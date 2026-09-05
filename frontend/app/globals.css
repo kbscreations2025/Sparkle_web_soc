@@ -1,0 +1,152 @@
+@import "tailwindcss";
+
+@theme {
+  /* ---------- Backgrounds ---------- */
+  --color-void:           #060608;
+  --color-surface-deep:   #09090C;
+  --color-surface:        #0D0D11;
+  --color-surface-raised: #131318;
+  --color-surface-float:  #1A1A20;
+  --color-surface-hover:  #202028;
+
+  /* ---------- Gold ---------- */
+  --color-gold:        #C4A86A;
+  --color-gold-bright: #DFC07E;
+  --color-gold-dim:    #8A7040;
+
+  /* ---------- Text ---------- */
+  --color-cream:  #EDE8DF;
+  --color-muted:  #A09488;
+  --color-faint:  #504840;
+
+  /* ---------- Semantic ---------- */
+  --color-success: #4ADE80;
+  --color-error:   #F87171;
+
+  /* ---------- Typography ---------- */
+  --font-display: var(--font-playfair), "Playfair Display", Georgia, serif;
+  --font-sans:    var(--font-inter), Inter, system-ui, sans-serif;
+}
+
+/* ---- Glass surfaces ---- */
+.glass {
+  background: rgba(13, 13, 17, 0.75);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+
+.glass-raised {
+  background: rgba(19, 19, 24, 0.85);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+
+/* ---- Glow utilities ---- */
+.glow-gold {
+  box-shadow: 0 0 0 1px rgba(196, 168, 106, 0.18),
+              0 8px 32px rgba(196, 168, 106, 0.07);
+}
+
+.glow-gold-strong {
+  box-shadow: 0 0 0 1px rgba(196, 168, 106, 0.28),
+              0 12px 48px rgba(196, 168, 106, 0.14);
+}
+
+/* ---- Hide all scrollbars globally (scroll still works) ---- */
+* { -ms-overflow-style: none; scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ---- Custom scrollbar ---- */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.10); }
+
+/* ---- Selection ---- */
+::selection { background: rgba(196,168,106,0.18); color: #DFC07E; }
+
+/* ---- Smooth transitions for all interactive elements ---- */
+button, a { transition-property: color, background-color, border-color, opacity, transform, box-shadow; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* ══════════════════════════════════════════════════════════
+   LIGHT THEME — the app's default look
+   ══════════════════════════════════════════════════════════ */
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* ── Backgrounds ── */
+  --color-void:           #F2EDE3;
+  --color-surface-deep:   #EAE3D8;
+  --color-surface:        #FBF8F3;
+  --color-surface-raised: #FFFFFF;
+  --color-surface-float:  #EDE6D8;
+  --color-surface-hover:  #E4DBCC;
+
+  /* ── Gold (slightly richer on light) ── */
+  --color-gold:        #A07828;
+  --color-gold-bright: #B88C34;
+  --color-gold-dim:    #C8A860;
+
+  /* ── Text ── */
+  --color-cream: #1C1006;
+  --color-muted: #5A4428;
+  --color-faint: #8C7050;
+}
+
+[data-theme="light"] .glass {
+  background: rgba(242, 237, 227, 0.80);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+
+[data-theme="light"] .glass-raised {
+  background: rgba(255, 252, 247, 0.93);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+
+[data-theme="light"] .glow-gold {
+  box-shadow: 0 0 0 1px rgba(160, 120, 40, 0.20),
+              0 4px 20px rgba(160, 120, 40, 0.10);
+}
+[data-theme="light"] .glow-gold-strong {
+  box-shadow: 0 0 0 1px rgba(160, 120, 40, 0.32),
+              0 8px 36px rgba(160, 120, 40, 0.16);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.12);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.20);
+}
+
+[data-theme="light"] body {
+  background: var(--color-void);
+}
+
+/* ── Gold shine text animation (the "Sparkle" wordmark on the login page) ── */
+@keyframes goldShine {
+  0%   { background-position: -250% center; }
+  100% { background-position: 250% center; }
+}
+.text-gold-shine {
+  background: linear-gradient(
+    90deg,
+    #7A5C18 0%,
+    #C4A86A 20%,
+    #F5E0A0 38%,
+    #FFF8E7 50%,
+    #F5E0A0 62%,
+    #C4A86A 80%,
+    #7A5C18 100%
+  );
+  background-size: 250% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: goldShine 4s linear infinite;
+}
