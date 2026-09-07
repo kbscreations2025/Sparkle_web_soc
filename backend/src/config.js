@@ -7,4 +7,6 @@ module.exports = {
   clientId: process.env.CLIENT_ID,
   clientSecret: process.env.CLIENT_SECRET,
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:3000",
+  mongoUri: process.env.MONGODB_URI,
+  mongoDbName: process.env.MONGODB_DB_NAME || "sparkle",
 };
