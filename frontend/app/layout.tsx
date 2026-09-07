@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { Inter, Playfair_Display } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
+import { ThemeProvider } from "@/lib/theme-context";
+import { readTheme, THEME_COOKIE } from "@/lib/theme";
 import { USER_HEADER, decodeUser } from "@/lib/session-header";
 import "./globals.css";
 
@@ -27,10 +29,16 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // render signed-in on first paint instead of asking the backend again.
   const initialUser = decodeUser((await headers()).get(USER_HEADER));
 
+  // The theme lives in a cookie rather than localStorage so the server can
+  // stamp it onto <html> directly — no inline script, no flash of the default.
+  const theme = readTheme((await cookies()).get(THEME_COOKIE)?.value);
+
   return (
-    <html lang="en" data-theme="light" className={`${inter.variable} ${playfair.variable} h-full antialiased`}>
+    <html lang="en" data-theme={theme} className={`${inter.variable} ${playfair.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-void text-cream font-sans">
-        <AuthProvider initialUser={initialUser}>{children}</AuthProvider>
+        <ThemeProvider initialTheme={theme}>
+          <AuthProvider initialUser={initialUser}>{children}</AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

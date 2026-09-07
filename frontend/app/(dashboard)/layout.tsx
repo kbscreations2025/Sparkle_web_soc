@@ -1,15 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { MotionConfig } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
-import { SidebarProvider, useSidebar } from "@/lib/sidebar-context";
-import { Sidebar } from "@/components/Sidebar";
-import { TopBar } from "@/components/TopBar";
-import { cn } from "@/lib/utils";
+import { TopNav } from "@/components/TopNav";
 
-function DashboardShell({ children }: { children: ReactNode }) {
+export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const { open } = useSidebar();
 
   // The proxy guarantees a signed-in user before this ever renders, so this is
   // only the brief gap while a signed-out visitor is being sent to /login.
@@ -17,25 +14,14 @@ function DashboardShell({ children }: { children: ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="flex min-h-screen bg-void">
-      <Sidebar />
-      <main
-        className={cn(
-          "flex-1 flex flex-col min-h-screen transition-[margin] duration-[250ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-          open ? "ml-[232px]" : "ml-[64px]"
-        )}
-      >
-        {children}
-      </main>
-      <TopBar />
-    </div>
-  );
-}
-
-export default function DashboardLayout({ children }: { children: ReactNode }) {
-  return (
-    <SidebarProvider>
-      <DashboardShell>{children}</DashboardShell>
-    </SidebarProvider>
+    // Framer animates via rAF, so the reduced-motion CSS in globals.css can't
+    // reach it — this is what honours the OS setting for every motion element.
+    <MotionConfig reducedMotion="user">
+      <div className="flex flex-col min-h-screen bg-void">
+        <TopNav />
+        {/* Clears the fixed TopNav, which sits outside the flow — must track its height. */}
+        <main className="flex-1 flex flex-col min-h-screen pt-14 md:pt-16">{children}</main>
+      </div>
+    </MotionConfig>
   );
 }

@@ -31,14 +31,14 @@
 /* ---- Glass surfaces ---- */
 .glass {
   background: rgba(13, 13, 17, 0.75);
-  backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
 }
 
 .glass-raised {
   background: rgba(19, 19, 24, 0.85);
-  backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
 }
 
 /* ---- Glow utilities ---- */
@@ -98,14 +98,14 @@ button, a { transition-property: color, background-color, border-color, opacity,
 
 [data-theme="light"] .glass {
   background: rgba(242, 237, 227, 0.80);
-  backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
 }
 
 [data-theme="light"] .glass-raised {
   background: rgba(255, 252, 247, 0.93);
-  backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
 }
 
 [data-theme="light"] .glow-gold {
@@ -126,6 +126,56 @@ button, a { transition-property: color, background-color, border-color, opacity,
 
 [data-theme="light"] body {
   background: var(--color-void);
+}
+
+/* White-tint utilities lift a surface off a dark ground; on the light ground
+   they'd be invisible, so flip them to a black tint of the same weight.
+   The :hover pair comes second so hover feedback still wins. */
+[data-theme="light"] [class*="bg-white/"] {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+[data-theme="light"] [class*="hover:bg-white/"]:hover {
+  background-color: rgba(0, 0, 0, 0.07) !important;
+}
+
+/* Same story for white hairlines — dividers and edges vanish on the light
+   ground, so flip them to a black tint that actually reads. */
+[data-theme="light"] [class*="border-white/"] {
+  border-color: rgba(0, 0, 0, 0.09) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   PERFORMANCE — last, so these win over the theme blocks above
+   ══════════════════════════════════════════════════════════ */
+
+/* A fixed, blurred bar forces its whole strip to repaint on every scroll frame
+   — the worst offender on phone GPUs. Below `md` the surfaces go opaque
+   instead: the look barely changes, the scrolling does. */
+@media (max-width: 767px) {
+  .glass,
+  .glass-raised,
+  [data-theme="light"] .glass,
+  [data-theme="light"] .glass-raised {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass,
+  [data-theme="light"] .glass { background: var(--color-surface); }
+  .glass-raised,
+  [data-theme="light"] .glass-raised { background: var(--color-surface-raised); }
+}
+
+/* Honour the OS setting — which also spares low-end devices the compositing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── Gold shine text animation (the "Sparkle" wordmark on the login page) ── */
