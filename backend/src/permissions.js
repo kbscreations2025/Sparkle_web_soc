@@ -17,10 +17,6 @@ function hasPermission(user, required) {
   return (user.permissions || []).some((grant) => grantMatches(grant, required));
 }
 
-function hasAnyPermission(user, requiredList) {
-  return requiredList.some((required) => hasPermission(user, required));
-}
-
 // Which users' results this user may read, as a Mongo filter fragment scoped to
 // their own tenant. `permissions` decides *whether* they can read other people's
 // results at all; `dataScope` decides how far that reach goes.
@@ -53,10 +49,14 @@ function resultReadFilter(user, { toolKey } = {}) {
 }
 
 function canExport(user) {
+  // Reading nothing means exporting nothing — checked first, so a suspended
+  // user can't fall through the "own data needs no grant" shortcut below.
+  if (!hasPermission(user, "result.read.own")) return false;
+
   const scope = user.dataScope || {};
   // Exporting only your own data needs no scope grant; exporting anyone else's does.
   if (!hasPermission(user, "result.read.others") || scope.kind === "own") return true;
   return scope.canExport === true;
 }
 
-module.exports = { grantMatches, hasPermission, hasAnyPermission, resultReadFilter, canExport };
+module.exports = { grantMatches, hasPermission, resultReadFilter, canExport };

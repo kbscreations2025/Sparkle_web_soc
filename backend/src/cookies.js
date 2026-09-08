@@ -30,19 +30,31 @@ function setAuthCookies(res, { access_token, refresh_token, device_token, user }
   }
 }
 
-// Logout revokes the trusted device server-side too, so clear device_token here as well.
-function clearAuthCookies(res) {
-  ["access_token", "refresh_token", "device_token", "user_profile"].forEach((name) => {
-    res.clearCookie(name, baseCookieOptions);
-  });
+/**
+ * Logout revokes the trusted device server-side too, so device_token goes with
+ * it by default. `keepDeviceToken` is for the one caller that ends only this
+ * browser's session (/session/clear): the device is still trusted upstream, so
+ * dropping the cookie would force a needless OTP on the next sign-in.
+ */
+function clearAuthCookies(res, { keepDeviceToken = false } = {}) {
+  const names = ["access_token", "refresh_token", "user_profile"];
+  if (!keepDeviceToken) names.push("device_token");
+
+  names.forEach((name) => res.clearCookie(name, baseCookieOptions));
 }
 
-function readUserProfile(req) {
+// Split out so the socket layer can decode the same cookie from a raw
+// handshake value, without an Express `req` to read it from.
+function decodeUserProfile(raw) {
   try {
-    return JSON.parse(Buffer.from(req.cookies.user_profile || "", "base64").toString("utf8"));
+    return JSON.parse(Buffer.from(raw || "", "base64").toString("utf8"));
   } catch (err) {
     return {};
   }
 }
 
-module.exports = { setAuthCookies, clearAuthCookies, readUserProfile };
+function readUserProfile(req) {
+  return decodeUserProfile(req.cookies.user_profile);
+}
+
+module.exports = { setAuthCookies, clearAuthCookies, readUserProfile, decodeUserProfile };

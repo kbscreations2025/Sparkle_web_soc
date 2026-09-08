@@ -3,9 +3,10 @@ import Image from "next/image";
 import { ArrowRight, Box, Lock, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/** Matches `Tool` in lib/nav.ts, so a tool spreads straight into this card. */
 export type ToolCardData = {
   icon: LucideIcon;
-  title: string;
+  label: string;
   description: string;
   href?: string;
   image?: string;
@@ -14,7 +15,7 @@ export type ToolCardData = {
 
 export function ToolCard({
   icon: Icon,
-  title,
+  label,
   description,
   href,
   image,
@@ -41,7 +42,7 @@ export function ToolCard({
         </div>
 
         <div className="min-w-0">
-          <p className={cn("text-sm font-semibold truncate", comingSoon ? "text-muted" : "text-cream")}>{title}</p>
+          <p className={cn("text-sm font-semibold truncate", comingSoon ? "text-muted" : "text-cream")}>{label}</p>
           <p className="text-[11px] text-faint leading-relaxed mt-0.5 line-clamp-2">{description}</p>
         </div>
 

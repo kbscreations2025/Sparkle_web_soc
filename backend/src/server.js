@@ -5,6 +5,7 @@ const cookieParser = require("cookie-parser");
 const config = require("./config");
 const { connectDb } = require("./db");
 const authRoutes = require("./routes/auth");
+const adminRoutes = require("./routes/admin");
 const { initSocket } = require("./socket");
 
 const app = express();
@@ -15,6 +16,7 @@ app.use(cookieParser());
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
 
 const httpServer = http.createServer(app);
 initSocket(httpServer);

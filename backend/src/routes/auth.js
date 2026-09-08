@@ -1,9 +1,10 @@
 const express = require("express");
 const loginApi = require("../loginApi");
-const { setAuthCookies, clearAuthCookies, readUserProfile } = require("../cookies");
+const { setAuthCookies, clearAuthCookies } = require("../cookies");
 const { requireAuth } = require("../middleware/auth");
-const { resolveSession } = require("../session");
-const { forceLogout } = require("../socket");
+const { resolveAppUser } = require("../appUser");
+const { peekVerifiedSession } = require("../session");
+const { forceLogout, forceLogoutByEmail } = require("../socket");
 
 const router = express.Router();
 
@@ -13,13 +14,36 @@ function upstreamError(err) {
 
 // Shared by /login (recognized device) and /verify-otp — both get back the
 // same {user, access_token, refresh_token, device_token} shape on success.
-function respondWithSession(res, result) {
-  setAuthCookies(res, result);
-  res.json({ status: "success", user: result.user });
+//
+// Central saying yes only settles identity, so app access is resolved before
+// any cookie is set: someone this app doesn't know gets a plain explanation
+// here instead of a session that fails on the very next request.
+async function respondWithSession(res, result, { forcedLogoutOthers = false } = {}) {
+  const resolved = await resolveAppUser(result.user);
+  if (resolved.denied) {
+    return res.status(403).json({ status: "error", ...resolved.denied });
+  }
+
+  // Central has just deleted the other sessions, so drop their live sockets in
+  // the same breath. Without this the other device only finds out when its own
+  // access token expires — up to 15 minutes of a screen that still works.
+  //
+  // Safe to fire before the new cookies are set: sockets are keyed by central
+  // user_id, and the device logging in here has no socket yet (the client only
+  // opens one once it has a user), so this can only reach the older sessions.
+  if (forcedLogoutOthers) forceLogout(result.user.user_id);
+
+  // Only name and email go into the profile cookie — it exists because
+  // verify-token returns neither, not to carry central's role or permissions.
+  setAuthCookies(res, {
+    ...result,
+    user: { name: resolved.user.name, email: resolved.user.email },
+  });
+  res.json({ status: "success", user: resolved.user });
 }
 
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body || {};
+  const { email, password, force_logout_others: forceLogoutOthers } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ status: "error", message: "email and password are required" });
   }
@@ -29,11 +53,26 @@ router.post("/login", async (req, res) => {
       email,
       password,
       deviceToken: req.cookies.device_token,
+      forceLogoutOthers,
     });
 
-    // Recognized device: verify-login returns tokens directly.
-    // Otherwise it's otp_required (new device) or error (bad credentials) — pass through as-is.
-    if (result.status === "success") return respondWithSession(res, result);
+    // A confirmed force-logout kills the other sessions the moment central
+    // accepts it — even when the answer is otp_required, because a new device
+    // still has to prove itself. So the eviction belongs HERE, not only on the
+    // success path: waiting for tokens would leave the displaced device
+    // running for the whole time it takes someone to fetch and type a code.
+    //
+    // Addressed by email: otp_required carries no user object.
+    if (forceLogoutOthers && result.status !== "error") {
+      const evicted = forceLogoutByEmail(email);
+      if (evicted > 0) console.log(`force-logout: evicted ${evicted} socket(s) for ${email}`);
+    }
+
+    // Recognized device: verify-login returns tokens directly. Otherwise it's
+    // otp_required (new device), session_limit_reached (already logged in
+    // elsewhere — carries max_active_sessions and the active_sessions list the
+    // client shows before confirming), or error. All pass through untouched.
+    if (result.status === "success") return await respondWithSession(res, result, { forcedLogoutOthers: Boolean(forceLogoutOthers) });
     return res.json(result);
   } catch (err) {
     return res.status(502).json({ status: "error", message: upstreamError(err) });
@@ -41,32 +80,45 @@ router.post("/login", async (req, res) => {
 });
 
 router.post("/verify-otp", async (req, res) => {
-  const { email, otp } = req.body || {};
+  const { email, otp, force_logout_others: forceLogoutOthers } = req.body || {};
   if (!email || !otp) {
     return res.status(400).json({ status: "error", message: "email and otp are required" });
   }
 
   try {
-    const result = await loginApi.verifyOtp({ email, otp });
-    if (result.status === "success") return respondWithSession(res, result);
+    // Can still come back session_limit_reached if someone took the last slot
+    // between verify-login and here. The OTP survives that, so the client can
+    // confirm and retry with this same code.
+    const result = await loginApi.verifyOtp({ email, otp, forceLogoutOthers });
+    if (result.status === "success") return await respondWithSession(res, result, { forcedLogoutOthers: Boolean(forceLogoutOthers) });
     return res.json(result);
   } catch (err) {
     return res.status(502).json({ status: "error", message: upstreamError(err) });
   }
 });
 
+// The single source of truth for what the UI may render. `isSuperAdmin` is the
+// only field the central login contributes; `role` and `permissions` come from
+// this app's database, so central's own role and permissions never leak in.
 router.get("/me", requireAuth, (req, res) => {
-  const profile = readUserProfile(req);
-  res.json({
-    status: "success",
-    user: {
-      user_id: req.user.user_id,
-      role: req.user.role,
-      permissions: req.user.permissions,
-      name: profile.name,
-      email: profile.email,
-    },
-  });
+  res.json({ status: "success", user: req.appUser });
+});
+
+/**
+ * Clears THIS browser's cookies and nothing else. Used by a client that has
+ * just been told `auth:revoked` — its session was ended from elsewhere, so
+ * there is nothing left to end upstream.
+ *
+ * Deliberately does NOT call the central logout: that revokes every trusted
+ * device for the user, which would force a fresh OTP on the device that just
+ * signed in and displaced this one. It also isn't optional — the displaced
+ * device's access token stays valid at central for up to 15 minutes, so
+ * without dropping these cookies the proxy would wave it straight back in.
+ */
+router.post("/session/clear", (req, res) => {
+  // The device stays trusted upstream — only this browser's session ended.
+  clearAuthCookies(res, { keepDeviceToken: true });
+  res.json({ status: "success" });
 });
 
 router.post("/logout", async (req, res) => {
@@ -82,9 +134,10 @@ router.post("/logout", async (req, res) => {
   }
 
   // Best-effort: disconnect the live socket now instead of waiting for its
-  // periodic revalidation sweep. No refresh fallback here — logging out
-  // shouldn't mint a fresh access token just to look up whose socket to drop.
-  const session = await resolveSession(accessTokenValue, null);
+  // periodic revalidation sweep. Cache-only — logging out shouldn't spend an
+  // upstream round-trip (nor mint a fresh token) just to look up whose socket
+  // to drop. A miss simply leaves it to the sweep.
+  const session = await peekVerifiedSession(accessTokenValue);
   if (session) forceLogout(session.user.user_id);
 
   clearAuthCookies(res);

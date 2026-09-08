@@ -3,9 +3,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { io } from "socket.io-client";
-import { getCurrentUser, logout as apiLogout, BACKEND_URL, type ApiUser } from "./api";
-
-const LOGIN_PATH = "/login";
+import { getCurrentUser, logout as apiLogout, clearLocalSession, BACKEND_URL, type ApiUser } from "./api";
+import { LOGIN_PATH } from "./shell";
 
 type AuthContextValue = {
   user: ApiUser | null;
@@ -58,10 +57,14 @@ export function AuthProvider({
     };
   }, [user, loggingOut, pathname, router]);
 
+  // Keyed on the id, not the object: every /me response is a fresh object, and
+  // depending on it would drop and re-dial the socket for the same person.
+  const userId = user?.user_id;
+
   // Lets the backend end this session in real time — an admin revoking access,
   // or a sign-out elsewhere — without waiting for the next page load.
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
 
     const socket = io(BACKEND_URL, { withCredentials: true });
 
@@ -69,13 +72,23 @@ export function AuthProvider({
     socket.on("disconnect", () => setLiveConnected(false));
     socket.on("auth:revoked", () => {
       setUser(null);
-      router.replace(LOGIN_PATH);
+      // Clearing the cookies is what actually ends it here. The access token
+      // stays valid at the central login for up to 15 minutes after the
+      // session was killed, so without this the proxy would verify it on the
+      // way to /login and send this device straight back into the app.
+      //
+      // Local-only on purpose: the upstream session is already gone, and
+      // calling the real logout would revoke the user's trusted devices and
+      // force a fresh OTP on whichever device just displaced this one.
+      clearLocalSession()
+        .catch(() => {})
+        .finally(() => router.replace(`${LOGIN_PATH}?denied=signed_out_elsewhere`));
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [user, router]);
+  }, [userId, router]);
 
   async function logout() {
     setLoggingOut(true);
@@ -83,6 +96,10 @@ export function AuthProvider({
       await apiLogout();
     } finally {
       setUser(null);
+      // Must be cleared: the recovery effect above is gated on it, so leaving
+      // it true would disable the "no user → re-fetch me" fallback for the
+      // rest of this tab's life.
+      setLoggingOut(false);
       router.replace(LOGIN_PATH);
     }
   }

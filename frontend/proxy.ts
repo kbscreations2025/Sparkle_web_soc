@@ -2,14 +2,20 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { ApiUser } from "@/lib/api";
 import { USER_HEADER, encodeUser } from "@/lib/session-header";
+import { LOGIN_PATH, homeFor, isWrongShell } from "@/lib/shell";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
-const LOGIN_PATH = "/login";
 
 type SessionCheck = {
   user: ApiUser | null;
   /** Set-Cookie lines from the backend, e.g. an access token it just refreshed. */
   setCookies: string[];
+  /**
+   * Why the backend refused, when it did. A 403 means authenticated but not
+   * allowed in — not provisioned, suspended — which is worth telling them,
+   * since otherwise they log in successfully and land back on the form.
+   */
+  deniedCode?: string;
 };
 
 /**
@@ -25,7 +31,11 @@ async function checkSession(request: NextRequest): Promise<SessionCheck> {
       headers: { cookie: request.headers.get("cookie") ?? "" },
     });
     const setCookies = res.headers.getSetCookie();
-    if (!res.ok) return { user: null, setCookies };
+
+    if (!res.ok) {
+      const denied = res.status === 403 ? await res.json().catch(() => null) : null;
+      return { user: null, setCookies, deniedCode: denied?.code };
+    }
 
     const data = await res.json();
     return { user: data.status === "success" ? data.user : null, setCookies };
@@ -52,7 +62,8 @@ function redirectTo(path: string, request: NextRequest) {
 }
 
 export async function proxy(request: NextRequest) {
-  const isLoginPage = request.nextUrl.pathname === LOGIN_PATH;
+  const { pathname } = request.nextUrl;
+  const isLoginPage = pathname === LOGIN_PATH;
   const hasSessionCookies = Boolean(
     request.cookies.get("access_token") || request.cookies.get("refresh_token")
   );
@@ -63,12 +74,22 @@ export async function proxy(request: NextRequest) {
     return isLoginPage ? allow(request, null) : redirectTo(LOGIN_PATH, request);
   }
 
-  const { user, setCookies } = await checkSession(request);
+  const { user, setCookies, deniedCode } = await checkSession(request);
 
-  if (isLoginPage) {
-    return withCookies(user ? redirectTo("/", request) : allow(request, null), setCookies);
+  if (!user) {
+    // Carry the reason so the form can say why, rather than silently
+    // re-presenting itself to someone whose credentials are perfectly valid.
+    const target = deniedCode ? `${LOGIN_PATH}?denied=${deniedCode}` : LOGIN_PATH;
+    return withCookies(isLoginPage ? allow(request, null) : redirectTo(target, request), setCookies);
   }
-  return withCookies(user ? allow(request, user) : redirectTo(LOGIN_PATH, request), setCookies);
+
+  // Signed in: send them to their own shell if they're anywhere else. A central
+  // super_admin gets the console, everyone else the dashboard.
+  if (isLoginPage || isWrongShell(user, pathname)) {
+    return withCookies(redirectTo(homeFor(user), request), setCookies);
+  }
+
+  return withCookies(allow(request, user), setCookies);
 }
 
 export const config = {

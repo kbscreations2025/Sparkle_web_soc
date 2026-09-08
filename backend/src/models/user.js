@@ -1,5 +1,4 @@
 const mongoose = require("mongoose");
-const { hasPermission } = require("../permissions");
 
 const USER_STATUSES = ["invited", "active", "suspended", "removed"];
 const SCOPE_KINDS = ["own", "organization", "selected"];
@@ -31,7 +30,10 @@ const userSchema = new mongoose.Schema(
     // Credentials, password and MFA live in the central login service. These
     // fields are a cache for display and joins; on conflict the central
     // service wins, so nothing here is ever used to authenticate.
-    authUserId: { type: String, required: true, index: true },
+    // Null until this person's first login here. A super admin provisions the
+    // row from the email they know; only the central login can tell us which
+    // user_id that email resolves to, so linkOnLogin() stamps it once.
+    authUserId: { type: String, default: null, index: true },
     email: { type: String, required: true, lowercase: true, trim: true },
     name: { type: String, trim: true },
     tenantId: { type: mongoose.Schema.Types.ObjectId, ref: "Tenant", required: true },
@@ -63,8 +65,13 @@ const userSchema = new mongoose.Schema(
 );
 
 // One row per person per tenant — the same central-login identity can be a
-// member of several tenants, each with its own permissions.
-userSchema.index({ authUserId: 1, tenantId: 1 }, { unique: true });
+// member of several organizations, each with its own permissions. Partial,
+// because Mongo treats null as a value: without the filter, two not-yet-linked
+// rows in one tenant would collide on {null, tenantId}.
+userSchema.index(
+  { authUserId: 1, tenantId: 1 },
+  { unique: true, partialFilterExpression: { authUserId: { $type: "string" } } }
+);
 userSchema.index({ tenantId: 1, email: 1 }, { unique: true });
 userSchema.index({ tenantId: 1, status: 1 });
 
@@ -143,23 +150,64 @@ userSchema.pre("validate", function normalizeDataScope() {
   if (this.dataScope && this.dataScope.kind !== "selected") this.dataScope.userIds = [];
 });
 
-// Mirrors the central login's view of a person into this tenant. Never touches
-// permissions, dataScope or role — those are assigned in this application and
-// must survive every re-sync from upstream.
-userSchema.statics.syncFromCentralLogin = function syncFromCentralLogin({
-  authUserId,
-  tenantId,
-  email,
-  name,
-}) {
-  return this.findOneAndUpdate(
-    { authUserId, tenantId },
-    {
-      $set: { email, ...(name && { name }), lastLoginAt: new Date() },
-      $setOnInsert: { status: "invited", permissions: [], permissionVersion: 1 },
-    },
-    { new: true, upsert: true, runValidators: true }
-  ).exec();
+// linkOnLogin runs on EVERY authenticated request, not just at login — it's
+// what requireAuth calls to resolve a session on each page load. Writing
+// lastLoginAt unconditionally would mean a Mongo write per request; this is
+// the threshold that turns that into "at most once per active user per
+// window" instead, which is all lastLoginAt is precise enough to need anyway.
+const LAST_LOGIN_REFRESH_MS = 5 * 60 * 1000;
+
+/**
+ * Resolves a central-login identity to this app's membership row. Never
+ * creates one and never upserts: the central response carries no organization,
+ * so there is no correct row to invent. Someone with no row has not been
+ * provisioned, which the caller must treat as "no access".
+ *
+ * Matches on authUserId once linked, falling back to the email a super admin
+ * provisioned the row with and stamping the id on that first login. Never
+ * touches permissions, dataScope or role — those are assigned in this
+ * application and must survive every login.
+ */
+userSchema.statics.linkOnLogin = async function linkOnLogin({ authUserId, email, name }) {
+  // Mongoose strips undefined values from a query, so an absent authUserId
+  // would turn `{ authUserId }` into `{}` — an $or clause matching every row.
+  const clauses = [
+    ...(authUserId ? [{ authUserId }] : []),
+    ...(email ? [{ authUserId: null, email: email.toLowerCase() }] : []),
+  ];
+  if (clauses.length === 0) return null;
+
+  const rows = await this.find({ deletedAt: null, $or: clauses }).exec();
+
+  if (rows.length === 0) return null;
+
+  // Belonging to several organizations needs a picker in the UI before it can
+  // be resolved here. Until then, refusing beats silently choosing the wrong
+  // one and showing someone another company's work.
+  if (rows.length > 1) {
+    const err = new Error("this identity belongs to more than one organization");
+    err.code = "AMBIGUOUS_TENANT";
+    throw err;
+  }
+
+  const user = rows[0];
+  const normalizedEmail = email?.toLowerCase();
+
+  if (!user.authUserId) user.authUserId = authUserId; // stamp once, on first link
+  if (normalizedEmail && normalizedEmail !== user.email) user.email = normalizedEmail;
+  if (name && name !== user.name) user.name = name;
+  // Central already vetted the credentials, so a pending invite needs no
+  // second manual activation. Suspended and removed are left alone.
+  if (user.status === "invited") user.status = "active";
+
+  const lastLoginStale =
+    !user.lastLoginAt || Date.now() - user.lastLoginAt.getTime() > LAST_LOGIN_REFRESH_MS;
+  if (lastLoginStale) user.lastLoginAt = new Date();
+
+  // Only touch Mongo when something actually changed — otherwise this would
+  // be a write on every request that calls requireAuth.
+  if (user.isModified()) await user.save();
+  return user;
 };
 
 // Permission and scope writes go through here so the version bump and the
@@ -170,10 +218,6 @@ userSchema.methods.applyGrants = function applyGrants({ permissions, dataScope, 
     this.dataScope = { ...dataScope, grantedByUserId, grantedAt: new Date() };
   }
   return this;
-};
-
-userSchema.methods.can = function can(required) {
-  return hasPermission(this, required);
 };
 
 module.exports = mongoose.model("User", userSchema);

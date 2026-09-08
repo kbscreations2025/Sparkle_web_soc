@@ -34,15 +34,20 @@ const aiProviderSchema = new mongoose.Schema(
     // Tenant.loadProvider() so the one place that needs the raw key is greppable.
     credential: { type: credentialSchema, required: true, select: false },
 
-    keyHint: { type: String, required: true }, // last 4 only — safe to return to the UI
+    keyHint: { type: String, required: true }, // "sk-…cdef" — safe to return to the UI
     keyFingerprint: { type: String, required: true }, // HMAC with a server pepper, not bare sha256
+
+    // Some providers need an org/project id alongside the key (OpenAI's
+    // org-scoped keys, for one). Not a secret, so it is stored in the clear.
+    orgId: { type: String, default: null },
 
     // ── routing + failover ──
     enabled: { type: Boolean, default: true },
     priority: { type: Number, default: 10 }, // lower tried first
     health: { type: healthSchema, default: () => ({}) },
 
-    createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    // Optional: a super admin acting here may have no local User row of their own.
+    createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true }
 );
@@ -83,8 +88,17 @@ tenantSchema.set("toJSON", {
   },
 });
 
-// The only place a raw API key enters the system. Derives hint and fingerprint
-// from the same plaintext so the three can never drift apart.
+// The only place a raw API key enters the system. Both writers go through this
+// one derivation so the ciphertext, the hint and the fingerprint can never
+// drift apart — they always describe the same plaintext.
+function credentialFrom(apiKey, provider) {
+  return {
+    credential: encryptSecret(apiKey, { provider }),
+    keyHint: hintSecret(apiKey),
+    keyFingerprint: fingerprintSecret(apiKey),
+  };
+}
+
 tenantSchema.methods.addProvider = function addProvider({
   provider,
   label,
@@ -96,9 +110,7 @@ tenantSchema.methods.addProvider = function addProvider({
   this.aiProviders.push({
     provider,
     label,
-    credential: encryptSecret(apiKey, { provider }),
-    keyHint: hintSecret(apiKey),
-    keyFingerprint: fingerprintSecret(apiKey),
+    ...credentialFrom(apiKey, provider),
     createdByUserId,
     ...(priority !== undefined && { priority }),
     ...(enabled !== undefined && { enabled }),
@@ -113,9 +125,7 @@ tenantSchema.methods.replaceProviderKey = function replaceProviderKey(providerId
   const entry = this.aiProviders.id(providerId);
   if (!entry) throw new Error("provider not found on this tenant");
 
-  entry.credential = encryptSecret(apiKey, { provider: entry.provider });
-  entry.keyHint = hintSecret(apiKey);
-  entry.keyFingerprint = fingerprintSecret(apiKey);
+  entry.set(credentialFrom(apiKey, entry.provider));
   entry.health = {}; // a new key clears the old key's failure streak
   return entry;
 };

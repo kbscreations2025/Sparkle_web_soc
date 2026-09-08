@@ -1,49 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  Sparkles,
-  Wand2,
-  Film,
-  Type,
-  PenTool,
-  Scissors,
-  ScanText,
-  Newspaper,
-  MessageSquare,
-  Leaf,
-  History,
-  LogOut,
-  Loader2,
-  Sun,
-  Moon,
-  Menu,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { useTheme } from "@/lib/theme-context";
+import { can } from "@/lib/permissions";
+import { NAV } from "@/lib/nav";
+import { NavBar, NavLogo, NavDivider } from "@/components/nav/NavBar";
+import { AccountMenu } from "@/components/nav/AccountMenu";
 import { cn } from "@/lib/utils";
-
-/** An item without an `href` has no page yet — give it one to make it navigable. */
-const NAV = [
-  { id: "dashboard", label: "Dashboard", icon: Sparkles, href: "/" },
-  { id: "cleaning", label: "Image Cleaning", icon: Wand2 },
-  { id: "text-to-image", label: "Text to Image", icon: Type },
-  { id: "text-to-sketch", label: "Text to Sketch", icon: PenTool },
-  { id: "sketch-to-image", label: "Sketch to Image", icon: Scissors },
-  { id: "image-to-sketch", label: "Image to Sketch", icon: PenTool },
-  { id: "image-to-text", label: "Image to Text", icon: ScanText },
-  { id: "marketing-kit", label: "Marketing Kit", icon: Newspaper },
-  { id: "chat-to-edit", label: "Chat to Edit", icon: MessageSquare },
-  { id: "life-style", label: "Lifestyle", icon: Leaf },
-  { id: "image-to-video", label: "Image to Video", icon: Film },
-  { id: "history", label: "History", icon: History },
-] satisfies { id: string; label: string; icon: LucideIcon; href?: string }[];
 
 /** Icon-only, so a square target rather than a label-width pill. */
 const PILL_BASE =
@@ -55,45 +22,22 @@ const TIP_EDGE_MARGIN = 70;
 /** Carried over from the sidebar rows; `bg-white/*` flips to a black tint on the light theme. */
 const PILL_IDLE = "bg-white/[0.04]";
 
-/** Shorter on phones; the layout's top padding must match. */
-export const TOP_NAV_HEIGHT = "h-14 md:h-16";
 
 export function TopNav() {
   const pathname = usePathname();
-  const { user, logout, loggingOut, liveConnected } = useAuth();
-  const { theme, toggle: toggleTheme } = useTheme();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
   // Only the label lives in state. The x position is written straight to the
   // node inside a rAF, so moving the pointer across the bar doesn't re-render
   // the twelve pills (and the account menu) on every mousemove event.
   const [tipLabel, setTipLabel] = useState<string | null>(null);
+  // Only the tools this person was granted. Memoised so the pills are not
+  // re-filtered on every hover-driven render.
+  const navItems = useMemo(() => NAV.filter((item) => can(user, item.permission)), [user]);
   const tipRef = useRef<HTMLSpanElement>(null);
   const tipX = useRef(0);
   const tipFrame = useRef<number | null>(null);
-
-  // Closing is delayed so the cursor can cross the gap between the avatar and
-  // the panel without the menu vanishing underneath it.
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function cancelClose() {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = null;
-  }
-
-  function openMenu() {
-    cancelClose();
-    setMenuOpen(true);
-  }
-
-  function closeMenuSoon() {
-    cancelClose();
-    closeTimer.current = setTimeout(() => setMenuOpen(false), 180);
-  }
-
-  useEffect(() => cancelClose, []);
 
   /** The label follows the cursor horizontally; vertically it's pinned below the bar. */
   function positionTip(clientX: number) {
@@ -116,17 +60,13 @@ export function TopNav() {
   }, []);
 
   useEffect(() => {
-    if (!menuOpen && !drawerOpen) return;
+    if (!drawerOpen) return;
 
     function onPointerDown(event: MouseEvent) {
-      const target = event.target as Node;
-      if (!menuRef.current?.contains(target)) setMenuOpen(false);
-      if (!drawerRef.current?.contains(target)) setDrawerOpen(false);
+      if (!drawerRef.current?.contains(event.target as Node)) setDrawerOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setMenuOpen(false);
-      setDrawerOpen(false);
+      if (event.key === "Escape") setDrawerOpen(false);
     }
 
     document.addEventListener("mousedown", onPointerDown);
@@ -135,12 +75,7 @@ export function TopNav() {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [menuOpen, drawerOpen]);
-
-  function closeAll() {
-    setDrawerOpen(false);
-    setMenuOpen(false);
-  }
+  }, [drawerOpen]);
 
   // Positions the tooltip the moment it mounts, without reading the ref during
   // render (which React's lint rules rightly reject).
@@ -150,36 +85,8 @@ export function TopNav() {
   }, []);
 
   return (
-    <header
-      className={cn(
-        "fixed top-0 inset-x-0 z-40 flex items-center gap-2 md:gap-4 px-3 md:px-4 border-b border-white/5 glass-raised",
-        TOP_NAV_HEIGHT
-      )}
-    >
-      {/* The star mark alone where width is tight; the full wordmark from
-          laptop widths up, where there's room for it. */}
-      <Link href="/" title="Dashboard" className="shrink-0">
-        <Image
-          src="/logo/sparklelogo2.png"
-          alt="Sparkle"
-          width={64}
-          height={64}
-          priority
-          className="lg:hidden w-7 h-7 md:w-8 md:h-8 object-contain"
-        />
-        {/* Eager but not `priority`: preloading it would pull the wordmark down
-            on phones too, where it is never shown. */}
-        {/* Sized to what it actually renders (h-8 at 200:56), so the srcset
-            asks for a ~128px variant instead of a 640px one. */}
-        <Image
-          src="/logo/sparkle5.png"
-          alt="Sparkle"
-          width={114}
-          height={32}
-          loading="eager"
-          className="hidden lg:block h-8 w-auto object-contain"
-        />
-      </Link>
+    <NavBar>
+      <NavLogo />
 
       {/* Phones get the drawer toggle where the icon row would otherwise sit. */}
       <div className="md:hidden shrink-0" ref={drawerRef}>
@@ -203,7 +110,7 @@ export function TopNav() {
               // where there's no hover to reveal the tooltip.
               className="fixed left-2 right-2 top-[3.75rem] max-h-[calc(100dvh-4.5rem)] overflow-y-auto rounded-xl border border-white/10 bg-surface-raised shadow-lg p-1.5 grid grid-cols-2 gap-1"
             >
-              {NAV.map(({ id, label, icon: Icon, href }) => {
+              {navItems.map(({ id, label, icon: Icon, href }) => {
                 const isActive = href !== undefined && pathname === href;
                 const row = "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-xs transition-colors";
 
@@ -222,7 +129,7 @@ export function TopNav() {
                     href={href}
                     // A tap that navigates should leave the drawer behind,
                     // not sitting on top of the page it just opened.
-                    onClick={closeAll}
+                    onClick={() => setDrawerOpen(false)}
                     className={cn(
                       row,
                       isActive ? "bg-gold/[0.10] text-gold font-medium" : "text-muted hover:text-cream hover:bg-white/[0.07]"
@@ -238,14 +145,14 @@ export function TopNav() {
         </AnimatePresence>
       </div>
 
-      <span aria-hidden className="hidden md:block w-px h-6 bg-white/10 shrink-0" />
+      <NavDivider />
 
       {/* Icons only — the label lives in the cursor-tracking tooltip below. */}
       <nav
         className="hidden md:flex flex-1 min-w-0 items-center gap-1 overflow-x-auto no-scrollbar"
         onMouseLeave={hideTip}
       >
-        {NAV.map(({ id, label, icon: Icon, href }) => {
+        {navItems.map(({ id, label, icon: Icon, href }) => {
           const isActive = href !== undefined && pathname === href;
           const hint = href ? label : `${label} — coming soon`;
 
@@ -347,78 +254,8 @@ export function TopNav() {
           <span className="text-xs font-semibold tabular-nums leading-none text-gold-shine">100</span>
         </span>
 
-        {/* Everything that isn't the credit balance lives in this menu now. */}
-        <div className="relative" ref={menuRef} onMouseEnter={openMenu} onMouseLeave={closeMenuSoon}>
-          {/* Hover opens it on pointer devices; the click toggle stays for touch. */}
-          <button
-            onClick={() => setMenuOpen((value) => !value)}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            title={user?.name ?? "Account"}
-            className="w-8 h-8 rounded-full bg-gold/10 border border-gold/15 flex items-center justify-center hover:border-gold/40 transition-colors"
-          >
-            <span className="text-gold text-[11px] font-semibold">{user?.name?.[0]?.toUpperCase() ?? "?"}</span>
-          </button>
-
-          <AnimatePresence>
-            {menuOpen && (
-              <motion.div
-                role="menu"
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
-                // Solid rather than glass: a backdrop-filter nested inside the
-                // header's own composites unreliably across browsers.
-                className="absolute right-0 top-full mt-2 w-48 rounded-lg border border-white/10 bg-surface-raised shadow-lg overflow-hidden"
-              >
-              <div className="px-2.5 py-2">
-                <p className="text-cream text-xs font-medium truncate leading-tight">{user?.name ?? "User"}</p>
-                <p className="text-faint text-[10px] truncate leading-tight">{user?.email ?? ""}</p>
-              </div>
-
-              {/* Status and both actions share one row — icons carry the labels. */}
-              <div className="flex items-center gap-0.5 px-1.5 py-1 border-t border-white/5">
-                <span
-                  title={liveConnected ? "Live" : "Connecting..."}
-                  className={cn(
-                    "flex-1 flex items-center gap-1.5 px-1 text-[10px]",
-                    liveConnected ? "text-success" : "text-faint"
-                  )}
-                >
-                  <span
-                    aria-hidden
-                    className={cn("h-1.5 w-1.5 rounded-full shrink-0", liveConnected ? "bg-success" : "bg-faint animate-pulse")}
-                  />
-                  {liveConnected ? "Live" : "Connecting..."}
-                </span>
-
-                <button
-                  role="menuitem"
-                  onClick={toggleTheme}
-                  title={theme === "light" ? "Dark mode" : "Light mode"}
-                  aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-                  className="p-1.5 rounded text-faint hover:text-cream hover:bg-white/[0.07] transition-colors"
-                >
-                  {theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
-                </button>
-
-                <button
-                  role="menuitem"
-                  onClick={logout}
-                  disabled={loggingOut}
-                  title="Sign out"
-                  aria-label="Sign out"
-                  className="p-1.5 rounded text-faint hover:text-cream hover:bg-white/[0.07] transition-colors"
-                >
-                  {loggingOut ? <Loader2 size={13} className="animate-spin" /> : <LogOut size={13} />}
-                </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+        <AccountMenu />
       </div>
-    </header>
+    </NavBar>
   );
 }
