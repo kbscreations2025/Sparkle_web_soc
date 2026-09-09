@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const { encryptSecret, fingerprintSecret, hintSecret } = require("../secrets");
+const { encryptSecret, fingerprintSecret, fingerprintMatches, hintSecret } = require("../secrets");
 
 const PROVIDERS = ["openai", "gemini", "replicate", "fal", "stability", "bfl", "custom"];
 const TENANT_STATUSES = ["active", "trial", "suspended", "archived"];
@@ -98,6 +98,23 @@ function credentialFrom(apiKey, provider) {
     keyFingerprint: fingerprintSecret(apiKey),
   };
 }
+
+/**
+ * True when this tenant already holds this exact key. Compared by fingerprint,
+ * so it works without ever decrypting anything.
+ *
+ * Deliberately keyed on the secret, not the provider: several keys for one
+ * provider is a normal setup (separate quotas, separate billing), but the same
+ * key twice is always a mistake — it would double an entry's weight in the
+ * failover order while sharing one upstream rate limit.
+ *
+ * `exceptId` skips one entry, so rotating a key doesn't collide with itself.
+ */
+tenantSchema.methods.hasProviderKey = function hasProviderKey(apiKey, { exceptId } = {}) {
+  return this.aiProviders.some(
+    (entry) => String(entry._id) !== String(exceptId) && fingerprintMatches(apiKey, entry.keyFingerprint)
+  );
+};
 
 tenantSchema.methods.addProvider = function addProvider({
   provider,

@@ -429,6 +429,16 @@ router.delete(
 );
 
 // ── AI provider keys ────────────────────────────────────────────────────────
+/**
+ * Priority decides failover order, so a non-number would poison the sort in
+ * `routableProviders` and silently scramble which key gets tried first.
+ */
+function invalidPriority(priority) {
+  if (priority === undefined) return null;
+  if (!Number.isInteger(priority) || priority < 0) return "priority must be a whole number, 0 or more";
+  return null;
+}
+
 /** Shapes a provider entry for the console — the credential itself never leaves the model. */
 const toProvider = (entry) => ({
   id: entry._id,
@@ -445,7 +455,10 @@ const toProvider = (entry) => ({
 router.get(
   "/organizations/:id/ai-providers",
   handle(async (req, res) => {
-    res.json({ status: "success", providers: req.tenant.aiProviders.map(toProvider) });
+    // Sorted the way routableProviders() will try them, so the console lists
+    // them in the order they actually run rather than in insertion order.
+    const providers = [...req.tenant.aiProviders].sort((a, b) => a.priority - b.priority);
+    res.json({ status: "success", providers: providers.map(toProvider) });
   })
 );
 
@@ -459,6 +472,17 @@ router.post(
     }
     if (!label?.trim()) return bad(res, "label is required");
     if (!apiKey?.trim()) return bad(res, "apiKey is required");
+
+    const priorityError = invalidPriority(priority);
+    if (priorityError) return bad(res, priorityError);
+
+    if (tenant.hasProviderKey(apiKey.trim())) {
+      return res.status(409).json({
+        status: "error",
+        message: "this organization already has that key — add a different one",
+        code: "duplicate_key",
+      });
+    }
 
     const entry = tenant.addProvider({
       provider,
@@ -485,6 +509,20 @@ router.patch(
     if (!entry) return notFound(res, "provider");
 
     const { label, apiKey, orgId, priority, enabled } = req.body || {};
+
+    const priorityError = invalidPriority(priority);
+    if (priorityError) return bad(res, priorityError);
+
+    // Rotating onto a key another entry already holds would create the
+    // duplicate the POST path refuses, so it is refused here too.
+    if (apiKey?.trim() && tenant.hasProviderKey(apiKey.trim(), { exceptId: providerId })) {
+      return res.status(409).json({
+        status: "error",
+        message: "this organization already has that key — add a different one",
+        code: "duplicate_key",
+      });
+    }
+
     if (label !== undefined) entry.label = label.trim();
     if (orgId !== undefined) entry.orgId = orgId.trim() || null;
     if (priority !== undefined) entry.priority = priority;
