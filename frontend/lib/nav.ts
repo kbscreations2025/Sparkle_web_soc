@@ -33,6 +33,7 @@ export const TOOLS: Tool[] = [
     icon: Wand2,
     description: "Remove distractions, studio-grade results",
     image: "/dashboard/cleaning.png",
+    href: "/cleaning",
     permission: "tool.cleaning.run",
   },
   {
