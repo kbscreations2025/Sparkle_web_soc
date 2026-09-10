@@ -157,6 +157,30 @@ tenantSchema.statics.loadProvider = async function loadProvider(tenantId, provid
   return tenant?.aiProviders.id(providerId) || null;
 };
 
+// Called after a routed call to this key succeeds. Clearing the streak (not
+// just recording the success) is what lets a key that had a bad patch earn
+// its way back to the front of routableProviders() instead of being
+// permanently penalised for a transient blip.
+tenantSchema.methods.recordProviderSuccess = function recordProviderSuccess(providerId) {
+  const entry = this.aiProviders.id(providerId);
+  if (!entry) return;
+  entry.health.lastUsedAt = new Date();
+  entry.health.lastSuccessAt = new Date();
+  entry.health.consecutiveFailures = 0;
+};
+
+// Called after a routed call to this key fails, whether or not another key
+// then picked up the request. `code` is whatever the provider returned
+// (a Gemini error code, an HTTP status) — kept as a string for display.
+tenantSchema.methods.recordProviderFailure = function recordProviderFailure(providerId, code) {
+  const entry = this.aiProviders.id(providerId);
+  if (!entry) return;
+  entry.health.lastUsedAt = new Date();
+  entry.health.lastErrorAt = new Date();
+  entry.health.lastErrorCode = code ? String(code) : null;
+  entry.health.consecutiveFailures += 1;
+};
+
 // Failover order: enabled entries only, lowest priority first, and among equal
 // priorities the one that has failed least recently.
 tenantSchema.methods.routableProviders = function routableProviders(provider) {

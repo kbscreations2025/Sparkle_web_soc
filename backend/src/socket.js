@@ -95,6 +95,17 @@ function liveSessionCounts(userIds = []) {
   }, {});
 }
 
+/**
+ * Pushes a live event to every open tab/device of one user — e.g. History
+ * pages watching for new generations without polling. A no-op before the
+ * socket server has started (a request could in principle race server
+ * startup) or if nobody of theirs is currently connected.
+ */
+function emitToUser(userId, event, payload) {
+  if (!ioInstance || !userId) return;
+  ioInstance.to(`user:${userId}`).emit(event, payload);
+}
+
 /** Evicts every socket in `room`, returning how many there were. */
 function evictRoom(room) {
   if (!ioInstance) return 0;
@@ -123,4 +134,4 @@ function forceLogoutByEmail(email) {
   return evictRoom(`email:${String(email).toLowerCase()}`);
 }
 
-module.exports = { initSocket, forceLogout, forceLogoutByEmail, liveSessionCounts };
+module.exports = { initSocket, forceLogout, forceLogoutByEmail, liveSessionCounts, emitToUser };

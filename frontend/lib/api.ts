@@ -269,6 +269,222 @@ export function deleteMember(memberId: string) {
   return apiRequest(`/api/admin/members/${memberId}`, { method: "DELETE" });
 }
 
+// ── image cleaning ──────────────────────────────────────────────────────────
+
+/**
+ * The models offered for a cleaning run. "Sparkle" is our label for them;
+ * every one is Gemini underneath, and `id` is what the backend forwards.
+ */
+export const CLEANING_MODELS = [
+  {
+    id: "gemini-3-pro-image",
+    label: "Sparkle 3 Pro Image",
+    quality: "4K",
+    description: "Highest fidelity · complex detail",
+    badge: "Best quality",
+  },
+  {
+    id: "gemini-3.1-flash-image",
+    label: "Sparkle 3.1 Flash Image",
+    quality: "4K",
+    description: "Optimised for speed · high volume",
+    badge: "Fast",
+  },
+  {
+    id: "gemini-2.5-flash-image",
+    label: "Sparkle 2.5 Flash Image",
+    quality: "1K",
+    description: "Budget-friendly · quick turnaround",
+    badge: "Budget",
+  },
+] as const;
+
+export type CleaningModelId = (typeof CLEANING_MODELS)[number]["id"];
+
+/** Model id → Sparkle label, for a history row from before the backend recorded the label itself. */
+export const MODEL_LABELS: Record<string, string> = Object.fromEntries(CLEANING_MODELS.map((m) => [m.id, m.label]));
+
+export const DEFAULT_CLEANING_MODEL: CleaningModelId = "gemini-3-pro-image";
+
+/**
+ * Same list, generic name — Chat to Edit (and every future image tool) uses
+ * the identical set of models, since the backend routes them through one
+ * shared map rather than each tool having its own. `CLEANING_MODELS` stays as
+ * the name the cleaning page already imports.
+ */
+export const SPARKLE_MODELS = CLEANING_MODELS;
+export type SparkleModelId = CleaningModelId;
+export const DEFAULT_SPARKLE_MODEL = DEFAULT_CLEANING_MODEL;
+
+/**
+ * Shared shape a model dropdown expects — built once from a models list
+ * rather than in every page. The explicit return type matters: without it,
+ * TS widens `entry.id`'s literal union to plain `string`, which is what let
+ * a caller's `onModelChange` mismatch its own state setter's type.
+ */
+export function toModelOptions<T extends { id: string; label: string; quality: string }>(
+  models: readonly T[]
+): { value: T["id"]; label: string; quality: string }[] {
+  return models.map((entry) => ({ value: entry.id, label: entry.label, quality: entry.quality }));
+}
+
+export type CleaningResult = {
+  /** The cleaned image, as a data URI ready to render. */
+  result?: string;
+  model?: string;
+  conversationId?: string | null;
+  generationId?: string | null;
+};
+
+/** First pass: an uploaded photo in, a cleaned one out. */
+export function cleanImage(body: {
+  /** Data URI. Compressed in the browser before it gets here. */
+  image: string;
+  model: CleaningModelId;
+  /** Replaces the built-in cleaning prompt entirely when given. */
+  customPrompt?: string;
+  /** Set to keep a retry in the same thread as the run it follows. */
+  conversationId?: string | null;
+}) {
+  return apiRequest<CleaningResult>("/api/cleaning", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** A follow-up on a result already produced — "make the gold warmer". */
+export function refineImage(body: {
+  /** The image being refined, as a data URI. */
+  refineImage: string;
+  instruction: string;
+  model: CleaningModelId;
+  /** Visual inspiration only — never copied into the result wholesale. */
+  referenceImages?: string[];
+  conversationId?: string | null;
+  parentGenerationId?: string | null;
+}) {
+  return apiRequest<CleaningResult>("/api/cleaning", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// ── chat to edit ─────────────────────────────────────────────────────────────
+
+export type ChatEditResult = {
+  /** One result image per call today — always length 1 — as a data URI. */
+  images?: string[];
+  model?: string;
+  conversationId?: string | null;
+  generationId?: string | null;
+};
+
+/**
+ * One turn of a chat-style edit. Unlike cleaning there's no "default" prompt
+ * mode — `instruction` always drives the edit, so it's required.
+ */
+export function chatEdit(body: {
+  /** The image being edited this turn, as a data URI. */
+  image: string;
+  /** Visual inspiration only — never copied into the result wholesale. */
+  referenceImages?: string[];
+  /** What's actually sent to the model. */
+  instruction: string;
+  /** What the UI shows for this turn. Falls back to `instruction` server-side if omitted. */
+  displayPrompt?: string;
+  model: SparkleModelId;
+  conversationId?: string | null;
+  parentGenerationId?: string | null;
+}) {
+  return apiRequest<ChatEditResult>("/api/chat-to-edit", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// ── history ──────────────────────────────────────────────────────────────────
+
+export type HistoryOutput = { assetId: string; url: string; width: number | null; height: number | null };
+
+export type HistoryItem = {
+  id: string;
+  conversationId: string;
+  tool: string;
+  model?: string | null;
+  quality?: string | null;
+  /** Whether the current caller is the one who ran this generation. */
+  isOwn: boolean;
+  userName: string;
+  createdAt: string;
+  outputs: HistoryOutput[];
+};
+
+export type ConversationAsset = { url: string; role: string };
+export type ConversationTurn = {
+  id: string;
+  sequence: number;
+  userPrompt: string | null;
+  model?: string | null;
+  quality?: string | null;
+  inputAssets: ConversationAsset[];
+  outputAssets: ConversationAsset[];
+};
+
+/**
+ * The full thread behind one History tile, in turn order — fetched when a
+ * tool page is asked to resume a past conversation rather than start fresh.
+ * Only the conversation's own owner can fetch it; the server 403s otherwise.
+ */
+export function fetchConversation(conversationId: string) {
+  return apiRequest<{ tool: string; generations: ConversationTurn[] }>(`/api/history/conversations/${conversationId}`);
+}
+
+/**
+ * `fetchConversation`, pre-validated for one specific tool's page — every
+ * resuming page needs the same "did this load, and is it actually mine"
+ * check before touching its own state, so it lives here once instead of
+ * being repeated per tool. Returns null on any failure (not found, wrong
+ * tool, empty thread) so the caller can just bail out.
+ */
+export async function fetchConversationForTool(conversationId: string, tool: string) {
+  const res = await fetchConversation(conversationId);
+  if (res.status !== "success" || res.tool !== tool || res.generations.length === 0) return null;
+  return res.generations;
+}
+
+/** Finds a model by id or (for a history row recorded before the id was, or a resumed label) by its Sparkle label. */
+export function resolveModelId<T extends { id: string; label: string }>(
+  models: readonly T[],
+  value?: string | null
+): T["id"] | undefined {
+  return models.find((m) => m.id === value || m.label === value)?.id;
+}
+
+/**
+ * One page of completed generations, newest first — the caller's own work
+ * unless `scope: "team"` is given, which the server only honours when the
+ * caller holds `result.read.others` (see `canReadTeam` in the response).
+ * `before` is the `nextCursor` from a previous page — omit it for the first
+ * page. `tool` narrows to one tool's generations; omit (or "all") for every
+ * tool.
+ */
+export function fetchHistory(params: { tool?: string; before?: string; limit?: number; scope?: "own" | "team" } = {}) {
+  const query = new URLSearchParams();
+  if (params.tool && params.tool !== "all") query.set("tool", params.tool);
+  if (params.before) query.set("before", params.before);
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.scope === "team") query.set("scope", "team");
+  const qs = query.toString();
+  return apiRequest<{ items: HistoryItem[]; nextCursor: string | null; canReadTeam: boolean }>(
+    `/api/history${qs ? `?${qs}` : ""}`
+  );
+}
+
+/** Permanently removes one generation (and its images) from history. */
+export function deleteHistoryItem(id: string) {
+  return apiRequest(`/api/history/${id}`, { method: "DELETE" });
+}
+
 /**
  * Drops this browser's session cookies without touching the central login.
  * For a client that was signed out from elsewhere: calling `logout()` instead

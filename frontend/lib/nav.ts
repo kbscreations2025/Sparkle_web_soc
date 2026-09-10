@@ -106,6 +106,7 @@ export const TOOLS: Tool[] = [
     icon: MessageSquare,
     description: "Iteratively refine a jewellery image, one message at a time",
     image: "/dashboard/chatToEdit.png",
+    href: "/chat-to-edit",
     permission: "tool.chat_to_edit.run",
   },
 ];
@@ -113,7 +114,7 @@ export const TOOLS: Tool[] = [
 /** The nav rail: every tool, plus History — which is a page, not a tool, so it has no card. */
 export const NAV: NavItem[] = [
   ...TOOLS,
-  { id: "history", label: "History", icon: History, permission: "result.read.own" },
+  { id: "history", label: "History", icon: History, href: "/history", permission: "result.read.own" },
 ];
 
 /**

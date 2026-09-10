@@ -21,9 +21,9 @@ export function AppShell({ nav, children }: { nav: ReactNode; children: ReactNod
     // Framer animates via rAF, so the reduced-motion CSS in globals.css can't
     // reach it — this is what honours the OS setting for every motion element.
     <MotionConfig reducedMotion="user">
-      <div className="flex flex-col min-h-screen bg-void">
+      <div className="flex h-screen min-h-0 flex-col bg-void">
         {nav}
-        <main className={cn("flex-1 flex flex-col", NAV_OFFSET)}>{children}</main>
+        <main className={cn("flex flex-1 flex-col min-h-0 overflow-hidden", NAV_OFFSET)}>{children}</main>
       </div>
     </MotionConfig>
   );

@@ -14,24 +14,27 @@ type CleaningMode = {
   label: string;
   description: string;
   icon: LucideIcon;
+  /** A mode without one has no workspace yet, so its card isn't clickable. */
+  href?: string;
 };
 
 /**
- * The six things this tool can do. No hrefs yet — the cards are the shape of
- * the page, and each one gets wired to its own workspace once that is built.
+ * The six things this tool can do. Only the ones with an `href` have a
+ * workspace built; the rest render as plain cards until they do.
  */
 const MODES: CleaningMode[] = [
   {
-    id: "background",
-    label: "Remove Background",
-    description: "Cut the piece out onto clean white or transparent",
-    icon: Eraser,
+    id: "default",
+    label: "Default",
+    description: "The standard retouch — upload, clean, then ask for changes",
+    icon: Sparkles,
+    href: "/cleaning/default",
   },
   {
     id: "dust",
     label: "Dust & Scratches",
     description: "Clear specks, fibres and hairline marks from the surface",
-    icon: Sparkles,
+    icon: Eraser,
   },
   {
     id: "reflections",
@@ -116,7 +119,7 @@ export default function CleaningPage() {
  * Rendered as a plain div until a mode has somewhere to go — a Link to nowhere
  * would look clickable and do nothing.
  */
-function ModeCard({ mode: { label, description, icon: Icon, href } }: { mode: CleaningMode & { href?: string } }) {
+function ModeCard({ mode: { label, description, icon: Icon, href } }: { mode: CleaningMode }) {
   const card = (
     <div
       className={cn(

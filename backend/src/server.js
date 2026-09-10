@@ -6,17 +6,50 @@ const config = require("./config");
 const { connectDb } = require("./db");
 const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
+const cleaningRoutes = require("./routes/cleaning");
+const chatToEditRoutes = require("./routes/chatToEdit");
+const historyRoutes = require("./routes/history");
 const { initSocket } = require("./socket");
 
 const app = express();
 
 app.use(cors({ origin: config.frontendOrigin, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: config.jsonBodyLimit }));
 app.use(cookieParser());
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/cleaning", cleaningRoutes);
+app.use("/api/chat-to-edit", chatToEditRoutes);
+app.use("/api/history", historyRoutes);
+
+/**
+ * Last stop for anything a route didn't handle itself.
+ *
+ * Without this, Express answers an oversized body with an HTML stack trace,
+ * which the frontend then fails to parse as JSON and reports as "could not
+ * reach the server" — hiding the real cause. Everything here answers in the
+ * same `{ status, message, code }` envelope the routes use.
+ */
+// eslint-disable-next-line no-unused-vars -- Express identifies error handlers by arity; `next` must stay.
+app.use((err, req, res, next) => {
+  // Thrown by body-parser before any route runs, so no route can catch it.
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({
+      status: "error",
+      message: `That request is larger than the ${config.jsonBodyLimit} limit. Try fewer or smaller images.`,
+      code: "payload_too_large",
+    });
+  }
+
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({ status: "error", message: "malformed JSON body", code: "invalid_json" });
+  }
+
+  console.error("unhandled error:", err);
+  res.status(500).json({ status: "error", message: "something went wrong" });
+});
 
 const httpServer = http.createServer(app);
 initSocket(httpServer);
