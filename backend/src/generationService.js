@@ -6,6 +6,7 @@ const Generation = require("./models/generation");
 const Asset = require("./models/asset");
 const { uploadObject, buildAssetKey, publicUrlFor } = require("./storage/r2");
 const { emitToUser } = require("./socket");
+const { logAudit } = require("./auditLog");
 
 function extensionFor(mimeType) {
   return mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
@@ -40,6 +41,8 @@ async function recordGeneration({
   inputImages,
   outputImages,
   providerId,
+  /** Which AI provider actually served this run — "gemini" by default, since every call site predates multi-provider routing except the ones that now pass it explicitly. */
+  provider,
 }) {
   const conversation = existingConversationId
     ? await Conversation.findOne({ _id: existingConversationId, tenantId: tenant._id })
@@ -79,7 +82,7 @@ async function recordGeneration({
     parentGenerationId: parentGenerationId || null,
     rootGenerationId,
     status: "completed",
-    model: { provider: "gemini", modelId: model, modelLabel: modelLabel || null },
+    model: { provider: provider || "gemini", modelId: model, modelLabel: modelLabel || null },
     aiProviderId: providerId,
     request: {
       userPrompt,
@@ -120,6 +123,28 @@ async function recordGeneration({
       width: entry.snapshot.width,
       height: entry.snapshot.height,
     })),
+  });
+
+  logAudit({
+    tenantId: tenant._id,
+    actorUserId: user._id,
+    actorAuthUserId: user.authUserId || null,
+    actorEmail: user.email,
+    actorName: user.name || user.email,
+    action: "generation.completed",
+    status: "success",
+    targetType: "generation",
+    targetId: String(generationId),
+    message: `${tool} generation completed via ${modelLabel || model}`,
+    metadata: {
+      tool,
+      model,
+      modelLabel,
+      quality,
+      provider: provider || "gemini",
+      conversationId: String(conversation._id),
+      aiProviderId: providerId ? String(providerId) : null,
+    },
   });
 
   return { conversationId: String(conversation._id), generationId: String(generationId) };

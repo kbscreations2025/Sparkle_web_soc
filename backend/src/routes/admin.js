@@ -5,6 +5,7 @@ const loginApi = require("../loginApi");
 const { requireAuth, requireSuperAdmin } = require("../middleware/auth");
 const { liveSessionCounts, forceLogout } = require("../socket");
 const { GRANT_GROUPS, TOOL_KEYS, unknownGrants } = require("../grants");
+const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const Tenant = require("../models/tenant");
 const User = require("../models/user");
 const { SCOPE_KINDS } = User;
@@ -206,6 +207,19 @@ router.post(
     if (!derived) return bad(res, "could not build a URL-safe slug from that name");
 
     const tenant = await Tenant.create({ name: name.trim(), slug: derived });
+
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: tenant._id,
+      action: "org.created",
+      status: "success",
+      targetType: "tenant",
+      targetId: String(tenant._id),
+      message: `created organization "${tenant.name}"`,
+      metadata: { name: tenant.name, slug: tenant.slug },
+    });
+
     res.status(201).json({ status: "success", organization: toOrg(tenant) });
   })
 );
@@ -221,11 +235,25 @@ router.patch(
     }
     if (!name?.trim() && !status) return bad(res, "nothing to update");
 
+    const before = { name: tenant.name, status: tenant.status };
+
     // Note: `slug` is immutable in the schema, so it is deliberately not
     // updatable here — it is baked into URLs.
     if (name?.trim()) tenant.name = name.trim();
     if (status) tenant.status = status;
     await tenant.save();
+
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: tenant._id,
+      action: "org.updated",
+      status: "success",
+      targetType: "tenant",
+      targetId: String(tenant._id),
+      message: `updated organization "${tenant.name}"`,
+      metadata: { before, after: { name: tenant.name, status: tenant.status } },
+    });
 
     const counts = await countsByTenant();
     res.json({ status: "success", organization: toOrg(tenant, counts.get(String(tenant._id))) });
@@ -254,6 +282,18 @@ router.delete(
       { tenantId: tenant._id, deletedAt: null },
       { $set: { deletedAt: now, status: "removed" } }
     );
+
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: tenant._id,
+      action: "org.deleted",
+      status: "success",
+      targetType: "tenant",
+      targetId: String(tenant._id),
+      message: `deleted organization "${tenant.name}" (${modifiedCount} member(s) removed)`,
+      metadata: { removedMembers: modifiedCount },
+    });
 
     res.json({ status: "success", removedMembers: modifiedCount });
   })
@@ -349,6 +389,18 @@ router.post(
     });
     await member.save();
 
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: req.tenant._id,
+      action: "member.added",
+      status: "success",
+      targetType: "user",
+      targetId: String(member._id),
+      message: `added member ${member.email}`,
+      metadata: { email: member.email, role: member.role, permissions: member.permissions, dataScope: member.dataScope },
+    });
+
     res.status(201).json({ status: "success", member: toMember(member) });
   })
 );
@@ -376,6 +428,15 @@ router.patch(
     const scope = await validateScope(dataScope, member.tenantId);
     if (scope.error) return bad(res, scope.error);
 
+    const before = {
+      name: member.name,
+      role: member.role,
+      status: member.status,
+      permissions: [...member.permissions],
+      dataScope: member.dataScope,
+      permissionVersion: member.permissionVersion,
+    };
+
     if (name !== undefined) member.name = name.trim();
     if (role !== undefined) member.role = role;
     if (status !== undefined) member.status = status;
@@ -392,11 +453,44 @@ router.patch(
 
     await member.save();
 
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: member.tenantId,
+      action: "member.updated",
+      status: "success",
+      targetType: "user",
+      targetId: String(member._id),
+      message: `updated member ${member.email}`,
+      metadata: {
+        before,
+        after: {
+          name: member.name,
+          role: member.role,
+          status: member.status,
+          permissions: member.permissions,
+          dataScope: member.dataScope,
+          permissionVersion: member.permissionVersion,
+        },
+      },
+    });
+
     // Suspending someone has to reach their open tabs. The socket sweep only
     // checks the central login, which still considers them signed in, so
     // without this they would keep a working page until they reloaded.
     if (status !== undefined && status !== "active" && member.authUserId) {
       forceLogout(member.authUserId);
+      logAudit({
+        ...actorFrom(req),
+        ...requestMeta(req),
+        tenantId: member.tenantId,
+        action: "auth.force_logout_by_admin",
+        status: "success",
+        targetType: "user",
+        targetId: String(member._id),
+        message: `force-logged-out ${member.email} (status changed to "${status}")`,
+        metadata: { reason: "status_changed", newStatus: status },
+      });
     }
 
     res.json({ status: "success", member: toMember(member) });
@@ -420,9 +514,34 @@ router.delete(
     );
     if (!member) return notFound(res, "member");
 
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: member.tenantId,
+      action: "member.removed",
+      status: "success",
+      targetType: "user",
+      targetId: String(member._id),
+      message: `removed member ${member.email}`,
+      metadata: { email: member.email },
+    });
+
     // Drop their live sockets now rather than letting them keep a working page
     // until the next revalidation sweep.
-    if (member.authUserId) forceLogout(member.authUserId);
+    if (member.authUserId) {
+      forceLogout(member.authUserId);
+      logAudit({
+        ...actorFrom(req),
+        ...requestMeta(req),
+        tenantId: member.tenantId,
+        action: "auth.force_logout_by_admin",
+        status: "success",
+        targetType: "user",
+        targetId: String(member._id),
+        message: `force-logged-out ${member.email} (member removed)`,
+        metadata: { reason: "member_removed" },
+      });
+    }
 
     res.json({ status: "success" });
   })
@@ -495,6 +614,19 @@ router.post(
     if (orgId?.trim()) entry.orgId = orgId.trim();
 
     await tenant.save();
+
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: tenant._id,
+      action: "ai_provider.added",
+      status: "success",
+      targetType: "aiProvider",
+      targetId: String(entry._id),
+      message: `added ${entry.provider} key "${entry.label}"`,
+      metadata: { provider: entry.provider, label: entry.label, keyHint: entry.keyHint, priority: entry.priority, enabled: entry.enabled },
+    });
+
     res.status(201).json({ status: "success", provider: toProvider(entry) });
   })
 );
@@ -523,14 +655,34 @@ router.patch(
       });
     }
 
+    const before = { label: entry.label, orgId: entry.orgId, priority: entry.priority, enabled: entry.enabled, keyHint: entry.keyHint };
+    const keyRotated = Boolean(apiKey?.trim());
+
     if (label !== undefined) entry.label = label.trim();
     if (orgId !== undefined) entry.orgId = orgId.trim() || null;
     if (priority !== undefined) entry.priority = priority;
     if (enabled !== undefined) entry.enabled = enabled;
     // A fresh key rotates in place so routing history and health stats survive.
-    if (apiKey?.trim()) tenant.replaceProviderKey(providerId, apiKey.trim());
+    if (keyRotated) tenant.replaceProviderKey(providerId, apiKey.trim());
 
     await tenant.save();
+
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: tenant._id,
+      action: "ai_provider.updated",
+      status: "success",
+      targetType: "aiProvider",
+      targetId: String(entry._id),
+      message: `updated ${entry.provider} key "${entry.label}"${keyRotated ? " (key rotated)" : ""}`,
+      metadata: {
+        before,
+        after: { label: entry.label, orgId: entry.orgId, priority: entry.priority, enabled: entry.enabled, keyHint: entry.keyHint },
+        keyRotated,
+      },
+    });
+
     res.json({ status: "success", provider: toProvider(entry) });
   })
 );
@@ -543,8 +695,25 @@ router.delete(
     const entry = tenant.aiProviders.id(req.params.providerId);
     if (!entry) return notFound(res, "provider");
 
+    // Captured before `deleteOne()` detaches the subdocument — nothing on it
+    // is readable afterwards.
+    const removed = { provider: entry.provider, label: entry.label, keyHint: entry.keyHint };
+
     entry.deleteOne();
     await tenant.save();
+
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: tenant._id,
+      action: "ai_provider.deleted",
+      status: "success",
+      targetType: "aiProvider",
+      targetId: String(req.params.providerId),
+      message: `deleted ${removed.provider} key "${removed.label}"`,
+      metadata: removed,
+    });
+
     res.json({ status: "success" });
   })
 );

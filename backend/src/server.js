@@ -13,6 +13,12 @@ const { initSocket } = require("./socket");
 
 const app = express();
 
+// So `req.ip` is the real client address, not a reverse proxy's, for the
+// audit log (and anything else that ever wants it). `1` trusts exactly one
+// hop in front of this process — the typical single load balancer/reverse
+// proxy deployment — rather than blindly trusting an arbitrary chain.
+app.set("trust proxy", 1);
+
 app.use(cors({ origin: config.frontendOrigin, credentials: true }));
 app.use(express.json({ limit: config.jsonBodyLimit }));
 app.use(cookieParser());

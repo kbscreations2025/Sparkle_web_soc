@@ -35,6 +35,7 @@ const MODES: CleaningMode[] = [
     label: "Dust & Scratches",
     description: "Clear specks, fibres and hairline marks from the surface",
     icon: Eraser,
+    href: "/cleaning/dust-scratches",
   },
   {
     id: "reflections",

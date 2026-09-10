@@ -1,20 +1,23 @@
 "use client";
 
-import { CLEANING_MODELS, type CleaningModelId } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export function ModelSelector({
+type ModelOption = { id: string; label: string; quality: string; description: string; badge: string };
+
+export function ModelSelector<TModel extends string>({
+  models,
   value,
   onChange,
   disabled,
 }: {
-  value: CleaningModelId;
-  onChange: (id: CleaningModelId) => void;
+  models: readonly (ModelOption & { id: TModel })[];
+  value: TModel;
+  onChange: (id: TModel) => void;
   disabled?: boolean;
 }) {
   return (
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-      {CLEANING_MODELS.map((model) => {
+      {models.map((model) => {
         const active = model.id === value;
         return (
           <button

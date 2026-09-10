@@ -4,6 +4,7 @@ const { buildChatEditPrompt } = require("../prompts");
 const { resolveModel, qualityFor, labelFor } = require("../gemini");
 const { routeGeminiCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
 const { recordGeneration, parseDataUri } = require("../generationService");
+const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 
 const router = express.Router();
 
@@ -104,6 +105,16 @@ router.post("/", async (req, res) => {
       generationId,
     });
   } catch (err) {
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: req.dbUser?.tenantId || null,
+      action: "generation.failed",
+      status: "failure",
+      targetType: "generation",
+      message: err.message || "generation failed",
+      metadata: { tool: "chat_to_edit", provider: "gemini", requestedModel: req.body?.model || null },
+    });
     sendGenerationError(res, err, "chat-to-edit");
   }
 });

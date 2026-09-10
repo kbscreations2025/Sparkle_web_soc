@@ -24,6 +24,18 @@ const CONTINUE_PATHS: Record<string, string> = {
 };
 
 /**
+ * Both cleaning workspaces record their generations under the same `tool:
+ * "cleaning"` bucket, so `CONTINUE_PATHS` alone can't tell a GPT-run
+ * conversation from a Gemini one apart — only the recorded model label can.
+ * Falls back to the Default workspace (Gemini) for anything else, same as
+ * before this distinction existed.
+ */
+function continuePathFor(item: HistoryItem) {
+  if (item.tool === "cleaning" && item.model === "Sparkle GPT Image") return "/cleaning/dust-scratches";
+  return CONTINUE_PATHS[item.tool];
+}
+
+/**
  * One fixed colour per tool, so the same tool always reads the same colour at
  * a glance — a hash would look "random enough" but could coincidentally
  * collide two tools onto near-identical hues.
@@ -243,7 +255,7 @@ export default function HistoryPage() {
 
   const handleContinue = useCallback(
     (item: HistoryItem) => {
-      const path = CONTINUE_PATHS[item.tool];
+      const path = continuePathFor(item);
       if (!path) return;
       router.push(`${path}?conversationId=${item.conversationId}`);
     },

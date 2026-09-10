@@ -317,6 +317,27 @@ export type SparkleModelId = CleaningModelId;
 export const DEFAULT_SPARKLE_MODEL = DEFAULT_CLEANING_MODEL;
 
 /**
+ * A separate one-model list for the "Dust & Scratches" workspace — it runs
+ * the exact same cleaning prompt as `CLEANING_MODELS` (the backend builds
+ * that prompt itself; the model id is all that changes), just always on
+ * OpenAI's `gpt-image-1` rather than Gemini. Kept apart from `CLEANING_MODELS`
+ * so the Default workspace's model picker (and Chat to Edit's, since it
+ * shares that list) is entirely unaffected.
+ */
+export const GPT_CLEANING_MODELS = [
+  {
+    id: "gpt-image-1",
+    label: "Sparkle GPT Image",
+    quality: "HD",
+    description: "OpenAI's image model · same studio-clean prompt",
+    badge: "GPT",
+  },
+] as const;
+
+export type GptCleaningModelId = (typeof GPT_CLEANING_MODELS)[number]["id"];
+export const DEFAULT_GPT_CLEANING_MODEL: GptCleaningModelId = "gpt-image-1";
+
+/**
  * Shared shape a model dropdown expects — built once from a models list
  * rather than in every page. The explicit return type matters: without it,
  * TS widens `entry.id`'s literal union to plain `string`, which is what let
@@ -340,7 +361,8 @@ export type CleaningResult = {
 export function cleanImage(body: {
   /** Data URI. Compressed in the browser before it gets here. */
   image: string;
-  model: CleaningModelId;
+  /** A `CLEANING_MODELS` or `GPT_CLEANING_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Replaces the built-in cleaning prompt entirely when given. */
   customPrompt?: string;
   /** Set to keep a retry in the same thread as the run it follows. */
@@ -357,7 +379,8 @@ export function refineImage(body: {
   /** The image being refined, as a data URI. */
   refineImage: string;
   instruction: string;
-  model: CleaningModelId;
+  /** A `CLEANING_MODELS` or `GPT_CLEANING_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Visual inspiration only — never copied into the result wholesale. */
   referenceImages?: string[];
   conversationId?: string | null;

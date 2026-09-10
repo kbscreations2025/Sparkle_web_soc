@@ -1,9 +1,9 @@
 const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { IMAGE_CLEANING_PROMPT, buildReferenceNote } = require("../prompts");
-const { resolveModel, qualityFor, labelFor } = require("../gemini");
-const { routeGeminiCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
+const { resolveProviderModel, routeProviderCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
 const { recordGeneration, parseDataUri } = require("../generationService");
+const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 
 const router = express.Router();
 
@@ -34,6 +34,10 @@ function buildPrompt({ isRefinement, instruction, customPrompt, referenceCount =
 }
 
 router.post("/", async (req, res) => {
+  // Hoisted so the catch block below can report the failure through the
+  // right provider's error classifier even if the failure happened after
+  // the model was resolved but before anything else was assigned.
+  let provider = "gemini";
   try {
     const { dbUser } = req;
     const {
@@ -49,7 +53,9 @@ router.post("/", async (req, res) => {
 
     const isRefinement = Boolean(refineImage && instruction);
     const sourceImage = isRefinement ? refineImage : image;
-    const model = resolveModel(requestedModel);
+    const resolved = resolveProviderModel(requestedModel);
+    provider = resolved.provider;
+    const { model, quality, modelLabel } = resolved;
 
     if (!sourceImage) {
       return res.status(400).json({ status: "error", message: "no image provided", code: "invalid" });
@@ -68,10 +74,10 @@ router.post("/", async (req, res) => {
     const tenant = await loadTenantOrThrow(dbUser);
 
     const prompt = buildPrompt({ isRefinement, instruction, customPrompt, referenceCount: parsedReferences.length });
-    const quality = qualityFor(model);
 
-    const { output, providerId } = await routeGeminiCall({
+    const { output, providerId } = await routeProviderCall({
       tenant,
+      provider,
       modelId: model,
       prompt,
       images: [
@@ -91,7 +97,7 @@ router.post("/", async (req, res) => {
         conversationId: requestedConversationId,
         parentGenerationId,
         model,
-        modelLabel: labelFor(model),
+        modelLabel,
         quality,
         prompt,
         userPrompt: isRefinement ? instruction : customPrompt?.trim() || null,
@@ -101,6 +107,7 @@ router.post("/", async (req, res) => {
         ],
         outputImages: [{ image: output, role: "generated" }],
         providerId,
+        provider,
       });
       conversationId = saved.conversationId;
       generationId = saved.generationId;
@@ -116,7 +123,17 @@ router.post("/", async (req, res) => {
       generationId,
     });
   } catch (err) {
-    sendGenerationError(res, err, "cleaning");
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: req.dbUser?.tenantId || null,
+      action: "generation.failed",
+      status: "failure",
+      targetType: "generation",
+      message: err.message || "generation failed",
+      metadata: { tool: "cleaning", provider, requestedModel: req.body?.model || null },
+    });
+    sendGenerationError(res, err, "cleaning", provider);
   }
 });
 
