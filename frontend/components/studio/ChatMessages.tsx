@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { Download, RotateCcw } from "lucide-react";
 import type { ChatMsg } from "./chat";
-import { downloadDataUrl } from "@/lib/image";
+import { downloadImage } from "@/lib/image";
 import { cn } from "@/lib/utils";
 
 /**
@@ -115,7 +115,7 @@ function AssistantBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) 
         </button>
         <button
           type="button"
-          onClick={() => downloadDataUrl(image, "result.jpg")}
+          onClick={() => downloadImage(image, "result.jpg")}
           className="flex w-full items-center justify-center gap-1 rounded-md py-0.5 text-[10px] text-faint transition-colors hover:text-gold"
         >
           <Download size={10} /> Download

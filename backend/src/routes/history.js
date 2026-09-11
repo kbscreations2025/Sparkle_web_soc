@@ -1,13 +1,122 @@
 const express = require("express");
+const { Readable } = require("stream");
 const config = require("../config");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { hasPermission } = require("../permissions");
 const Generation = require("../models/generation");
 const Asset = require("../models/asset");
-const { GENERATION_TOOLS } = require("../generations");
+const { GENERATION_TOOLS, toPublicAsset } = require("../generations");
 const { deleteObject } = require("../storage/r2");
 
 const router = express.Router();
+
+/**
+ * Whether a url really points at this app's own public bucket.
+ *
+ * Both routes below hand a caller-supplied url to `fetch`, so this check is
+ * the only thing standing between them and an open relay that will make the
+ * server request anything a signed-in user names.
+ *
+ * Compared by parsed origin, not by string prefix: `startsWith` accepts
+ * `https://pub-xxxx.r2.dev.attacker.example/…`, which begins with the
+ * configured url and is an entirely different host. Parsing also rejects a
+ * protocol swap and anything that isn't a url at all.
+ */
+function isOwnPublicUrl(value) {
+  if (typeof value !== "string" || !config.r2.publicUrl) return false;
+
+  let candidate;
+  let base;
+  try {
+    candidate = new URL(value);
+    base = new URL(config.r2.publicUrl);
+  } catch {
+    return false;
+  }
+
+  if (candidate.origin !== base.origin) return false;
+
+  // A public url configured with a path prefix confines us to that subtree;
+  // one pointing at the bucket root ("/") imposes no further restriction.
+  const basePath = base.pathname.replace(/\/+$/, "");
+  return basePath === "" || candidate.pathname.startsWith(`${basePath}/`);
+}
+
+/**
+ * Strips anything that would let a filename escape the browser's downloads
+ * folder or break the header it travels in — separators, quotes, control
+ * characters — and keeps it to a sane length.
+ */
+function safeFilename(name, fallback) {
+  const cleaned = String(name || "")
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what must not reach a header
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .trim()
+    // After trimming, not before — otherwise "  ..name" keeps its dots and
+    // lands as a hidden file.
+    .replace(/^\.+/, "")
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
+/**
+ * Streams one stored image back as a file attachment.
+ *
+ * The reason this exists rather than the browser downloading from R2
+ * directly: an anchor's `download` attribute is ignored cross-origin, so
+ * `<a href="https://…r2.dev/…" download>` navigates to the image instead of
+ * saving it — which is what a click on the download button used to do. Coming
+ * from our own origin with `Content-Disposition: attachment`, the browser
+ * saves it, and the filename we choose survives.
+ *
+ * Deliberately registered before the `result.read.own` middleware below and
+ * behind `requireAuth` alone: a tool page's own freshly generated result is
+ * downloadable by whoever just made it, whether or not they also hold the
+ * History permission. It grants no reach either, since these objects sit in a
+ * public bucket that anyone holding the URL can already fetch unauthenticated
+ * — this route only changes which headers come back.
+ *
+ * Streamed rather than buffered: these are full-resolution originals of
+ * several megabytes, and holding one in memory per concurrent download is a
+ * needless way to run a small instance out of heap.
+ */
+router.get("/download", requireAuth, async (req, res) => {
+  const { url } = req.query;
+  if (!isOwnPublicUrl(url)) {
+    return res.status(400).json({ status: "error", message: "invalid url", code: "invalid" });
+  }
+
+  let upstream;
+  try {
+    upstream = await fetch(url);
+  } catch (err) {
+    console.error("download: could not reach R2:", err.message);
+    return res.status(502).json({ status: "error", message: "could not load image", code: "fetch_failed" });
+  }
+  if (!upstream.ok || !upstream.body) {
+    return res.status(502).json({ status: "error", message: "could not load image", code: "fetch_failed" });
+  }
+
+  const filename = safeFilename(req.query.filename, "sparkle-image.jpg");
+  res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/octet-stream");
+  const length = upstream.headers.get("content-length");
+  if (length) res.setHeader("Content-Length", length);
+  // Both forms: the quoted one for older clients, the RFC 5987 one so a name
+  // with non-ASCII characters in it still arrives intact.
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${filename.replace(/"/g, "")}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+  );
+  // CORS hides every response header from script by default, so without this
+  // a caller fetching the blob cannot read back the name it was given.
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+
+  Readable.fromWeb(upstream.body).pipe(res).on("error", (err) => {
+    console.error("download: stream failed:", err.message);
+    res.destroy();
+  });
+});
 
 router.use(requireAuth, requirePermission("result.read.own"));
 
@@ -24,7 +133,7 @@ const MAX_LIMIT = 60;
  */
 router.get("/image-data", async (req, res) => {
   const { url } = req.query;
-  if (typeof url !== "string" || !config.r2.publicUrl || !url.startsWith(config.r2.publicUrl)) {
+  if (!isOwnPublicUrl(url)) {
     return res.status(400).json({ status: "error", message: "invalid url", code: "invalid" });
   }
 
@@ -122,12 +231,7 @@ function toHistoryItem(generation, dbUser) {
     isOwn: String(generation.userId) === String(dbUser._id),
     userName: generation.userName,
     createdAt: generation.createdAt,
-    outputs: (generation.response?.outputAssets || []).map((asset) => ({
-      assetId: String(asset.assetId),
-      url: asset.url,
-      width: asset.width,
-      height: asset.height,
-    })),
+    outputs: (generation.response?.outputAssets || []).map(toPublicAsset),
   };
 }
 
@@ -163,8 +267,8 @@ router.get("/conversations/:id", async (req, res) => {
       userPrompt: g.request?.userPrompt || null,
       model: g.model?.modelLabel || g.model?.modelId,
       quality: g.request?.params?.quality || null,
-      inputAssets: (g.request?.inputAssets || []).map((a) => ({ url: a.url, role: a.role })),
-      outputAssets: (g.response?.outputAssets || []).map((a) => ({ url: a.url, role: a.role })),
+      inputAssets: (g.request?.inputAssets || []).map(toPublicAsset),
+      outputAssets: (g.response?.outputAssets || []).map(toPublicAsset),
     })),
   });
 });
@@ -190,12 +294,18 @@ router.delete("/:id", async (req, res) => {
   const assets = await Asset.find({ _id: { $in: assetIds }, deletedAt: null });
 
   await Promise.all(
-    assets.map(async (asset) => {
-      try {
-        await deleteObject(asset.s3Key);
-      } catch (err) {
-        console.error(`history delete: could not remove R2 object for asset ${asset._id}:`, err.message);
-      }
+    assets.flatMap((asset) => {
+      // The thumbnail is a separate object under the same prefix — skipping
+      // it here would leave it orphaned in the bucket with nothing left
+      // pointing at it.
+      const keys = [asset.s3Key, asset.thumbnail?.s3Key].filter(Boolean);
+      return keys.map(async (key) => {
+        try {
+          await deleteObject(key);
+        } catch (err) {
+          console.error(`history delete: could not remove R2 object ${key} for asset ${asset._id}:`, err.message);
+        }
+      });
     })
   );
 

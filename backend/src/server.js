@@ -9,7 +9,10 @@ const adminRoutes = require("./routes/admin");
 const cleaningRoutes = require("./routes/cleaning");
 const chatToEditRoutes = require("./routes/chatToEdit");
 const historyRoutes = require("./routes/history");
+const jobRoutes = require("./routes/jobs");
 const { initSocket } = require("./socket");
+const { startQueueEventsBridge, closeQueue } = require("./queue");
+const { closeRedisConnections, isRedisReady } = require("./redis");
 
 const app = express();
 
@@ -23,12 +26,16 @@ app.use(cors({ origin: config.frontendOrigin, credentials: true }));
 app.use(express.json({ limit: config.jsonBodyLimit }));
 app.use(cookieParser());
 
-app.get("/health", (req, res) => res.json({ status: "ok" }));
+// Reports Redis too: the API answers fine without it, but every queued
+// generation would fail, so a green health check that ignored it would be
+// telling the truth about the wrong thing.
+app.get("/health", (req, res) => res.json({ status: "ok", redis: isRedisReady() ? "ready" : "unavailable" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/cleaning", cleaningRoutes);
 app.use("/api/chat-to-edit", chatToEditRoutes);
 app.use("/api/history", historyRoutes);
+app.use("/api/jobs", jobRoutes);
 
 /**
  * Last stop for anything a route didn't handle itself.
@@ -60,6 +67,19 @@ app.use((err, req, res, next) => {
 const httpServer = http.createServer(app);
 initSocket(httpServer);
 
+// Job state reaches the browser from here, not from the worker: this is the
+// process holding the websockets, and BullMQ's event stream lets it watch work
+// happening in a process that has none. See queue.js.
+startQueueEventsBridge();
+
+// In development the worker shares this process so `npm run dev` stays one
+// command. In production it is its own service (`npm run worker`) so a slow
+// generation can never occupy the process that has to answer HTTP.
+let worker;
+if (config.queue.runInProcess) {
+  worker = require("./worker").startWorker();
+}
+
 // Fail fast rather than accepting requests that would all 500 on the first query.
 connectDb()
   .then(() => {
@@ -71,3 +91,24 @@ connectDb()
     console.error("Startup failed:", err.message);
     process.exit(1);
   });
+
+/**
+ * Stop taking new work, let what is in flight finish, then let go of Redis.
+ * Without this a redeploy drops in-progress generations, which reappear later
+ * as duplicates once their queue locks expire.
+ */
+async function shutdown(signal) {
+  console.log(`${signal} — shutting down…`);
+  httpServer.close();
+  try {
+    if (worker) await worker.close();
+    await closeQueue();
+    await closeRedisConnections();
+  } catch (err) {
+    console.error("shutdown error:", err.message);
+  }
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

@@ -47,6 +47,20 @@ function resolveProviderModel(requestedModel) {
 }
 
 /**
+ * The user-facing reading of a failed generation, independent of how it will
+ * be delivered. Routes turn this into an HTTP response; the queue worker
+ * stores it on the job instead, and both want the same wording for the same
+ * failure.
+ */
+function classifyProviderError(err, provider = "gemini") {
+  if (err instanceof NoProviderError) {
+    return { message: err.message, code: err.code, noProvider: true };
+  }
+  const { message, code } = (PROVIDER_MODULES[provider] || PROVIDER_MODULES.gemini).classifyError(err);
+  return { message, code: code === undefined ? null : String(code), noProvider: false };
+}
+
+/**
  * Shared failure response for the image-generating routes: a `NoProviderError`
  * is a 503 the tenant needs to act on, anything else is classified (by
  * whichever provider actually ran) and reported as a 502 (the model didn't
@@ -128,5 +142,6 @@ module.exports = {
   resolveProviderModel,
   loadTenantOrThrow,
   sendGenerationError,
+  classifyProviderError,
   NoProviderError,
 };

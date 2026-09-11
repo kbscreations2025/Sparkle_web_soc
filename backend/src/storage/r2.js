@@ -1,4 +1,4 @@
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const config = require("../config");
 
 /**
@@ -37,14 +37,27 @@ function getBucket() {
  * so a bucket listing is browsable by hand if it's ever needed. `role` is the
  * asset's role (uploaded/generated/edited/...) from `ASSET_ROLES`.
  */
-function buildAssetKey({ tenantId, userId, conversationId, generationId, role, assetId, extension }) {
+function buildAssetKey({ tenantId, userId, conversationId, generationId, role, assetId, extension, variant }) {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const name = variant ? `${assetId}_${variant}` : String(assetId);
   return (
     `${PREFIX}tenants/${tenantId}/users/${userId}/${yyyy}/${mm}/` +
-    `${conversationId}/${generationId}/${role}/${assetId}.${extension}`
+    `${conversationId}/${generationId}/${role}/${name}.${extension}`
   );
+}
+
+/**
+ * The key of a derivative sitting beside an original — `<id>.jpg` becomes
+ * `<id>_thumb.webp`. Derived from the original's key rather than rebuilt from
+ * its parts, because the date segment is stamped at upload time and a
+ * backfill running months later would otherwise compute a different path.
+ */
+function variantKeyFor(originalKey, variant, extension) {
+  const dot = originalKey.lastIndexOf(".");
+  const stem = dot === -1 ? originalKey : originalKey.slice(0, dot);
+  return `${stem}_${variant}.${extension}`;
 }
 
 function assertOwnKey(key) {
@@ -72,6 +85,13 @@ async function uploadObject(key, body, contentType) {
   );
 }
 
+/** Reads one object back as a Buffer. Only the thumbnail backfill needs this — the app itself never reads its own bytes back. */
+async function getObject(key) {
+  assertOwnKey(key);
+  const result = await getClient().send(new GetObjectCommand({ Bucket: getBucket(), Key: key }));
+  return Buffer.from(await result.Body.transformToByteArray());
+}
+
 async function deleteObject(key) {
   assertOwnKey(key);
   await getClient().send(new DeleteObjectCommand({ Bucket: getBucket(), Key: key }));
@@ -83,4 +103,4 @@ function publicUrlFor(key) {
   return `${config.r2.publicUrl.replace(/\/$/, "")}/${key}`;
 }
 
-module.exports = { buildAssetKey, uploadObject, deleteObject, publicUrlFor };
+module.exports = { buildAssetKey, variantKeyFor, uploadObject, getObject, deleteObject, publicUrlFor };

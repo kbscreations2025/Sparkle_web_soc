@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, Pencil, X, ZoomIn, ZoomOut } from "lucide-react";
+import { downloadImage } from "@/lib/image";
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 8;
@@ -173,14 +174,14 @@ export function Lightbox({
           </button>
         )}
         {downloadName && (
-          <a
-            href={src}
-            download={downloadName}
+          <button
+            type="button"
+            onClick={() => downloadImage(src, downloadName)}
             title="Download"
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-black/50 text-white/90 transition-colors hover:bg-black/70 hover:text-white"
           >
             <Download size={16} />
-          </a>
+          </button>
         )}
         <button
           type="button"

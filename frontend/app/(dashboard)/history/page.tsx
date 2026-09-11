@@ -6,7 +6,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { io } from "socket.io-client";
 import { ChevronDown, Copy, Download, Loader2, MessageCircle, Trash2, Users } from "lucide-react";
 import { BACKEND_URL, deleteHistoryItem, fetchHistory, MODEL_LABELS, type HistoryItem } from "@/lib/api";
-import { TOOLS } from "@/lib/nav";
+import { downloadImage } from "@/lib/image";
+import { conversationHref, TOOL_LABELS, TOOLS, workspacePathFor } from "@/lib/nav";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -14,26 +15,7 @@ import { HistoryLightbox } from "@/components/studio/HistoryLightbox";
 
 const HISTORY_PERMISSION = "result.read.own";
 
-const TOOL_LABELS: Record<string, string> = Object.fromEntries(TOOLS.map((t) => [t.id, t.label]));
 const TOOL_FILTERS = [{ id: "all", label: "All tools" }, ...TOOLS.map((t) => ({ id: t.id, label: t.label }))];
-
-/** Where a conversation's tool actually lives — distinct from `TOOLS[].href`, which for Image Cleaning points at its mode picker, not the workspace itself. */
-const CONTINUE_PATHS: Record<string, string> = {
-  cleaning: "/cleaning/default",
-  chat_to_edit: "/chat-to-edit",
-};
-
-/**
- * Both cleaning workspaces record their generations under the same `tool:
- * "cleaning"` bucket, so `CONTINUE_PATHS` alone can't tell a GPT-run
- * conversation from a Gemini one apart — only the recorded model label can.
- * Falls back to the Default workspace (Gemini) for anything else, same as
- * before this distinction existed.
- */
-function continuePathFor(item: HistoryItem) {
-  if (item.tool === "cleaning" && item.model === "Sparkle GPT Image") return "/cleaning/dust-scratches";
-  return CONTINUE_PATHS[item.tool];
-}
 
 /**
  * One fixed colour per tool, so the same tool always reads the same colour at
@@ -54,10 +36,16 @@ const TOOL_COLORS: Record<string, string> = {
 };
 const FALLBACK_TOOL_COLOR = "0 0% 60%";
 
-/** Shared by every round tile action button — continue, download, delete. */
+/**
+ * Shared by every round tile action button — continue, download, delete.
+ *
+ * No `lg` step up. The tiles do not get bigger at wide viewports — the grid
+ * just adds a column — so scaling the buttons with the viewport only ever
+ * made them cover more of the same-sized picture.
+ */
 const TILE_ACTION_BUTTON =
-  "flex h-5 w-5 items-center justify-center rounded-full border border-white/20 bg-black/55 backdrop-blur-sm transition-colors hover:bg-black/75 md:h-7 md:w-7 lg:h-8 lg:w-8";
-const TILE_ACTION_ICON = "text-white/85 md:h-3 md:w-3 lg:h-3.5 lg:w-3.5";
+  "flex h-5 w-5 items-center justify-center rounded-full border border-white/20 bg-black/55 backdrop-blur-sm transition-colors hover:bg-black/75 md:h-6 md:w-6";
+const TILE_ACTION_ICON = "text-white/85 md:h-3 md:w-3";
 
 /** Row gap between tiles, kept as one constant since both the CSS grid and the row-height estimate must agree. */
 const GRID_GAP = 10;
@@ -255,9 +243,10 @@ export default function HistoryPage() {
 
   const handleContinue = useCallback(
     (item: HistoryItem) => {
-      const path = continuePathFor(item);
-      if (!path) return;
-      router.push(`${path}?conversationId=${item.conversationId}`);
+      // `item.model` carries the recorded model label, which is the only
+      // thing that distinguishes the two cleaning workspaces.
+      const href = conversationHref(item.tool, item.conversationId, item.model);
+      if (href) router.push(href);
     },
     [router]
   );
@@ -325,7 +314,7 @@ export default function HistoryPage() {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 md:px-5 md:py-5 lg:px-6">
         {loading ? (
-          <SkeletonGrid columns={columns} rows={3} />
+          <SkeletonGrid rows={3} />
         ) : items.length === 0 ? (
           <p className="px-2 py-10 text-center text-sm text-faint">Nothing generated yet.</p>
         ) : (
@@ -346,7 +335,7 @@ export default function HistoryPage() {
                       key={item.id}
                       item={item}
                       toolLabel={TOOL_LABELS[item.tool] || item.tool}
-                      canContinue={item.isOwn && Boolean(CONTINUE_PATHS[item.tool])}
+                      canContinue={item.isOwn && Boolean(workspacePathFor(item.tool, item.model))}
                       deleting={deletingId === item.id}
                       onOpen={openItem}
                       onContinue={handleContinue}
@@ -361,7 +350,7 @@ export default function HistoryPage() {
 
         {loadingMore && (
           <div className="pt-1">
-            <SkeletonGrid columns={columns} rows={1} />
+            <SkeletonGrid rows={1} />
           </div>
         )}
       </div>
@@ -370,7 +359,7 @@ export default function HistoryPage() {
         item={selected}
         toolLabel={selected ? TOOL_LABELS[selected.tool] || selected.tool : ""}
         modelLabel={modelLabelFor(selected?.model)}
-        canContinue={Boolean(selected && selected.isOwn && CONTINUE_PATHS[selected.tool])}
+        canContinue={Boolean(selected?.isOwn && workspacePathFor(selected.tool, selected.model))}
         deleting={Boolean(selected && deletingId === selected.id)}
         onClose={() => setSelected(null)}
         onDelete={handleDelete}
@@ -399,12 +388,41 @@ function ToolFilter({ value, onChange }: { value: string; onChange: (id: string)
   );
 }
 
-/** Same shape as a real tile, so the grid doesn't jump when results replace it. */
-function SkeletonGrid({ columns, rows }: { columns: number; rows: number }) {
+/**
+ * Same shape as a real tile, so the grid doesn't jump when results replace it.
+ *
+ * Laid out by CSS breakpoints rather than by `useResponsiveColumns`, and that
+ * is the whole point: the hook cannot know the viewport until it has mounted
+ * and measured, so it necessarily returns its 2-column default for the first
+ * paint. That is precisely the frame the skeleton occupies — which is why the
+ * loader used to appear as two oversized boxes and then snap to six small
+ * ones. Media queries are resolved before the first paint, so there is no
+ * wrong frame to correct.
+ *
+ * The breakpoints below must stay in step with the hook's, or the skeleton
+ * would hand over to a grid of a different shape.
+ */
+const SKELETON_GRID_COLUMNS = "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6";
+
+function SkeletonGrid({ rows }: { rows: number }) {
+  // Enough tiles for the widest layout; the surplus is hidden at narrower
+  // ones so every breakpoint shows the same number of *rows* rather than the
+  // same number of tiles.
+  const perRowWide = 6;
+  const total = perRowWide * rows;
+
   return (
-    <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP }}>
-      {Array.from({ length: columns * rows }).map((_, i) => (
-        <div key={i} className="aspect-square animate-pulse rounded-lg bg-white/[0.04] md:rounded-xl" />
+    <div className={cn("grid", SKELETON_GRID_COLUMNS)} style={{ gap: GRID_GAP }}>
+      {Array.from({ length: total }).map((_, i) => (
+        <div
+          key={i}
+          className={cn(
+            "aspect-square animate-pulse rounded-lg bg-white/[0.04] md:rounded-xl",
+            // Beyond what fits in two columns, then in four.
+            i >= 2 * rows && i < 4 * rows && "hidden sm:block",
+            i >= 4 * rows && "hidden lg:block"
+          )}
+        />
       ))}
     </div>
   );
@@ -439,7 +457,10 @@ const HistoryTile = memo(
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- small grid tile, lazy-loaded natively; next/image adds no value at this size */}
         <img
-          src={cover.url}
+          // The small copy, not the original: a full page of results is tens
+          // of megabytes at full size and under a megabyte here. The original
+          // is still what the download link and the lightbox below point at.
+          src={cover.thumbnailUrl}
           alt={toolLabel}
           loading="lazy"
           decoding="async"
@@ -473,15 +494,19 @@ const HistoryTile = memo(
                 <MessageCircle size={10} className={TILE_ACTION_ICON} />
               </button>
             )}
-            <a
-              href={cover.url}
-              download={`${item.tool}-${item.id}.jpg`}
+            <button
+              type="button"
               title="Download"
-              onClick={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                // The tile is clickable; downloading must not also open it.
+                event.stopPropagation();
+                // The full-size original, never the grid thumbnail.
+                downloadImage(cover.url, `${item.tool}-${item.id}.jpg`);
+              }}
               className={TILE_ACTION_BUTTON}
             >
               <Download size={10} className={TILE_ACTION_ICON} />
-            </a>
+            </button>
             <button
               type="button"
               title="Delete"

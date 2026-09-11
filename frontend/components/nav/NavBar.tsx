@@ -12,11 +12,17 @@ import { NAV_HEIGHT } from "@/components/AppShell";
  * they put between the divider and the account menu, so everything else lives
  * here rather than being kept in step by hand across two files.
  */
-export function NavBar({ children }: { children: ReactNode }) {
+export function NavBar({ children, floating = true }: { children: ReactNode; floating?: boolean }) {
   return (
     <header
       className={cn(
-        "fixed top-0 inset-x-0 z-40 flex items-center gap-2 md:gap-4 px-3 md:px-4 border-b border-white/5 glass-raised",
+        "z-40 flex items-center gap-2 md:gap-4 px-3 md:px-4 border-b border-white/5 glass-raised",
+        // Pinned across the viewport by default — which only works when the
+        // header is the topmost thing. A shell with a full-height sidebar
+        // puts this inside the content column instead, where spanning the
+        // whole width would lay it over the sidebar; there it stays in flow
+        // and needs no offset underneath it.
+        floating ? "fixed top-0 inset-x-0" : "relative shrink-0",
         NAV_HEIGHT
       )}
     >

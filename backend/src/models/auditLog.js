@@ -31,9 +31,12 @@ const AUDIT_ACTIONS = [
   // ── generations ──
   "generation.completed",
   "generation.failed",
+  // ── background jobs ──
+  "job.queued",
+  "job.cancelled",
 ];
 
-const TARGET_TYPES = ["tenant", "user", "aiProvider", "generation", "session"];
+const TARGET_TYPES = ["tenant", "user", "aiProvider", "generation", "session", "job"];
 
 /**
  * One append-only row per tracked action, across every area of the app — not

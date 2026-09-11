@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, Loader2, MessageCircle, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import type { HistoryItem } from "@/lib/api";
+import { downloadImage } from "@/lib/image";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
@@ -90,15 +91,17 @@ export function HistoryLightbox({
   const active = item.outputs[activeIndex];
   const timeLabel = timeAgo(item.createdAt);
 
-  function downloadAll() {
-    item!.outputs.forEach((output, i) => {
-      const link = document.createElement("a");
-      link.href = output.url;
-      link.download = `${item!.tool}-${item!.id}-${i + 1}.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    });
+  /**
+   * One at a time, in order. Firing them together would open as many parallel
+   * proxy streams of several megabytes each, and browsers throttle or drop
+   * simultaneous downloads from one gesture anyway. `downloadImage` reports
+   * failure by returning false rather than throwing, so one bad image can't
+   * abandon the rest of the set.
+   */
+  async function downloadAll() {
+    for (const [i, output] of item!.outputs.entries()) {
+      await downloadImage(output.url, `${item!.tool}-${item!.id}-${i + 1}.jpg`);
+    }
   }
 
   return (
@@ -136,7 +139,7 @@ export function HistoryLightbox({
                   title="Continue this conversation"
                   className="flex h-7 items-center gap-1 rounded-full px-2 text-[10px] font-medium text-white/85 transition-colors hover:bg-white/[0.10] md:h-8"
                 >
-                  <MessageCircle size={13} /> Continue
+                  <MessageCircle size={13} /> 
                 </button>
               )}
               {item.outputs.length > 1 && (
@@ -149,14 +152,17 @@ export function HistoryLightbox({
                   <Download size={13} /> All
                 </button>
               )}
-              <a
-                href={active?.url}
-                download={`${item.tool}-${item.id}-${activeIndex + 1}.jpg`}
+              <button
+                type="button"
+                onClick={() =>
+                  active &&
+                  downloadImage(active.url, `${item.tool}-${item.id}-${activeIndex + 1}.jpg`)
+                }
                 title="Download"
                 className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.10] md:h-8 md:w-8"
               >
                 <Download size={14} />
-              </a>
+              </button>
               <button
                 type="button"
                 onClick={() => onDelete(item)}
@@ -194,8 +200,10 @@ export function HistoryLightbox({
                     i === activeIndex ? "border-gold" : "border-transparent hover:border-white/30"
                   }`}
                 >
+                  {/* The small copy — this strip is 64px tiles, and the pane
+                      beside it is already loading the full-size original. */}
                   {/* eslint-disable-next-line @next/next/no-img-element -- fixed small thumbnail, next/image adds no value here */}
-                  <img src={output.url} alt="" className="h-full w-full object-cover" />
+                  <img src={output.thumbnailUrl} alt="" className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>

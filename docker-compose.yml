@@ -1,0 +1,30 @@
+# Local development dependencies. Production runs managed equivalents (Redis
+# on Render), so nothing here is deployed — it only exists so `docker compose
+# up -d` gives you the same services locally that the app expects in the cloud.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: sparkle-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    # `noeviction` is not a preference — BullMQ REQUIRES it. Under any evicting
+    # policy Redis is free to drop queue keys when memory fills, which silently
+    # loses queued jobs rather than failing loudly. `appendonly` keeps the queue
+    # across a container restart, so a redeploy doesn't drop pending work.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:

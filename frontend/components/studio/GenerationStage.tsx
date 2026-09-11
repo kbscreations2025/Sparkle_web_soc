@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { Download, Loader2, Maximize2, Pencil } from "lucide-react";
+import { downloadImage } from "@/lib/image";
 
 /**
  * The large preview every results screen shares — whatever a tool is showing
@@ -77,14 +78,17 @@ export function GenerationStage({
             </button>
           )}
           {downloadName && (
-            <a
-              href={src}
-              download={downloadName}
+            <button
+              type="button"
+              // `src` is inline bytes on a fresh result and a stored url on
+              // one that came back through the queue; only the helper
+              // saves both — a plain `download` anchor ignores the second.
+              onClick={() => downloadImage(src, downloadName)}
               title="Download"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/75"
             >
               <Download size={13} />
-            </a>
+            </button>
           )}
         </div>
       )}

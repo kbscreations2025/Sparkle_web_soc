@@ -10,6 +10,13 @@ const assetSnapshotSchema = new mongoose.Schema(
   {
     assetId: { type: mongoose.Schema.Types.ObjectId, ref: "Asset", required: true },
     url: { type: String, required: true },
+    /**
+     * The grid-sized copy. Null where there isn't one, and every reader falls
+     * back to `url` — so this being absent is a bandwidth cost, never a
+     * broken tile. Carried here rather than looked up from the Asset because
+     * History renders from these snapshots alone and never joins.
+     */
+    thumbnailUrl: { type: String, default: null },
     role: { type: String, enum: ASSET_ROLES, required: true },
     width: { type: Number, default: null },
     height: { type: Number, default: null },

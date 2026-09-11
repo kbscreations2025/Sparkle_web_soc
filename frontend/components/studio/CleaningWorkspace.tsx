@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Loader2, PenLine, Sparkles, Wand2 } from "lucide-react";
@@ -15,7 +15,8 @@ import { ToolHeader } from "@/components/studio/ToolHeader";
 import type { ChatMsg } from "@/components/studio/chat";
 import type { Attachment } from "@/components/studio/AttachmentChips";
 import { cleanImage, refineImage, fetchConversationForTool, resolveModelId, toModelOptions } from "@/lib/api";
-import { compressImage, urlToDataUrl } from "@/lib/image";
+import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
+import { useJobs } from "@/lib/jobs-context";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -99,11 +100,32 @@ export function CleaningWorkspace<TModel extends string>({
   const searchParams = useSearchParams();
   const modelOptionsForInput = toModelOptions(modelOptions);
 
-  // Arriving from History with ?conversationId=... resumes that thread
-  // instead of starting a fresh upload — fetched once per id, not on every
-  // render, since the id itself never changes for the life of this page.
+  // Renamed: `jobs` in this component is the photos on screen, not the queue.
+  const { jobs: queueJobs, track } = useJobs();
+  /**
+   * Which queued job belongs to which photo on screen.
+   *
+   * A ref, not state: this is bookkeeping the render doesn't read, and putting
+   * it in state would re-run the resolver effect on every write it makes.
+   */
+  const pendingJobs = useRef<Record<string, { kind: "generate" | "refine"; localJobId: string }>>({});
+
+  /**
+   * Arriving with ?conversationId=... resumes that thread instead of starting
+   * a fresh upload — from History, or from the queue rail.
+   *
+   * Keyed on the id itself rather than on mount. Landing here from another
+   * route remounts the component, but clicking a queue row while already on
+   * this page only swaps the query string, and Next reuses the component for
+   * that — so an effect that ran once per mount would change the url and load
+   * nothing. Depending on the extracted string (not the `searchParams` object,
+   * whose identity churns on unrelated navigations) re-runs exactly when the
+   * conversation actually changes.
+   */
+  const resumeConversationId = searchParams.get("conversationId");
+
   useEffect(() => {
-    const conversationId = searchParams.get("conversationId");
+    const conversationId = resumeConversationId;
     if (!conversationId) return;
 
     let cancelled = false;
@@ -157,8 +179,69 @@ export function CleaningWorkspace<TModel extends string>({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resumes once for this page's lifetime; re-running on searchParams identity changes would refetch on every unrelated navigation
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the conversation id is the only input that should trigger a re-resume; modelOptions/updateJob are stable per render and listing them would refetch the thread for unrelated reasons
+  }, [resumeConversationId]);
+
+  /**
+   * Turns finished queue jobs back into what's on screen.
+   *
+   * The work now completes somewhere else entirely, so this is the seam where
+   * it comes home: a job this page queued settles, and the photo it belongs to
+   * gets its result — whether that took two seconds or outlived a navigation.
+   *
+   * `updateJob`/`appendMessage` are hoisted function declarations further down;
+   * this only runs after render, so they exist by the time it does.
+   */
+  useEffect(() => {
+    for (const queueJob of queueJobs) {
+      const pending = pendingJobs.current[queueJob.id];
+      if (!pending) continue;
+
+      if (queueJob.status === "completed" && queueJob.result) {
+        delete pendingJobs.current[queueJob.id];
+        const { outputUrl, conversationId, generationId } = queueJob.result;
+
+        if (pending.kind === "generate") {
+          updateJob(pending.localJobId, {
+            status: "done",
+            cleaned: outputUrl,
+            conversationId,
+            generationId,
+            // Empty, not seeded with the result: the initial clean already
+            // shows in the big viewer, so the thread starts blank and the
+            // suggestion hints (which only appear on an empty thread) are
+            // visible right away rather than after the first refinement.
+            history: [],
+          });
+        } else {
+          updateJob(pending.localJobId, { cleaned: outputUrl, generationId });
+          appendMessage(pending.localJobId, {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "Updated",
+            image: outputUrl ?? undefined,
+          });
+          setRefining(false);
+        }
+      } else if (queueJob.status === "failed" || queueJob.status === "cancelled") {
+        delete pendingJobs.current[queueJob.id];
+        const message =
+          queueJob.error?.message || (queueJob.status === "cancelled" ? "Cancelled" : "The model returned no image");
+
+        if (pending.kind === "generate") {
+          updateJob(pending.localJobId, { status: "failed", error: message });
+        } else {
+          appendMessage(pending.localJobId, {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: message,
+            retryInstruction: queueJob.request?.instruction || "",
+          });
+          setRefining(false);
+        }
+      }
+    }
+  }, [queueJobs]);
 
   if (!can(user, CLEANING_PERMISSION)) {
     return (
@@ -217,9 +300,13 @@ export function CleaningWorkspace<TModel extends string>({
   }
 
   /**
-   * One request per photo, in sequence. The model takes several seconds each
-   * and firing them together would risk tripping the provider's rate limit,
-   * so results stream in one at a time instead.
+   * Hands every photo to the queue and returns.
+   *
+   * Used to run them one at a time and wait: the request itself was the only
+   * record that work was happening, so firing them together risked the
+   * provider's rate limit and closing the tab lost everything. Now the worker
+   * owns both concerns — it decides how many run at once (WORKER_CONCURRENCY)
+   * and it keeps running whatever this page does next.
    */
   async function handleGenerate() {
     if (items.length === 0) return;
@@ -239,28 +326,23 @@ export function CleaningWorkspace<TModel extends string>({
     setSelectedId(queued[0]?.id ?? null);
 
     for (const item of items) {
-      updateJob(item.id, { status: "running" });
       try {
         const result = await cleanImage({
           image: item.dataUrl,
           model,
+          // So the queue rail can show this photo rather than a bare spinner.
+          preview: await makeThumbnail(item.dataUrl),
           ...(useCustomPrompt && customPrompt.trim() && { customPrompt: customPrompt.trim() }),
         });
 
-        if (result.status === "success" && result.result) {
-          updateJob(item.id, {
-            status: "done",
-            cleaned: result.result,
-            conversationId: result.conversationId,
-            generationId: result.generationId,
-            // Empty, not seeded with the result: the initial clean already
-            // shows in the big viewer, so the thread starts blank and the
-            // suggestion hints (which only appear on an empty thread) are
-            // visible right away rather than after the first refinement.
-            history: [],
-          });
+        if (result.status === "queued" && result.job) {
+          pendingJobs.current[result.job.id] = { kind: "generate", localJobId: item.id };
+          // Into the shared queue immediately, so the nav indicator shows it
+          // without waiting for the first socket update.
+          track(result.job);
+          updateJob(item.id, { status: "running" });
         } else {
-          updateJob(item.id, { status: "failed", error: result.message || "The model returned no image" });
+          updateJob(item.id, { status: "failed", error: result.message || "Could not queue this photo" });
         }
       } catch {
         updateJob(item.id, { status: "failed", error: "Could not reach the server" });
@@ -305,26 +387,41 @@ export function CleaningWorkspace<TModel extends string>({
     setError("");
 
     try {
+      // A completed job hands back a stored url, but the backend edits bytes,
+      // not links — so a result that hasn't been converted yet is fetched now.
+      // Same conversion resuming a thread from History already does.
+      let editable = job.cleaned;
+      if (!editable.startsWith("data:")) {
+        editable = await urlToDataUrl(editable);
+        updateJob(job.id, { cleaned: editable });
+      }
+
       const result = await refineImage({
-        refineImage: job.cleaned,
+        refineImage: editable,
         instruction: text.trim(),
         model,
         referenceImages: refsThisTurn,
         conversationId: job.conversationId,
         parentGenerationId: job.generationId,
+        // The image being refined, so the rail shows the piece rather than the
+        // photo this thread originally started from.
+        preview: await makeThumbnail(editable),
       });
 
-      if (result.status === "success" && result.result) {
-        updateJob(job.id, { cleaned: result.result, generationId: result.generationId });
-        appendMessage(job.id, { id: crypto.randomUUID(), role: "assistant", content: "Updated", image: result.result });
+      if (result.status === "queued" && result.job) {
+        pendingJobs.current[result.job.id] = { kind: "refine", localJobId: job.id };
+        track(result.job);
+        // `refining` stays true until the resolver effect sees this settle —
+        // the thread keeps its skeleton bubble in the meantime.
       } else {
         appendMessage(job.id, {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: result.message || "The model returned no image",
+          content: result.message || "Could not queue this change",
           retryInstruction: text.trim(),
           retryRefImages: refsThisTurn,
         });
+        setRefining(false);
       }
     } catch {
       appendMessage(job.id, {
@@ -334,7 +431,6 @@ export function CleaningWorkspace<TModel extends string>({
         retryInstruction: text.trim(),
         retryRefImages: refsThisTurn,
       });
-    } finally {
       setRefining(false);
     }
   }

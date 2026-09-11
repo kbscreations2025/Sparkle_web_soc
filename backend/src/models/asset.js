@@ -41,10 +41,34 @@ const assetSchema = new mongoose.Schema(
     mimeType: { type: String, required: true },
     sizeBytes: { type: Number, required: true },
 
-    // Null until something measures them — a gallery wanting to reserve layout
-    // space before the image loads is the reason to start populating these.
+    // Measured at upload, from the same decode that produces the thumbnail.
+    // Null on rows written before that existed, and on anything the decoder
+    // couldn't read — a gallery reserving layout space has to tolerate both.
     width: { type: Number, default: null },
     height: { type: Number, default: null },
+
+    /**
+     * A small WebP copy of the same picture, written beside the original at
+     * upload time. A grid of 24 tiles pulling full-size results is tens of
+     * megabytes; the same grid on thumbnails is under one.
+     *
+     * Null means there isn't one — a row written before this existed, or a
+     * resize that failed. Every reader falls back to the original, so a null
+     * here costs bandwidth and nothing else.
+     */
+    thumbnail: {
+      type: new mongoose.Schema(
+        {
+          s3Key: { type: String, required: true },
+          mimeType: { type: String, required: true },
+          sizeBytes: { type: Number, required: true },
+          width: { type: Number, required: true },
+          height: { type: Number, required: true },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
 
     /** sha256 of the bytes. Detects a re-upload of the same file, and proves S3 still holds what we wrote. */
     checksum: { type: String, required: true },

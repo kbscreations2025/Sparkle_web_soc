@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import Image from "next/image";
 import { Download, Paperclip, Send, Loader2 } from "lucide-react";
-import { downloadDataUrl } from "@/lib/image";
+import { downloadImage } from "@/lib/image";
 import { cn } from "@/lib/utils";
 
 /**
@@ -61,7 +61,7 @@ export function RefinePanel<TModel extends string>({
           <Image src={original.src} alt="Original" fill sizes="64px" className="object-cover" />
           <button
             type="button"
-            onClick={() => downloadDataUrl(original.src, "original.jpg")}
+            onClick={() => downloadImage(original.src, "original.jpg")}
             title="Download the original"
             className="absolute bottom-0.5 right-0.5 rounded-full bg-black/60 p-1 text-white/80 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
           >

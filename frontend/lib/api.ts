@@ -23,7 +23,9 @@ export type ActiveSession = {
 };
 
 export type ApiResult<T = Record<string, never>> = {
-  status: "success" | "otp_required" | "session_limit_reached" | "error";
+  // "queued" is what the generation routes answer with now: the work was
+  // accepted onto the job queue, not finished (see fetchJobs/JobsProvider).
+  status: "success" | "queued" | "otp_required" | "session_limit_reached" | "error";
   message?: string;
 } & T;
 
@@ -349,15 +351,99 @@ export function toModelOptions<T extends { id: string; label: string; quality: s
   return models.map((entry) => ({ value: entry.id, label: entry.label, quality: entry.quality }));
 }
 
-export type CleaningResult = {
-  /** The cleaned image, as a data URI ready to render. */
-  result?: string;
-  model?: string;
-  conversationId?: string | null;
-  generationId?: string | null;
+// ── background jobs ─────────────────────────────────────────────────────────
+
+export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+/**
+ * One queued piece of work. Image tools no longer answer with a finished
+ * picture — they answer with one of these, and the result arrives later over
+ * the socket (or is found again by `fetchJobs` after a reload).
+ */
+export type QueuedJob = {
+  id: string;
+  type: string;
+  tool: string;
+  status: JobStatus;
+  /**
+   * 0–100, advanced every second while a run is in flight — not only at
+   * phase boundaries. During the provider call it is a prediction, since no
+   * provider reports real progress; see `estimatedMs`.
+   */
+  progress: number;
+  /** Which stage the run is in — "preparing", "generating", "saving", "done". Null on older jobs. */
+  phase: string | null;
+  /** What this run was predicted to cost, fixed when it started. What "time left" is computed against. */
+  estimatedMs: number | null;
+  /** What it actually cost. Set once it finishes. */
+  durationMs: number | null;
+  /**
+   * A small thumbnail of the input, so the queue can show which photo is
+   * being worked on. Null when the client didn't manage to make one.
+   */
+  preview: string | null;
+  /** What was asked for. Never the images themselves — those stay server-side. */
+  request: {
+    model?: string;
+    modelLabel?: string;
+    quality?: string;
+    provider?: string;
+    isRefinement?: boolean;
+    instruction?: string | null;
+    customPrompt?: string | null;
+    referenceCount?: number;
+    conversationId?: string | null;
+  };
+  result: {
+    generationId: string;
+    conversationId: string;
+    /** Where the finished image is stored. Render this; fetch bytes only to edit further. */
+    outputUrl: string | null;
+    model?: string;
+    modelLabel?: string;
+  } | null;
+  error: { message: string; code: string | null } | null;
+  attempts: number;
+  maxAttempts: number;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 };
 
-/** First pass: an uploaded photo in, a cleaned one out. */
+/** Answer shape of every route that queues work instead of doing it inline. */
+export type QueuedResult = { job?: QueuedJob };
+
+/**
+ * The caller's own jobs. Defaults to the live ones, which is the question a
+ * freshly-loaded page is really asking: "is anything of mine still running?"
+ * This is what makes a reload lossless — nothing is remembered client-side.
+ */
+export function fetchJobs(params: { status?: string; tool?: string; limit?: number } = {}) {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.tool) query.set("tool", params.tool);
+  if (params.limit) query.set("limit", String(params.limit));
+  const suffix = query.toString() ? `?${query}` : "";
+  return apiRequest<{ jobs?: QueuedJob[]; activeCount?: number }>(`/api/jobs${suffix}`);
+}
+
+export function fetchJob(id: string) {
+  return apiRequest<{ job?: QueuedJob }>(`/api/jobs/${id}`);
+}
+
+/** Only works while a job is still waiting — a started one can't be recalled. */
+export function cancelJob(id: string) {
+  return apiRequest<{ job?: QueuedJob }>(`/api/jobs/${id}`, { method: "DELETE" });
+}
+
+// ── image cleaning calls ────────────────────────────────────────────────────
+
+/**
+ * First pass: an uploaded photo in, a queued job out.
+ *
+ * Answers in milliseconds with a job id rather than waiting out the model, so
+ * closing or reloading the tab no longer throws the work away.
+ */
 export function cleanImage(body: {
   /** Data URI. Compressed in the browser before it gets here. */
   image: string;
@@ -367,14 +453,16 @@ export function cleanImage(body: {
   customPrompt?: string;
   /** Set to keep a retry in the same thread as the run it follows. */
   conversationId?: string | null;
+  /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
+  preview?: string | null;
 }) {
-  return apiRequest<CleaningResult>("/api/cleaning", {
+  return apiRequest<QueuedResult>("/api/cleaning", {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-/** A follow-up on a result already produced — "make the gold warmer". */
+/** A follow-up on a result already produced — "make the gold warmer". Also queued. */
 export function refineImage(body: {
   /** The image being refined, as a data URI. */
   refineImage: string;
@@ -385,8 +473,10 @@ export function refineImage(body: {
   referenceImages?: string[];
   conversationId?: string | null;
   parentGenerationId?: string | null;
+  /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
+  preview?: string | null;
 }) {
-  return apiRequest<CleaningResult>("/api/cleaning", {
+  return apiRequest<QueuedResult>("/api/cleaning", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -427,7 +517,15 @@ export function chatEdit(body: {
 
 // ── history ──────────────────────────────────────────────────────────────────
 
-export type HistoryOutput = { assetId: string; url: string; width: number | null; height: number | null };
+export type HistoryOutput = {
+  assetId: string;
+  /** Full-size original. What a download, a lightbox, or resuming the conversation must use. */
+  url: string;
+  /** Small copy for grid tiles. Already falls back to `url` server-side, so it is never empty. */
+  thumbnailUrl: string;
+  width: number | null;
+  height: number | null;
+};
 
 export type HistoryItem = {
   id: string;
@@ -442,7 +540,7 @@ export type HistoryItem = {
   outputs: HistoryOutput[];
 };
 
-export type ConversationAsset = { url: string; role: string };
+export type ConversationAsset = { url: string; thumbnailUrl: string; role: string };
 export type ConversationTurn = {
   id: string;
   sequence: number;
