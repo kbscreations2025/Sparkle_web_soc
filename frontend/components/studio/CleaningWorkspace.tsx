@@ -9,6 +9,7 @@ import { ModelSelector } from "@/components/studio/ModelSelector";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatMessages } from "@/components/studio/ChatMessages";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
+import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
 import { Lightbox } from "@/components/studio/Lightbox";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
 import { ToolHeader } from "@/components/studio/ToolHeader";
@@ -57,13 +58,9 @@ type ModelOption = { id: string; label: string; quality: string; description: st
  * instructions for every model, from `customPrompt` or its own default.
  */
 export function CleaningWorkspace<TModel extends string>({
-  title,
-  description,
   modelOptions,
   defaultModel,
 }: {
-  title: string;
-  description: string;
   modelOptions: readonly (ModelOption & { id: TModel })[];
   defaultModel: TModel;
 }) {
@@ -457,7 +454,7 @@ export function CleaningWorkspace<TModel extends string>({
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-      <ToolHeader title={title} description={description} onReset={showResults ? startOver : undefined} />
+      <ToolHeader onReset={showResults ? startOver : undefined} />
 
       {error && (
         <p className="shrink-0 border-b border-error/20 bg-error/[0.08] px-5 py-2 text-xs text-error">{error}</p>
@@ -518,90 +515,91 @@ export function CleaningWorkspace<TModel extends string>({
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
-          {/* ── chat rail ── */}
-          <div className="flex w-[300px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] xl:w-[340px]">
-            {jobs.length > 1 && (
-              <ul className="grid shrink-0 grid-cols-5 gap-1.5 border-b border-white/[0.06] p-3">
-                {jobs.map((job) => (
-                  <li key={job.id}>
-                    <button
-                      onClick={() => {
-                        setSelectedId(job.id);
-                        setSelectedView(null);
-                      }}
-                      className={cn(
-                        "relative block aspect-square w-full overflow-hidden rounded-lg border transition-colors",
-                        job.id === selectedId ? "border-gold/50" : "border-white/10 hover:border-gold/25"
-                      )}
-                    >
-                      <Image src={job.cleaned ?? job.original} alt={job.name} fill sizes="60px" className="object-cover" />
-                      {job.status !== "done" && (
-                        <span className="absolute inset-0 flex items-center justify-center bg-black/50">
-                          {job.status === "running" && <Loader2 size={12} className="animate-spin text-white" />}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+        <StudioSplitLayout
+          chatRail={
+            <>
+              {jobs.length > 1 && (
+                <ul className="grid shrink-0 grid-cols-5 gap-1.5 border-b border-white/[0.06] p-3">
+                  {jobs.map((job) => (
+                    <li key={job.id}>
+                      <button
+                        onClick={() => {
+                          setSelectedId(job.id);
+                          setSelectedView(null);
+                        }}
+                        className={cn(
+                          "relative block aspect-square w-full overflow-hidden rounded-lg border transition-colors",
+                          job.id === selectedId ? "border-gold/50" : "border-white/10 hover:border-gold/25"
+                        )}
+                      >
+                        <Image src={job.cleaned ?? job.original} alt={job.name} fill sizes="60px" className="object-cover" />
+                        {job.status !== "done" && (
+                          <span className="absolute inset-0 flex items-center justify-center bg-black/50">
+                            {job.status === "running" && <Loader2 size={12} className="animate-spin text-white" />}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
-            <ChatMessages
-              history={selected?.history ?? []}
-              busy={refining || generatingSelected}
-              onSelectResult={setSelectedView}
-              onRetry={retry}
-              hints={selected?.cleaned && selected.history.length === 0 ? REFINE_SUGGESTIONS : undefined}
-              onHint={(hint) => handleRefine(hint)}
-            />
-
-            <div className="shrink-0 border-t border-white/[0.06] p-3">
-              <ChatInputBar
-                value={chatInput}
-                onChange={setChatInput}
-                onSend={() => handleRefine(chatInput)}
-                busy={refining || !selected?.cleaned}
-                attachments={attachments}
-                onOpenAttachment={setPreviewAttachment}
-                onRemoveAttachment={removeAttachment}
-                onAttachFiles={addReferenceImages}
-                onPasteImage={(file) => addReferenceImages([file])}
-                modelOptions={modelOptionsForInput}
-                modelValue={model}
-                onModelChange={setModel}
-                placeholder={selected?.cleaned ? "Describe a change…" : "Waiting for the first result…"}
+              <ChatMessages
+                history={selected?.history ?? []}
+                busy={refining || generatingSelected}
+                onSelectResult={setSelectedView}
+                onRetry={retry}
+                hints={selected?.cleaned && selected.history.length === 0 ? REFINE_SUGGESTIONS : undefined}
+                onHint={(hint) => handleRefine(hint)}
               />
-            </div>
-          </div>
 
-          {/* ── stage ── */}
-          <section className="relative flex-1 overflow-hidden">
-            <GenerationStage
-              src={selectedView ?? selected?.cleaned ?? null}
-              busy={generatingSelected}
-              busyLabel="Generating…"
-              emptyLabel={selected?.error ?? "Nothing yet"}
-              downloadName={selected ? `cleaned-${selected.name}` : undefined}
-              // Hidden while the annotation toolbar occupies the same corner.
-              onExpand={annotating ? undefined : setLightboxSrc}
-              onAnnotate={
-                annotating || !selected?.cleaned ? undefined : (src) => setAnnotating({ src, target: "stage" })
-              }
-            />
-
-            {annotating && annotating.target === "stage" && selected && (
-              <AnnotationOverlay
-                src={annotating.src}
-                onAttach={(marked) => {
-                  setAnnotatedPhoto(marked);
-                  setAnnotating(null);
-                }}
-                onClose={() => setAnnotating(null)}
+              <div className="shrink-0 border-t border-white/[0.06] p-3">
+                <ChatInputBar
+                  value={chatInput}
+                  onChange={setChatInput}
+                  onSend={() => handleRefine(chatInput)}
+                  busy={refining || !selected?.cleaned}
+                  attachments={attachments}
+                  onOpenAttachment={setPreviewAttachment}
+                  onRemoveAttachment={removeAttachment}
+                  onAttachFiles={addReferenceImages}
+                  onPasteImage={(file) => addReferenceImages([file])}
+                  modelOptions={modelOptionsForInput}
+                  modelValue={model}
+                  onModelChange={setModel}
+                  placeholder={selected?.cleaned ? "Describe a change…" : "Waiting for the first result…"}
+                />
+              </div>
+            </>
+          }
+          stage={
+            <>
+              <GenerationStage
+                src={selectedView ?? selected?.cleaned ?? null}
+                busy={generatingSelected}
+                busyLabel="Generating…"
+                emptyLabel={selected?.error ?? "Nothing yet"}
+                downloadName={selected ? `cleaned-${selected.name}` : undefined}
+                // Hidden while the annotation toolbar occupies the same corner.
+                onExpand={annotating ? undefined : setLightboxSrc}
+                onAnnotate={
+                  annotating || !selected?.cleaned ? undefined : (src) => setAnnotating({ src, target: "stage" })
+                }
               />
-            )}
-          </section>
-        </div>
+
+              {annotating && annotating.target === "stage" && selected && (
+                <AnnotationOverlay
+                  src={annotating.src}
+                  onAttach={(marked) => {
+                    setAnnotatedPhoto(marked);
+                    setAnnotating(null);
+                  }}
+                  onClose={() => setAnnotating(null)}
+                />
+              )}
+            </>
+          }
+        />
       )}
 
       {/* Reference annotation replaces the preview it was opened from, so it

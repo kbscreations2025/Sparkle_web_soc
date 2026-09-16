@@ -4,10 +4,23 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { io } from "socket.io-client";
-import { ChevronDown, Copy, Download, Loader2, MessageCircle, Trash2, Users } from "lucide-react";
+import {
+  ChevronDown,
+  Copy,
+  Download,
+  History,
+  Loader2,
+  type LucideIcon,
+  MessageCircle,
+  Newspaper,
+  SlidersHorizontal,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { BACKEND_URL, deleteHistoryItem, fetchHistory, MODEL_LABELS, type HistoryItem } from "@/lib/api";
 import { downloadImage } from "@/lib/image";
 import { conversationHref, TOOL_LABELS, TOOLS, workspacePathFor } from "@/lib/nav";
+import { usePageToolbar } from "@/lib/page-toolbar-context";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -15,7 +28,7 @@ import { HistoryLightbox } from "@/components/studio/HistoryLightbox";
 
 const HISTORY_PERMISSION = "result.read.own";
 
-const TOOL_FILTERS = [{ id: "all", label: "All tools" }, ...TOOLS.map((t) => ({ id: t.id, label: t.label }))];
+const TOOL_OPTIONS = TOOLS.map((t) => ({ id: t.id, label: t.label }));
 
 /**
  * One fixed colour per tool, so the same tool always reads the same colour at
@@ -89,12 +102,6 @@ function useResponsiveColumns() {
   return columns;
 }
 
-function cacheKeyFor(tool: string, wholeTeam: boolean) {
-  return `${tool}:${wholeTeam ? "team" : "own"}`;
-}
-
-type CacheEntry = { items: HistoryItem[]; nextCursor: string | null; canReadTeam: boolean };
-
 export default function HistoryPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -102,9 +109,17 @@ export default function HistoryPage() {
   const searchParams = useSearchParams();
 
   // Filters live in the URL — shareable, and survive back/forward — hydrated
-  // once from whatever query string this page was opened with.
-  const [tool, setTool] = useState(() => searchParams.get("tool") || "all");
-  const [wholeTeam, setWholeTeam] = useState(() => searchParams.get("scope") === "team");
+  // once from whatever query string this page was opened with. Both are
+  // client-side filters over one fetched dataset (see below): empty means no
+  // filter, checking one or more narrows the grid down to just those.
+  const [selectedTools, setSelectedTools] = useState<string[]>(() => {
+    const raw = searchParams.get("tools");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  });
+  const [selectedMembers, setSelectedMembers] = useState<string[]>(() => {
+    const raw = searchParams.get("members");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  });
 
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,92 +129,76 @@ export default function HistoryPage() {
   const [selected, setSelected] = useState<HistoryItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Every (tool, scope) combination already fetched this session, so flipping
-  // a filter back and forth never re-hits the network for pages already seen.
-  const cacheRef = useRef(new Map<string, CacheEntry>());
-  // Mirrors `tool`/`wholeTeam` for the socket handler below, which is set up
-  // once and must not reconnect every time a filter changes.
-  const filterRef = useRef({ tool, wholeTeam });
-  filterRef.current = { tool, wholeTeam };
-
   const columns = useResponsiveColumns();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  function updateFilters(nextTool: string, nextWholeTeam: boolean) {
-    setTool(nextTool);
-    setWholeTeam(nextWholeTeam);
+  function updateFilters(nextTools: string[], nextMembers: string[]) {
+    setSelectedTools(nextTools);
+    setSelectedMembers(nextMembers);
     const params = new URLSearchParams(searchParams.toString());
-    if (nextTool === "all") params.delete("tool");
-    else params.set("tool", nextTool);
-    if (nextWholeTeam) params.set("scope", "team");
-    else params.delete("scope");
+    if (nextTools.length === 0) params.delete("tools");
+    else params.set("tools", nextTools.join(","));
+    if (nextMembers.length === 0) params.delete("members");
+    else params.set("members", nextMembers.join(","));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  // Serves from the in-memory cache instantly when this (tool, scope) has
-  // already been fetched; otherwise fetches page one. Guarded by `cancelled`
-  // so a fast filter switch can't have an older response clobber a newer one.
+  // One fetch, once — every tool, every teammate the server will give us
+  // (the server only honours `scope: "team"` for someone who actually holds
+  // `result.read.others`, falling back to their own results otherwise, so
+  // it's always safe to ask). Which tool and which people show up is a
+  // client-side filter over this one dataset, not a re-fetch.
   useEffect(() => {
-    const key = cacheKeyFor(tool, wholeTeam);
-    const cached = cacheRef.current.get(key);
-    if (cached) {
-      setItems(cached.items);
-      setNextCursor(cached.nextCursor);
-      setCanReadTeam(cached.canReadTeam);
-      setLoading(false);
-      return;
-    }
-
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const res = await fetchHistory({ tool, scope: wholeTeam ? "team" : "own" });
+      const res = await fetchHistory({ scope: "team" });
       if (cancelled) return;
       if (res.status === "success") {
-        const nextItems = res.items ?? [];
-        const cursor = res.nextCursor ?? null;
-        const team = Boolean(res.canReadTeam);
-        setItems(nextItems);
-        setNextCursor(cursor);
-        setCanReadTeam(team);
-        cacheRef.current.set(key, { items: nextItems, nextCursor: cursor, canReadTeam: team });
+        setItems(res.items ?? []);
+        setNextCursor(res.nextCursor ?? null);
+        setCanReadTeam(Boolean(res.canReadTeam));
       }
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [tool, wholeTeam]);
+  }, []);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
-    const res = await fetchHistory({ tool, before: nextCursor, scope: wholeTeam ? "team" : "own" });
+    const res = await fetchHistory({ before: nextCursor, scope: "team" });
     if (res.status === "success") {
-      const key = cacheKeyFor(tool, wholeTeam);
-      setItems((current) => {
-        const merged = [...current, ...(res.items ?? [])];
-        const existing = cacheRef.current.get(key);
-        cacheRef.current.set(key, {
-          items: merged,
-          nextCursor: res.nextCursor ?? null,
-          canReadTeam: existing?.canReadTeam ?? canReadTeam,
-        });
-        return merged;
-      });
+      setItems((current) => [...current, ...(res.items ?? [])]);
       setNextCursor(res.nextCursor ?? null);
     }
     setLoadingMore(false);
-  }, [tool, wholeTeam, nextCursor, loadingMore, canReadTeam]);
+  }, [nextCursor, loadingMore]);
+
+  // Everyone who has shown up in a fetch so far — what the checkbox list
+  // offers. Grows as more pages load; never shrinks when a filter narrows.
+  const knownMembers = useMemo(() => Array.from(new Set(items.map((item) => item.userName))).sort(), [items]);
+
+  const visibleItems = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          (selectedTools.length === 0 || selectedTools.includes(item.tool)) &&
+          (selectedMembers.length === 0 || selectedMembers.includes(item.userName))
+      ),
+    [items, selectedTools, selectedMembers]
+  );
 
   // Rows of `columns` items each — virtualized by row, not by card, so a grid
   // (not a single-column list) still only mounts what's on screen.
   const rows = useMemo(() => {
     const chunks: HistoryItem[][] = [];
-    for (let i = 0; i < items.length; i += columns) chunks.push(items.slice(i, i + columns));
+    for (let i = 0; i < visibleItems.length; i += columns) chunks.push(visibleItems.slice(i, i + columns));
     return chunks;
-  }, [items, columns]);
+  }, [visibleItems, columns]);
 
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
@@ -219,16 +218,10 @@ export default function HistoryPage() {
     loadMore();
   }, [virtualRows, rows.length, loadMore]);
 
-  const totalImages = useMemo(() => items.reduce((sum, item) => sum + item.outputs.length, 0), [items]);
-
-  /** Removes one id from every cached filter view, not just the one on screen — so deleting in "All tools" doesn't resurrect it if the user later switches to "Image Cleaning". */
-  function purgeFromAllCaches(id: string) {
-    for (const [key, entry] of cacheRef.current) {
-      if (entry.items.some((row) => row.id === id)) {
-        cacheRef.current.set(key, { ...entry, items: entry.items.filter((row) => row.id !== id) });
-      }
-    }
-  }
+  const totalImages = useMemo(
+    () => visibleItems.reduce((sum, item) => sum + item.outputs.length, 0),
+    [visibleItems]
+  );
 
   const handleDelete = useCallback(async (item: HistoryItem) => {
     setDeletingId(item.id);
@@ -236,7 +229,6 @@ export default function HistoryPage() {
     setDeletingId(null);
     if (res.status === "success") {
       setItems((current) => current.filter((row) => row.id !== item.id));
-      purgeFromAllCaches(item.id);
       setSelected((current) => (current?.id === item.id ? null : current));
     }
   }, []);
@@ -262,19 +254,9 @@ export default function HistoryPage() {
 
     const socket = io(BACKEND_URL, { withCredentials: true });
     socket.on("history:generation", (item: HistoryItem) => {
-      const matchesTool = (t: string) => t === "all" || t === item.tool;
-
-      for (const [key, entry] of cacheRef.current) {
-        const [keyTool, keyScope] = key.split(":");
-        if (keyScope !== "own" || !matchesTool(keyTool)) continue;
-        if (entry.items.some((row) => row.id === item.id)) continue;
-        cacheRef.current.set(key, { ...entry, items: [item, ...entry.items] });
-      }
-
-      const current = filterRef.current;
-      if (!current.wholeTeam && matchesTool(current.tool)) {
-        setItems((rows) => (rows.some((row) => row.id === item.id) ? rows : [item, ...rows]));
-      }
+      // Always prepended to the one dataset — whether it's currently *shown*
+      // is up to `visibleItems`, which reacts to it the moment it lands.
+      setItems((current) => (current.some((row) => row.id === item.id) ? current : [item, ...current]));
     });
 
     return () => {
@@ -282,7 +264,63 @@ export default function HistoryPage() {
     };
   }, [user?.user_id]);
 
-  if (!can(user, HISTORY_PERMISSION)) {
+  const hasAccess = can(user, HISTORY_PERMISSION);
+
+  const filterControls = hasAccess ? (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        {/* A segmented toggle, not two separate pills — one bordered group,
+            squared off, split by a single divider. History is the only tab
+            wired up; Marketing Kits is a placeholder until it has somewhere
+            to go. The image count rides on its corner as a badge instead of
+            its own pill. */}
+        <div className="relative">
+          <div className="flex items-center overflow-hidden rounded-md border border-white/10">
+            <button
+              type="button"
+              aria-pressed="true"
+              className="flex items-center gap-1.5 border-r border-white/10 bg-gold/[0.08] px-3 py-1.5 text-xs font-medium text-gold"
+            >
+              <History size={12} /> History
+            </button>
+            <button
+              type="button"
+              disabled
+              title="Coming soon"
+              aria-pressed="false"
+              className="flex cursor-not-allowed items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-faint opacity-60"
+            >
+              <Newspaper size={12} /> Marketing Kits
+            </button>
+          </div>
+          {totalImages > 0 && (
+            <span
+              aria-label={`${totalImages} images`}
+              className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410] shadow-sm"
+            >
+              {totalImages}
+            </span>
+          )}
+        </div>
+        {canReadTeam && (
+          <MemberFilter
+            members={knownMembers}
+            selected={selectedMembers}
+            onChange={(next) => updateFilters(selectedTools, next)}
+          />
+        )}
+      </div>
+      <ToolFilter selected={selectedTools} onChange={(next) => updateFilters(next, selectedMembers)} />
+    </>
+  ) : null;
+
+  // From `md` up these render in the header, replacing the breadcrumb —
+  // there's no room for both there, and the filters are the more useful of
+  // the two on this page. Below `md` the header has no room for them either,
+  // so they stay in the page body instead (see the `md:hidden` bar below).
+  usePageToolbar(filterControls);
+
+  if (!hasAccess) {
     return (
       <div className="flex-1 overflow-y-auto px-8 py-8">
         <p className="text-sm text-muted">History isn&apos;t enabled for your account. Ask an admin to grant you access.</p>
@@ -292,30 +330,14 @@ export default function HistoryPage() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-3 md:px-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-gold/20 bg-gold/[0.08] px-3 py-1.5 text-xs font-medium text-gold">History</span>
-          <span className="rounded-full border border-white/10 px-3 py-1.5 text-xs text-faint">{totalImages} images</span>
-          {canReadTeam && (
-            <button
-              type="button"
-              onClick={() => updateFilters(tool, !wholeTeam)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                wholeTeam ? "border-gold/30 bg-gold/10 text-gold" : "border-white/10 text-faint hover:text-cream"
-              )}
-            >
-              <Users size={12} /> Whole team
-            </button>
-          )}
-        </div>
-        <ToolFilter value={tool} onChange={(next) => updateFilters(next, wholeTeam)} />
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-3 md:hidden">
+        {filterControls}
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 md:px-5 md:py-5 lg:px-6">
         {loading ? (
           <SkeletonGrid rows={3} />
-        ) : items.length === 0 ? (
+        ) : visibleItems.length === 0 ? (
           <p className="px-2 py-10 text-center text-sm text-faint">Nothing generated yet.</p>
         ) : (
           <div style={{ position: "relative", height: rowVirtualizer.getTotalSize() }}>
@@ -369,22 +391,156 @@ export default function HistoryPage() {
   );
 }
 
-function ToolFilter({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+type FilterOption = { id: string; label: string };
+
+/**
+ * Shared shape for both filters here: an icon+label trigger carrying a
+ * selection-count badge, and a panel with an "All" toggle above one checkbox
+ * per option. Nothing checked means no filter — everything. Checking one or
+ * more narrows the grid down to just those.
+ */
+function CheckboxFilter({
+  icon: Icon,
+  label,
+  emptyLabel,
+  options,
+  selected,
+  onChange,
+}: {
+  icon: LucideIcon;
+  label: string;
+  emptyLabel: string;
+  options: FilterOption[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((v) => v !== id) : [...selected, id]);
+  }
+
+  const allIds = options.map((option) => option.id);
+
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="appearance-none rounded-full border border-white/10 bg-surface-raised py-1.5 pl-3 pr-8 text-xs font-medium text-cream outline-none transition-colors hover:border-white/20"
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className="flex items-center gap-1.5 rounded-full border border-white/10 bg-surface-raised py-1.5 pl-3 pr-2.5 text-xs font-medium text-cream transition-colors hover:border-white/20"
       >
-        {TOOL_FILTERS.map((entry) => (
-          <option key={entry.id} value={entry.id}>
-            {entry.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-faint" />
+        <Icon size={12} className="text-faint" />
+        <span>{label}</span>
+        <ChevronDown size={13} className="text-faint" />
+      </button>
+
+      {/* What's checked, not what they are — the list itself already shows
+          every option. */}
+      {selected.length > 0 && (
+        <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410] shadow-sm">
+          {selected.length}
+        </span>
+      )}
+
+      {open && (
+        <div
+          role="listbox"
+          aria-multiselectable="true"
+          className="absolute right-0 top-full z-10 mt-2 w-48 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg"
+        >
+          {options.length === 0 ? (
+            <p className="px-3 py-2.5 text-[11px] text-faint">{emptyLabel}</p>
+          ) : (
+            <div className="max-h-64 overflow-y-auto py-1">
+              <label className="flex cursor-pointer items-center gap-2 border-b border-white/5 px-3 py-1.5 text-xs font-medium text-cream hover:bg-white/[0.05]">
+                <input
+                  type="checkbox"
+                  checked={selected.length === allIds.length}
+                  ref={(el) => {
+                    if (el) el.indeterminate = selected.length > 0 && selected.length < allIds.length;
+                  }}
+                  // All checked → clear; anything else (none or some) → all.
+                  onChange={() => onChange(selected.length === allIds.length ? [] : allIds)}
+                  style={{ accentColor: "var(--color-gold)" }}
+                />
+                All
+              </label>
+              {options.map((option) => (
+                <label
+                  key={option.id}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(option.id)}
+                    onChange={() => toggle(option.id)}
+                    style={{ accentColor: "var(--color-gold)" }}
+                  />
+                  <span className="truncate">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+function ToolFilter({ selected, onChange }: { selected: string[]; onChange: (next: string[]) => void }) {
+  return (
+    <CheckboxFilter
+      icon={SlidersHorizontal}
+      label="Tools"
+      emptyLabel="No tools to filter by."
+      options={TOOL_OPTIONS}
+      selected={selected}
+      onChange={onChange}
+    />
+  );
+}
+
+/** Who to show results for — a checkbox per real name the data has reported, never a generic "Whole team" standing in for actual people. */
+function MemberFilter({
+  members,
+  selected,
+  onChange,
+}: {
+  members: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const options = useMemo(() => members.map((name) => ({ id: name, label: name })), [members]);
+  return (
+    <CheckboxFilter
+      icon={Users}
+      label="Members"
+      emptyLabel="No results to filter by yet."
+      options={options}
+      selected={selected}
+      onChange={onChange}
+    />
   );
 }
 
@@ -467,12 +623,6 @@ const HistoryTile = memo(
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
         />
 
-        {item.outputs.length > 1 && (
-          <span className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:bottom-2 md:right-2 md:text-[10px]">
-            <Copy size={9} className="md:h-2.5 md:w-2.5" /> {item.outputs.length}
-          </span>
-        )}
-
         <div className="absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2">
           <span
             className="max-w-[55%] truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
@@ -480,7 +630,12 @@ const HistoryTile = memo(
           >
             {toolLabel}
           </span>
-          <div className="flex gap-1 md:gap-1.5">
+          <div className="flex items-center gap-1 md:gap-1.5">
+            {item.outputs.length > 1 && (
+              <span className="flex h-5 items-center gap-0.5 rounded-full bg-black/55 px-1.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:h-6 md:text-[10px]">
+                <Copy size={9} className="md:h-2.5 md:w-2.5" /> {item.outputs.length}
+              </span>
+            )}
             {canContinue && (
               <button
                 type="button"

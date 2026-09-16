@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  * is up, the theme toggle and sign out. Shared so the dashboard and the
  * console present the same control in the same place.
  */
-export function AccountMenu() {
+export function AccountMenu({ avatarClassName }: { avatarClassName?: string } = {}) {
   const { user, logout, loggingOut, liveConnected } = useAuth();
   const { theme, toggle: toggleTheme } = useTheme();
   const [open, setOpen] = useState(false);
@@ -66,7 +66,10 @@ export function AccountMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         title={user?.name ?? "Account"}
-        className="w-8 h-8 rounded-full bg-gold/10 border border-gold/15 flex items-center justify-center hover:border-gold/40 transition-colors"
+        className={cn(
+          "w-8 h-8 rounded-full bg-gold/10 border border-gold/15 flex items-center justify-center hover:border-gold/40 transition-colors shrink-0",
+          avatarClassName
+        )}
       >
         <span className="text-gold text-[11px] font-semibold">
           {user?.name?.[0]?.toUpperCase() ?? "?"}

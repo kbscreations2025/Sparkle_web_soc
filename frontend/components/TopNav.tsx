@@ -6,7 +6,9 @@ import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 import { useNavItems } from "@/lib/nav";
+import { usePageToolbarValue } from "@/lib/page-toolbar-context";
 import { NavBar, NavLogo } from "@/components/nav/NavBar";
+import { Breadcrumbs } from "@/components/nav/Breadcrumbs";
 import { AccountMenu } from "@/components/nav/AccountMenu";
 import { QueueIndicator } from "@/components/studio/QueueIndicator";
 import { cn } from "@/lib/utils";
@@ -26,6 +28,9 @@ export function TopNav() {
   const drawerRef = useRef<HTMLDivElement>(null);
   // Only the tools this person was granted.
   const navItems = useNavItems();
+  // Set by pages that need controls of their own here instead of the route
+  // trail — e.g. History's filters, which replace it rather than sit beside it.
+  const toolbar = usePageToolbarValue();
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -112,6 +117,15 @@ export function TopNav() {
         </AnimatePresence>
       </div>
 
+      {/* From `md` up the logo lives in the sidebar, so this bar would
+          otherwise sit empty on the left — the route trail fills it, unless
+          the page has put its own controls here instead. */}
+      {toolbar ? (
+        <div className="hidden min-w-0 flex-1 items-center gap-2 md:flex">{toolbar}</div>
+      ) : (
+        <Breadcrumbs />
+      )}
+
       {/* ml-auto holds the cluster right wherever the nav row isn't filling the
           gap — on phones, and at xl where the row is absolutely positioned. */}
       <div className="flex items-center gap-1.5 md:gap-2.5 shrink-0 ml-auto">
@@ -122,10 +136,12 @@ export function TopNav() {
           <QueueIndicator />
         </span>
 
-        <span className="flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full bg-surface-raised/80 backdrop-blur-md border border-gold/25 shadow-[0_0px_8px_rgba(0,0,0,0.35)]">
+        {/* Credits and the account avatar as one pill, not two — a divider
+            between them instead of a gap that reads as unrelated controls. */}
+        <div className="flex items-center gap-2 pl-1.5 pr-1.5 py-1 rounded-full bg-surface-raised/80 backdrop-blur-md border border-gold/25">
           <span
             aria-hidden
-            className="relative w-[22px] h-[22px] rounded-full flex items-center justify-center shadow-[0_1px_3px_rgba(0,0,0,0.4)]"
+            className="relative w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.4)]"
             style={{ background: "repeating-conic-gradient(var(--color-gold-dim) 0deg 6deg, var(--color-gold-bright) 6deg 12deg)" }}
           >
             <span
@@ -136,9 +152,11 @@ export function TopNav() {
             </span>
           </span>
           <span className="text-xs font-semibold tabular-nums leading-none text-gold-shine">100</span>
-        </span>
 
-        <AccountMenu />
+          <span aria-hidden className="w-px h-5 shrink-0 bg-gold/20" />
+
+          <AccountMenu avatarClassName="w-7 h-7" />
+        </div>
       </div>
     </NavBar>
   );

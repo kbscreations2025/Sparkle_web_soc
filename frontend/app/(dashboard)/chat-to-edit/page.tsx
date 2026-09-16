@@ -6,6 +6,7 @@ import { ImagePlus, Upload } from "lucide-react";
 import { ChatMessages } from "@/components/studio/ChatMessages";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
+import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
 import { Lightbox } from "@/components/studio/Lightbox";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
 import { ToolHeader } from "@/components/studio/ToolHeader";
@@ -278,20 +279,15 @@ export default function ChatToEditPage() {
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-      <ToolHeader
-        title="Chat to Edit"
-        description="Attach a jewellery image in chat · edit it conversationally, one message at a time"
-        onReset={started ? resetAll : undefined}
-        resetLabel="New chat"
-      />
+      <ToolHeader onReset={started ? resetAll : undefined} resetLabel="New chat" />
 
       {error && (
         <p className="shrink-0 border-b border-error/20 bg-error/[0.08] px-5 py-2 text-xs text-error">{error}</p>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* ── chat rail ── */}
-        <div className="flex w-[300px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] xl:w-[340px]">
+      <StudioSplitLayout
+        chatRail={
+          <>
             <ChatMessages
               history={history}
               busy={busy}
@@ -303,18 +299,18 @@ export default function ChatToEditPage() {
 
             <div className="shrink-0 border-t border-white/[0.06] p-3">
               <ChatInputBar
-              value={chatInput}
-              onChange={setChatInput}
-              onSend={() => send()}
-              busy={busy}
-              attachments={attachments}
-              onOpenAttachment={openAttachment}
-              onRemoveAttachment={removeAttachment}
-              onAttachFiles={addReferenceImages}
-              onPasteImage={(file) => addReferenceImages([file])}
-              modelOptions={MODEL_OPTIONS}
-              modelValue={model}
-              onModelChange={setModel}
+                value={chatInput}
+                onChange={setChatInput}
+                onSend={() => send()}
+                busy={busy}
+                attachments={attachments}
+                onOpenAttachment={openAttachment}
+                onRemoveAttachment={removeAttachment}
+                onAttachFiles={addReferenceImages}
+                onPasteImage={(file) => addReferenceImages([file])}
+                modelOptions={MODEL_OPTIONS}
+                modelValue={model}
+                onModelChange={setModel}
                 placeholder={
                   currentImage || pendingImage
                     ? "Describe what to change…"
@@ -322,66 +318,67 @@ export default function ChatToEditPage() {
                 }
               />
             </div>
-        </div>
-
-        {/* ── stage ── */}
-        <div className="relative flex-1 overflow-hidden">
-          {displayImage ? (
-            <GenerationStage
-              src={displayImage}
-              alt="Current"
-              busy={busy}
-              busyLabel="Applying edit…"
-              // Hidden while the annotation toolbar occupies the same corner.
-              downloadName={annotating ? undefined : "edited.jpg"}
-              onExpand={annotating ? undefined : setLightboxSrc}
-              onAnnotate={annotating ? undefined : (src) => setAnnotating({ src, target: "stage" })}
-            />
-          ) : (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.04]">
-                <ImagePlus size={20} className="text-faint" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-cream">Attach an image to begin</p>
-                <p className="mt-1 max-w-xs text-xs text-faint">
-                  Upload a jewellery photo to start — no original image exists yet for this chat — then
-                  describe your first edit.
-                </p>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) stageStartImage(file);
-                  event.target.value = "";
-                }}
+          </>
+        }
+        stage={
+          <>
+            {displayImage ? (
+              <GenerationStage
+                src={displayImage}
+                alt="Current"
+                busy={busy}
+                busyLabel="Applying edit…"
+                // Hidden while the annotation toolbar occupies the same corner.
+                downloadName={annotating ? undefined : "edited.jpg"}
+                onExpand={annotating ? undefined : setLightboxSrc}
+                onAnnotate={annotating ? undefined : (src) => setAnnotating({ src, target: "stage" })}
               />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="mt-1 flex items-center gap-2 rounded-xl border border-gold/25 bg-gold/10 px-4 py-2 text-xs font-medium text-gold transition-colors hover:border-gold/35 hover:bg-gold/15"
-              >
-                <Upload size={13} /> Upload image
-              </button>
-            </div>
-          )}
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.04]">
+                  <ImagePlus size={20} className="text-faint" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-cream">Attach an image to begin</p>
+                  <p className="mt-1 max-w-xs text-xs text-faint">
+                    Upload a jewellery photo to start — no original image exists yet for this chat — then
+                    describe your first edit.
+                  </p>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) stageStartImage(file);
+                    event.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-1 flex items-center gap-2 rounded-xl border border-gold/25 bg-gold/10 px-4 py-2 text-xs font-medium text-gold transition-colors hover:border-gold/35 hover:bg-gold/15"
+                >
+                  <Upload size={13} /> Upload image
+                </button>
+              </div>
+            )}
 
-          {annotating && annotating.target === "stage" && (
-            <AnnotationOverlay
-              src={annotating.src}
-              onAttach={(marked) => {
-                setAnnotatedPhoto(marked);
-                setAnnotating(null);
-              }}
-              onClose={() => setAnnotating(null)}
-            />
-          )}
-        </div>
-      </div>
+            {annotating && annotating.target === "stage" && (
+              <AnnotationOverlay
+                src={annotating.src}
+                onAttach={(marked) => {
+                  setAnnotatedPhoto(marked);
+                  setAnnotating(null);
+                }}
+                onClose={() => setAnnotating(null)}
+              />
+            )}
+          </>
+        }
+      />
 
       {/* Reference/photo annotation replaces the preview it was opened from,
           so it stays full-screen like the Lightbox instead of jumping to the stage. */}

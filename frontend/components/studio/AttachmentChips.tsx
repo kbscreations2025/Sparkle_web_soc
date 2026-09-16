@@ -40,7 +40,7 @@ export function AttachmentChips({
             type="button"
             onClick={() => onRemove(attachment)}
             title={`Remove ${attachment.label}`}
-            className="absolute -right-1 -top-1 rounded-full bg-black/70 p-0.5 text-white/80 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
+            className="absolute -right-1 -top-1 rounded-full bg-black/70 p-0.5 text-white/80 opacity-100 transition-opacity hover:text-white md:opacity-0 md:group-hover:opacity-100"
           >
             <X size={10} />
           </button>

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { JobsProvider } from "@/lib/jobs-context";
+import { PageToolbarProvider } from "@/lib/page-toolbar-context";
 import { AppShell } from "@/components/AppShell";
 import { TopNav } from "@/components/TopNav";
 import { SideNav } from "@/components/nav/SideNav";
@@ -29,12 +30,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   // column changes as you move around.
   return (
     <JobsProvider>
-      <AppShell nav={<TopNav />} sidebar={<SideNav />}>
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
-          <QueueRail />
-        </div>
-      </AppShell>
+      <PageToolbarProvider>
+        <AppShell nav={<TopNav />} sidebar={<SideNav />}>
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
+            <QueueRail />
+          </div>
+        </AppShell>
+      </PageToolbarProvider>
     </JobsProvider>
   );
 }

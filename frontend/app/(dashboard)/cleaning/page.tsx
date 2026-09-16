@@ -92,13 +92,7 @@ export default function CleaningPage() {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-6xl space-y-6">
-        <header className="space-y-1">
-          <h1 className="font-serif text-2xl text-cream md:text-3xl">Image Cleaning</h1>
-          <p className="max-w-2xl text-sm text-muted">
-            Pick what you want cleaned up. Each one takes your photo and returns a studio-grade version.
-          </p>
-        </header>
-
+        {/* The breadcrumb already names this page — no need to repeat the title here. */}
         <motion.div
           variants={containerVariants}
           initial="hidden"

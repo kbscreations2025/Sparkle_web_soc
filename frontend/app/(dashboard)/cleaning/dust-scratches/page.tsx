@@ -11,11 +11,6 @@ import { GPT_CLEANING_MODELS, DEFAULT_GPT_CLEANING_MODEL } from "@/lib/api";
  */
 export default function CleaningDustScratchesPage() {
   return (
-    <CleaningWorkspace
-      title="Dust & Scratches"
-      description="Clear specks, fibres and hairline marks — via GPT Image, same studio-clean prompt"
-      modelOptions={GPT_CLEANING_MODELS}
-      defaultModel={DEFAULT_GPT_CLEANING_MODEL}
-    />
+    <CleaningWorkspace modelOptions={GPT_CLEANING_MODELS} defaultModel={DEFAULT_GPT_CLEANING_MODEL} />
   );
 }
