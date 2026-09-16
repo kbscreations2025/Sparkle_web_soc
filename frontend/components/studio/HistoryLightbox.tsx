@@ -1,17 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, Loader2, MessageCircle, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import type { HistoryItem } from "@/lib/api";
 import { downloadImage } from "@/lib/image";
-
-const MIN_SCALE = 1;
-const MAX_SCALE = 4;
-const STEP = 1.25;
-/** One wheel notch. Multiplicative, so a notch feels the same at 100% and 400%. */
-const WHEEL_STEP = 1.12;
-
-const clampScale = (value: number) => Math.min(Math.max(value, MIN_SCALE), MAX_SCALE);
+import { useImageZoom } from "@/lib/useImageZoom";
 
 /**
  * The detail view for one History tile: every output image of that
@@ -42,25 +35,19 @@ export function HistoryLightbox({
   onContinue?: () => void;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const [scale, setScale] = useState(1);
-  // Pan, in screen pixels, of the image's centre away from the viewport centre.
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const frameRef = useRef<HTMLDivElement>(null);
-  // The ref carries the grab point (needed synchronously while dragging); the
-  // flag is what the render reads, since a ref's value is invisible to it.
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
+  // Narrower range than the mid-tool Lightbox: this is a read-only look at a
+  // stored result, so it never zooms out below the fitted size.
+  const zoom = useImageZoom({ min: 1, max: 4, buttonStep: 1.25, resetKey: item?.id });
+  const { scale, frameRef } = zoom;
 
-  // Each generation opens on its first image, at 100%. Reset during render
-  // (React's documented pattern for "state that depends on a changed prop")
-  // rather than an effect, so switching items never paints the old
-  // index/scale for a frame before an effect catches up.
+  // Each generation opens on its first image. Reset during render (React's
+  // documented pattern for "state that depends on a changed prop") rather than
+  // an effect, so switching items never paints the old index for a frame
+  // before an effect catches up. The zoom resets itself off the same key.
   const [openItemId, setOpenItemId] = useState(item?.id);
   if (item?.id !== openItemId) {
     setOpenItemId(item?.id);
     setActiveIndex(0);
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
   }
 
   useEffect(() => {
@@ -71,23 +58,6 @@ export function HistoryLightbox({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [item, onClose]);
-
-  // Registered by hand because React's onWheel is passive — it cannot
-  // preventDefault, so the page (or the browser's own zoom) would scroll too.
-  useEffect(() => {
-    const frame = frameRef.current;
-    if (!frame || !item) return;
-    function onWheel(event: WheelEvent) {
-      event.preventDefault();
-      setScale((s) => {
-        const next = clampScale(event.deltaY < 0 ? s * WHEEL_STEP : s / WHEEL_STEP);
-        if (next === 1) setOffset({ x: 0, y: 0 });
-        return next;
-      });
-    }
-    frame.addEventListener("wheel", onWheel, { passive: false });
-    return () => frame.removeEventListener("wheel", onWheel);
-  }, [item]);
 
   if (!item) return null;
 
@@ -196,8 +166,7 @@ export function HistoryLightbox({
                   type="button"
                   onClick={() => {
                     setActiveIndex(i);
-                    setScale(1);
-                    setOffset({ x: 0, y: 0 });
+                    zoom.reset();
                   }}
                   className={`h-16 w-16 shrink-0 overflow-hidden rounded-md border-2 transition-colors ${
                     i === activeIndex ? "border-gold" : "border-transparent hover:border-white/30"
@@ -214,21 +183,7 @@ export function HistoryLightbox({
 
           <div
             className="flex min-h-0 flex-1 items-center justify-center overflow-hidden"
-            onPointerDown={(event) => {
-              if (scale <= 1 || event.button !== 0) return;
-              dragRef.current = { x: event.clientX - offset.x, y: event.clientY - offset.y };
-              setDragging(true);
-              event.currentTarget.setPointerCapture(event.pointerId);
-            }}
-            onPointerMove={(event) => {
-              const start = dragRef.current;
-              if (!start) return;
-              setOffset({ x: event.clientX - start.x, y: event.clientY - start.y });
-            }}
-            onPointerUp={() => {
-              dragRef.current = null;
-              setDragging(false);
-            }}
+            {...zoom.panHandlers}
           >
             {active && (
               // eslint-disable-next-line @next/next/no-img-element -- transform-scaled, so next/image's fill sizing doesn't apply
@@ -238,14 +193,11 @@ export function HistoryLightbox({
                 draggable={false}
                 className="max-h-[70vh] max-w-[80vw] select-none rounded object-contain md:max-h-[76vh]"
                 style={{
-                  transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                  transition: dragging ? "none" : "transform 120ms ease",
-                  cursor: scale > 1 ? (dragging ? "grabbing" : "grab") : "default",
+                  ...zoom.imageStyle,
+                  transition: zoom.dragging ? "none" : "transform 120ms ease",
                 }}
-                onDoubleClick={() => {
-                  setScale((s) => (s > 1 ? 1 : 2));
-                  setOffset({ x: 0, y: 0 });
-                }}
+                // Double-click toggles between fitted and 2x.
+                onDoubleClick={() => (scale > 1 ? zoom.reset() : zoom.zoomBy(2))}
               />
             )}
           </div>
@@ -254,8 +206,8 @@ export function HistoryLightbox({
         <div className="mt-3 flex items-center gap-1 rounded-full border border-white/15 bg-black/60 px-1.5 py-1 backdrop-blur-sm">
           <button
             type="button"
-            onClick={() => setScale((s) => Math.max(MIN_SCALE, s / STEP))}
-            disabled={scale <= MIN_SCALE}
+            onClick={zoom.zoomOut}
+            disabled={zoom.atMin}
             title="Zoom out"
             className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-30"
           >
@@ -263,10 +215,7 @@ export function HistoryLightbox({
           </button>
           <button
             type="button"
-            onClick={() => {
-              setScale(1);
-              setOffset({ x: 0, y: 0 });
-            }}
+            onClick={zoom.reset}
             title="Reset to 100%"
             className="w-11 select-none rounded-full text-center text-[10px] font-medium tabular-nums text-white/70 transition-colors hover:bg-white/15 hover:text-white"
           >
@@ -274,8 +223,8 @@ export function HistoryLightbox({
           </button>
           <button
             type="button"
-            onClick={() => setScale((s) => Math.min(MAX_SCALE, s * STEP))}
-            disabled={scale >= MAX_SCALE}
+            onClick={zoom.zoomIn}
+            disabled={zoom.atMax}
             title="Zoom in"
             className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-30"
           >

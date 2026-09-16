@@ -631,11 +631,6 @@ const HistoryTile = memo(
             {toolLabel}
           </span>
           <div className="flex items-center gap-1 md:gap-1.5">
-            {item.outputs.length > 1 && (
-              <span className="flex h-5 items-center gap-0.5 rounded-full bg-black/55 px-1.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:h-6 md:text-[10px]">
-                <Copy size={9} className="md:h-2.5 md:w-2.5" /> {item.outputs.length}
-              </span>
-            )}
             {canContinue && (
               <button
                 type="button"
@@ -681,10 +676,19 @@ const HistoryTile = memo(
           </div>
         </div>
 
-        <div className="absolute bottom-1.5 left-1.5 md:bottom-2 md:left-2">
-          <span className="rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:px-2 md:text-[10px] lg:text-[11px]">
+        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
+          <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:px-2 md:text-[10px] lg:text-[11px]">
             {item.userName}
           </span>
+
+          {/* How many images this run produced. Down here rather than up with
+              the actions: it is information about the tile, not a control, and
+              a long name truncates before it rather than pushing it off. */}
+          {item.outputs.length > 1 && (
+            <span className="flex h-5 shrink-0 items-center gap-0.5 rounded-full bg-black/55 px-1.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:h-6 md:text-[10px]">
+              <Copy size={9} className="md:h-2.5 md:w-2.5" /> {item.outputs.length}
+            </span>
+          )}
         </div>
       </div>
     );

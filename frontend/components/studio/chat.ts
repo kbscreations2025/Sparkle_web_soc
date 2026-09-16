@@ -12,6 +12,12 @@ export type ChatMsg = {
   content: string;
   /** The image this turn attached (user) or produced (assistant). */
   image?: string;
+  /**
+   * Every image an assistant turn produced, when it made more than one — Text
+   * to Image asks for several variations at once. `image` stays the first of
+   * them, so a tool that only ever produces one can keep ignoring this.
+   */
+  images?: string[];
   /** Reference images attached alongside `image`, inspiration only. */
   refImages?: string[];
   /** Present only on a failed assistant turn — what to restore if the user retries. */

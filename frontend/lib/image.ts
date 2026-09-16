@@ -166,6 +166,25 @@ function saveLocalUrl(url: string, filename: string) {
  * `.catch` only invites one of them to forget and surface an unhandled
  * rejection.
  */
+/**
+ * Saves a whole set of results, numbered from 1.
+ *
+ * Sequential with a beat between each: a burst of downloads fired from one
+ * click is throttled — and silently dropped past the first few — by every
+ * browser, which would look like the button half-working.
+ *
+ * Resolves with how many actually saved, so a caller can tell a partial run
+ * from a complete one.
+ */
+export async function downloadAllImages(sources: string[], baseName: string): Promise<number> {
+  let saved = 0;
+  for (const [index, src] of sources.entries()) {
+    if (index > 0) await new Promise((resolve) => setTimeout(resolve, 300));
+    if (await downloadImage(src, `${baseName}-${index + 1}.jpg`)) saved++;
+  }
+  return saved;
+}
+
 export async function downloadImage(src: string, filename: string): Promise<boolean> {
   // Inline bytes are same-origin by definition — the simple path still works.
   if (src.startsWith("data:") || src.startsWith("blob:")) {

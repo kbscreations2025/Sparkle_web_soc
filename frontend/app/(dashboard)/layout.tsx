@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { TopNav } from "@/components/TopNav";
 import { SideNav } from "@/components/nav/SideNav";
 import { QueueRail } from "@/components/studio/QueueRail";
+import { JobToasts } from "@/components/studio/JobToasts";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
@@ -36,6 +37,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
             <QueueRail />
           </div>
+          {/* Announces finished work over whatever page is open — the rail is
+              easy to miss, and hidden entirely on a phone. */}
+          <JobToasts />
         </AppShell>
       </PageToolbarProvider>
     </JobsProvider>

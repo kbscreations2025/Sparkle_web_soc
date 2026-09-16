@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 import { useNavItems } from "@/lib/nav";
-import { usePageToolbarValue } from "@/lib/page-toolbar-context";
+import { usePageActionsValue, usePageToolbarValue } from "@/lib/page-toolbar-context";
 import { NavBar, NavLogo } from "@/components/nav/NavBar";
 import { Breadcrumbs } from "@/components/nav/Breadcrumbs";
 import { AccountMenu } from "@/components/nav/AccountMenu";
@@ -31,6 +31,7 @@ export function TopNav() {
   // Set by pages that need controls of their own here instead of the route
   // trail — e.g. History's filters, which replace it rather than sit beside it.
   const toolbar = usePageToolbarValue();
+  const actions = usePageActionsValue();
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -129,6 +130,11 @@ export function TopNav() {
       {/* ml-auto holds the cluster right wherever the nav row isn't filling the
           gap — on phones, and at xl where the row is absolutely positioned. */}
       <div className="flex items-center gap-1.5 md:gap-2.5 shrink-0 ml-auto">
+        {/* The current page's own action, if it has one — a tool's "Start over".
+            Beside the credits rather than in the toolbar slot above, so it
+            doesn't cost the page its breadcrumb trail. */}
+        {actions}
+
         {/* Small screens only: from md up the queue lives in the right rail,
             which is always visible and doesn't have to be opened. Renders
             nothing when there is nothing queued. */}

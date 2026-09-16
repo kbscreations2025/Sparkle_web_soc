@@ -17,8 +17,8 @@ export const ASPECTS = [
 export type AspectId = (typeof ASPECTS)[number]["id"];
 
 export const STYLES = [
-  { id: "photorealistic", label: "Photorealistic" },
   { id: "product-studio", label: "Product Studio" },
+  { id: "photorealistic", label: "Photorealistic" },
   { id: "luxury-campaign", label: "Luxury Campaign" },
   { id: "dark-velvet", label: "Dark Velvet" },
   { id: "warm-gold", label: "Warm Gold" },

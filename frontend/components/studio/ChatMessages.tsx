@@ -1,9 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import { Download, RotateCcw } from "lucide-react";
 import type { ChatMsg } from "./chat";
-import { downloadImage } from "@/lib/image";
+import { downloadAllImages, downloadImage } from "@/lib/image";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,6 +23,8 @@ import { cn } from "@/lib/utils";
 export function ChatMessages({
   history,
   busy,
+  busyCount = 1,
+  selectedSrc,
   onSelectResult,
   onRetry,
   hints,
@@ -30,107 +33,187 @@ export function ChatMessages({
 }: {
   history: ChatMsg[];
   busy?: boolean;
+  /** How many results the in-flight turn will produce — one placeholder each. */
+  busyCount?: number;
+  /** Which result is currently on the stage, so its thumbnail can be marked. */
+  selectedSrc?: string | null;
   /** Called with a past assistant turn's image when its thumbnail is clicked. */
   onSelectResult: (src: string) => void;
   onRetry: (msg: ChatMsg) => void;
-  /** Shown only before the first message — quick-start suggestions. */
+  /** Quick-start or refinement suggestions. Whether they still apply is the caller's call. */
   hints?: string[];
   hintsLabel?: string;
   onHint?: (hint: string) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
-      {history.length === 0 && hints && hints.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="mb-1.5 text-[10px] font-medium text-faint">{hintsLabel}</p>
-          {hints.map((hint) => (
-            <button
-              key={hint}
-              type="button"
-              onClick={() => onHint?.(hint)}
-              className="block w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-[12px] text-gold transition-colors hover:bg-white/[0.07]"
-            >
-              {hint}
-            </button>
-          ))}
-        </div>
-      )}
-
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2.5">
       {history.map((msg) =>
         msg.role === "user" ? (
           <UserBubble key={msg.id} msg={msg} onOpen={onSelectResult} />
         ) : msg.retryInstruction !== undefined ? (
           <ErrorBubble key={msg.id} msg={msg} onRetry={onRetry} />
         ) : (
-          <AssistantBubble key={msg.id} msg={msg} onOpen={onSelectResult} />
+          <AssistantBubble key={msg.id} msg={msg} onOpen={onSelectResult} selectedSrc={selectedSrc} />
         )
       )}
 
-      {busy && <SkeletonBubble />}
+      {busy && <SkeletonBubble count={busyCount} />}
+
+      {/* After the thread, not before it: these are what to say next. Whether
+          they still apply is the caller's call — it passes none once they
+          don't — so there is no second condition on the same thing here. */}
+      {hints && hints.length > 0 && !busy && (
+        <div className="space-y-1">
+          <p className="mb-1 text-[9px] font-medium uppercase tracking-wide text-faint">{hintsLabel}</p>
+          {hints.map((hint) => (
+            <button
+              key={hint}
+              type="button"
+              onClick={() => onHint?.(hint)}
+              className="block w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-left text-[11px] leading-snug text-gold transition-colors hover:bg-white/[0.07]"
+            >
+              {hint}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Thumb({ src, size = 44 }: { src: string; size?: number }) {
+/**
+ * Sized by class rather than a pixel prop, so a tile can grow a step on wider
+ * screens — the rail is the full width of a phone but a 300px column on a
+ * desktop, and one fixed size cannot suit both.
+ */
+function Thumb({ src, className, sizes }: { src: string; className: string; sizes: string }) {
   return (
-    <div
-      className="relative shrink-0 overflow-hidden rounded-md border border-white/10 bg-surface-float"
-      style={{ width: size, height: size }}
-    >
-      <Image src={src} alt="" fill sizes={`${size}px`} className="object-cover" />
+    <div className={cn("relative shrink-0 overflow-hidden rounded-md border border-white/10 bg-surface-float", className)}>
+      <Image src={src} alt="" fill sizes={sizes} className="object-cover" />
     </div>
   );
 }
+
+/** Tile sizes shared by results and their placeholders, so the two never disagree. */
+const TILE_MULTI = "h-11 w-11 sm:h-12 sm:w-12";
+const TILE_SINGLE = "h-14 w-14 sm:h-16 sm:w-16";
 
 function UserBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) => void }) {
   const images = [...(msg.image ? [msg.image] : []), ...(msg.refImages ?? [])];
 
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] space-y-2 rounded-xl rounded-br-sm border border-gold/25 bg-gold/[0.08] px-2.5 py-2">
+      <div className="max-w-[85%] space-y-1.5 rounded-xl rounded-br-sm border border-gold/25 bg-gold/[0.08] px-2.5 py-1.5">
         {images.length > 0 && (
-          <div className="flex flex-wrap justify-end gap-1.5">
+          <div className="flex flex-wrap justify-end gap-1">
             {images.map((src, i) => (
               <button key={i} type="button" onClick={() => onOpen(src)}>
-                <Thumb src={src} size={i === 0 && msg.image ? 44 : 32} />
+                <Thumb
+                  src={src}
+                  className={i === 0 && msg.image ? "h-9 w-9" : "h-7 w-7"}
+                  sizes={i === 0 && msg.image ? "36px" : "28px"}
+                />
               </button>
             ))}
           </div>
         )}
-        <p className="text-right text-[12px] leading-relaxed text-cream">{msg.content}</p>
+        <p className="whitespace-pre-wrap break-words text-right text-[11px] leading-snug text-cream">{msg.content}</p>
       </div>
     </div>
   );
 }
 
-function AssistantBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) => void }) {
-  if (!msg.image) return null;
-  const image = msg.image;
+/**
+ * What the model produced for one turn. Usually a single image; Text to Image
+ * asks for several variations at once, so every one of them is shown here and
+ * clicking any picks it for the stage.
+ */
+function AssistantBubble({
+  msg,
+  onOpen,
+  selectedSrc,
+}: {
+  msg: ChatMsg;
+  onOpen: (src: string) => void;
+  selectedSrc?: string | null;
+}) {
+  const [savingAll, setSavingAll] = useState(false);
+  const images = msg.images?.length ? msg.images : msg.image ? [msg.image] : [];
+  if (images.length === 0) return null;
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[85%] space-y-1.5 rounded-xl rounded-bl-sm border border-white/10 bg-white/[0.04] p-1.5">
-        <button type="button" onClick={() => onOpen(image)} className="block transition-opacity hover:opacity-90">
-          <Thumb src={image} size={72} />
-        </button>
-        <button
-          type="button"
-          onClick={() => downloadImage(image, "result.jpg")}
-          className="flex w-full items-center justify-center gap-1 rounded-md py-0.5 text-[10px] text-faint transition-colors hover:text-gold"
-        >
-          <Download size={10} /> Download
-        </button>
+      <div className="max-w-[85%] space-y-1 rounded-xl rounded-bl-sm border border-white/10 bg-white/[0.04] p-1.5">
+        <div className="flex flex-wrap gap-1">
+          {images.map((src, index) => (
+            <div key={`${src}-${index}`} className="group/tile relative">
+              <button
+                type="button"
+                onClick={() => onOpen(src)}
+                className={cn(
+                  "block overflow-hidden rounded-md border transition-colors",
+                  src === selectedSrc ? "border-gold/60" : "border-transparent hover:border-gold/30"
+                )}
+              >
+                <Thumb
+                  src={src}
+                  className={images.length > 1 ? TILE_MULTI : TILE_SINGLE}
+                  sizes={images.length > 1 ? "48px" : "64px"}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadImage(src, `result-${index + 1}.jpg`)}
+                title="Download"
+                className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white/[0.12] bg-surface-float text-faint opacity-0 transition-opacity hover:text-gold group-hover/tile:opacity-100"
+              >
+                <Download size={9} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {images.length > 1 && (
+          <button
+            type="button"
+            disabled={savingAll}
+            onClick={async () => {
+              setSavingAll(true);
+              try {
+                await downloadAllImages(images, "generated");
+              } finally {
+                setSavingAll(false);
+              }
+            }}
+            className="flex w-full items-center justify-center gap-1 rounded-md py-0.5 text-[10px] text-faint transition-colors hover:text-gold disabled:opacity-60"
+          >
+            <Download size={10} /> {savingAll ? "Saving…" : `Download all (${images.length})`}
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-/** Placeholder in the assistant slot, sized like the result that replaces it. */
-function SkeletonBubble() {
+/**
+ * Placeholders in the assistant slot, one per result still to come and sized
+ * like the thumbnails that replace them — so a run's size is visible from the
+ * moment it is queued, not only once it lands.
+ */
+function SkeletonBubble({ count }: { count: number }) {
+  const tiles = Math.max(1, count);
+
   return (
     <div className="flex justify-start">
-      <div className="rounded-xl rounded-bl-sm border border-white/10 bg-white/[0.04] p-1.5">
-        <div className="h-28 w-28 animate-pulse rounded-md bg-white/[0.09]" />
+      <div className="max-w-[85%] rounded-xl rounded-bl-sm border border-white/10 bg-white/[0.04] p-1.5">
+        <div className="flex flex-wrap gap-1">
+          {Array.from({ length: tiles }, (_, index) => (
+            <div
+              key={index}
+              className={cn("animate-pulse rounded-md bg-white/[0.09]", tiles > 1 ? TILE_MULTI : TILE_SINGLE)}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -139,8 +222,8 @@ function SkeletonBubble() {
 function ErrorBubble({ msg, onRetry }: { msg: ChatMsg; onRetry: (msg: ChatMsg) => void }) {
   return (
     <div className="flex justify-start">
-      <div className="max-w-[85%] space-y-1.5 rounded-xl rounded-bl-sm border border-error/25 bg-error/[0.08] px-3 py-2">
-        <p className="text-[12px] text-error">{msg.content}</p>
+      <div className="max-w-[85%] space-y-1.5 rounded-xl rounded-bl-sm border border-error/25 bg-error/[0.08] px-2.5 py-1.5">
+        <p className="text-[11px] leading-snug text-error">{msg.content}</p>
         <button
           type="button"
           onClick={() => onRetry(msg)}

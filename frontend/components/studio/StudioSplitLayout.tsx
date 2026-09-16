@@ -21,7 +21,7 @@ export function StudioSplitLayout({
       {/* ── chat rail — left on desktop (unchanged); below the stage, always
           visible, on mobile — order-2 keeps DOM order (and the existing
           border-r on desktop) while moving it below the stage visually. */}
-      <div className="order-2 flex min-h-0 flex-1 flex-col overflow-hidden md:order-1 md:w-[300px] md:flex-none md:border-r md:border-white/[0.06] xl:w-[340px]">
+      <div className="order-2 flex min-h-0 flex-1 flex-col overflow-hidden md:order-1 md:w-[350px] md:flex-none md:border-r md:border-white/[0.06] xl:w-[340px]">
         {chatRail}
       </div>
 

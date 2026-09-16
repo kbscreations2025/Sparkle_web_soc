@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Image from "next/image";
 import { ChevronDown, ChevronRight, Wand2, X } from "lucide-react";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
 import { SpellCheckedTextarea } from "@/components/studio/SpellCheckedTextarea";
@@ -58,7 +57,7 @@ export default function TextToImagePage() {
 
   // ── input phase ──
   const [prompt, setPrompt] = useState("");
-  const [style, setStyle] = useState<StyleId>("photorealistic");
+  const [style, setStyle] = useState<StyleId>("product-studio");
   const [aspect, setAspect] = useState<AspectId>("square");
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
   const [count, setCount] = useState<number>(DEFAULT_IMAGE_COUNT);
@@ -72,6 +71,8 @@ export default function TextToImagePage() {
   // ── generation / results ──
   const [status, setStatus] = useState<"idle" | "generating" | "done" | "failed">("idle");
   const [images, setImages] = useState<string[]>([]);
+  /** How many variations this run asked for — what the placeholders count against. */
+  const [requestedCount, setRequestedCount] = useState(0);
   const [selectedView, setSelectedView] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<ChatMsg[]>([]);
@@ -105,13 +106,21 @@ export default function TextToImagePage() {
 
       const historyMsgs: ChatMsg[] = generations.flatMap((turn, index) => [
         { id: `${turn.id}-user`, role: "user" as const, content: turn.userPrompt || (index === 0 ? "Generate this design" : "Refine this") },
-        { id: `${turn.id}-assistant`, role: "assistant" as const, content: "Updated", image: turn.outputAssets[0]?.url },
+        {
+          id: `${turn.id}-assistant`,
+          role: "assistant" as const,
+          content: "Updated",
+          image: turn.outputAssets[0]?.url,
+          // Every variation the turn produced, not just the first.
+          images: turn.outputAssets.map((asset) => asset.url).filter(Boolean),
+        },
       ]);
 
       const last = generations[generations.length - 1];
       const lastImages = last.outputAssets.map((a) => a.url).filter(Boolean);
       setHistory(historyMsgs);
       setImages(lastImages);
+      setRequestedCount(lastImages.length);
       setSelectedView(lastImages[0] ?? null);
       setStatus("done");
       conversationId.current = resumeConversationId;
@@ -145,6 +154,12 @@ export default function TextToImagePage() {
         setSelectedView(urls[0] ?? null);
         setStatus(urls.length ? "done" : "failed");
         if (!urls.length) setError("The model returned no image");
+        // The whole set answers the opening prompt, so it lands as one turn.
+        else
+          setHistory((current) => [
+            ...current,
+            { id: crypto.randomUUID(), role: "assistant", content: "Generated", image: urls[0], images: urls },
+          ]);
       } else {
         setImages(urls.length ? urls : images);
         setSelectedView(urls[0] ?? selectedView);
@@ -197,6 +212,7 @@ export default function TextToImagePage() {
   function reset() {
     setStatus("idle");
     setImages([]);
+    setRequestedCount(0);
     setSelectedView(null);
     setError("");
     setHistory([]);
@@ -213,8 +229,15 @@ export default function TextToImagePage() {
     setStatus("generating");
     setImages([]);
     setSelectedView(null);
-    setHistory([]);
     setChatInput("");
+    // Fixed for this run, so the placeholders keep counting the images that
+    // were actually asked for even if the count selector is changed later.
+    setRequestedCount(count);
+    // What was submitted opens the thread, so the conversation reads from the
+    // original request down to each refinement rather than starting mid-way.
+    setHistory([
+      { id: crypto.randomUUID(), role: "user", content: finalDescription || "Generate a design" },
+    ]);
 
     const result = await textToImage({ prompt: finalDescription, model, style, aspect, count });
     if (result.status === "queued" && result.job) {
@@ -290,6 +313,9 @@ export default function TextToImagePage() {
 
   const isGenerating = status === "generating";
   const displayImg = selectedView ?? images[0] ?? null;
+  // A resumed conversation has no requested count of its own — what came back
+  // is the whole set, so the images themselves are the tally.
+  const tileCount = Math.max(requestedCount, images.length);
 
   // ── Results ──
   if (status !== "idle") {
@@ -303,44 +329,38 @@ export default function TextToImagePage() {
         <StudioSplitLayout
           chatRail={
             <>
-              <div className="shrink-0 space-y-2.5 px-4 pt-4 pb-3">
-                <div className="flex items-center gap-2">
-                  <p className="text-[10px] font-medium uppercase tracking-widest text-faint">Prompt</p>
-                  <span className="rounded-full border border-gold/[0.18] bg-gold/[0.08] px-2 py-0.5 text-[9px] font-semibold leading-none text-gold/80">
-                    {SPARKLE_MODELS.find((m) => m.id === model)?.label}
-                  </span>
-                </div>
-                <div className="max-h-32 overflow-y-auto rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
-                  <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-muted">{finalDescription || "—"}</p>
-                </div>
-
-                {images.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {images.map((src, i) => (
-                      <button
-                        key={src + i}
-                        type="button"
-                        onClick={() => setSelectedView(src)}
-                        className={cn(
-                          "relative block h-12 w-12 overflow-hidden rounded-lg border bg-white transition-colors",
-                          displayImg === src ? "border-gold/50" : "border-white/[0.08] hover:border-gold/30"
-                        )}
-                      >
-                        <Image src={src} alt="" fill sizes="48px" className="object-contain" />
-                      </button>
-                    ))}
-                  </div>
-                )}
+              {/* Request first, then what it produced — the whole exchange is
+                  the thread, so the results live in it rather than in a strip
+                  of their own repeating the latest turn. */}
+              <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-0.5 pt-3">
+                <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
+                  Generated{" "}
+                  {tileCount > 0 && (
+                    <span className="normal-case tracking-normal text-faint/60">
+                      ({images.length}/{tileCount}
+                      {isGenerating ? " · generating…" : ""})
+                    </span>
+                  )}
+                </p>
+                <span className="shrink-0 rounded-full border border-gold/[0.18] bg-gold/[0.08] px-2 py-0.5 text-[9px] font-semibold leading-none text-gold/80">
+                  {SPARKLE_MODELS.find((m) => m.id === model)?.label}
+                </span>
               </div>
 
               <ChatMessages
                 history={history}
-                busy={refining}
+                busy={refining || isGenerating}
+                busyCount={isGenerating ? tileCount : 1}
+                selectedSrc={displayImg}
                 onSelectResult={setSelectedView}
                 onRetry={retry}
-                hints={displayImg && history.length === 0 ? REFINE_HINTS : undefined}
+                // Offered until the first refinement comes back — the opening
+                // prompt is itself a message now, so an empty thread is no
+                // longer what "nothing refined yet" looks like.
+                hints={displayImg && !history.some((msg) => msg.role === "assistant") ? REFINE_HINTS : undefined}
                 onHint={(hint) => handleRefine(hint)}
               />
+
 
               <div className="shrink-0 border-t border-white/[0.06] p-3">
                 <ChatInputBar

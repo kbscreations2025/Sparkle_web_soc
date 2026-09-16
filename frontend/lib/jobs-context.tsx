@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { io } from "socket.io-client";
 import { BACKEND_URL, cancelJob, fetchJobs, type QueuedJob } from "./api";
 import { useAuth } from "./auth-context";
@@ -10,6 +10,27 @@ const ACTIVE = new Set(["queued", "running"]);
 
 /** Settled jobs are kept so a page can still see the result land, but not forever. */
 const MAX_TRACKED = 50;
+
+/**
+ * How long a finished job stays in the queue rail before it is dropped —
+ * after this it lives in History, which is the durable record.
+ *
+ * Only ever applied to settled jobs: something still queued or running stays
+ * on screen however long it takes, because it is the only place that work is
+ * visible while it is happening.
+ */
+const SETTLED_TTL_MS = 15 * 60 * 1000;
+
+/** Coarse on purpose: a minute either side of a 15-minute cut-off is invisible, and this wakes the tab. */
+const PRUNE_EVERY_MS = 60 * 1000;
+
+/** When a job finished, falling back to when it was created for older rows. */
+const settledAt = (job: QueuedJob) => Date.parse(job.finishedAt ?? job.createdAt);
+
+/** Still worth showing: anything unfinished, plus anything finished recently. */
+function isCurrent(job: QueuedJob, now: number) {
+  return ACTIVE.has(job.status) || now - settledAt(job) < SETTLED_TTL_MS;
+}
 
 /**
  * How many jobs a refresh pulls back, across every status.
@@ -31,6 +52,12 @@ type JobsContextValue = {
   track: (job: QueuedJob) => void;
   /** Re-reads from the server. The reconciliation path when live updates were missed. */
   refresh: () => Promise<void>;
+  /**
+   * Fires when a job finishes *while being watched* — the socket transition,
+   * not a job that merely arrived already-finished from a refresh. Returns its
+   * own unsubscribe.
+   */
+  onJobSettled: (listener: (job: QueuedJob) => void) => () => void;
 };
 
 const JobsContext = createContext<JobsContextValue>({
@@ -39,6 +66,7 @@ const JobsContext = createContext<JobsContextValue>({
   connected: false,
   track: () => {},
   refresh: async () => {},
+  onJobSettled: () => () => {},
 });
 
 /**
@@ -57,7 +85,43 @@ export function JobsProvider({ children }: { children: ReactNode }) {
   const [jobsById, setJobsById] = useState<Record<string, QueuedJob>>({});
   const [connected, setConnected] = useState(false);
 
+  // Announcing "just finished" needs the status a job held a moment ago, which
+  // is bookkeeping no render reads — so a ref, not state.
+  const lastStatus = useRef(new Map<string, QueuedJob["status"]>());
+  const settleListeners = useRef(new Set<(job: QueuedJob) => void>());
+
+  const onJobSettled = useCallback((listener: (job: QueuedJob) => void) => {
+    settleListeners.current.add(listener);
+    return () => {
+      settleListeners.current.delete(listener);
+    };
+  }, []);
+
+  /**
+   * Notes what each job's status now is and announces the ones that just
+   * finished.
+   *
+   * Applied to *every* way a job reaches this tab — the socket and the
+   * catch-up fetch alike — because a dropped socket is exactly when a result
+   * arrives by fetch instead, and that is the moment a user most needs telling.
+   *
+   * A job whose first sighting is already-finished never announces: with no
+   * previous status recorded there is no transition, which is what keeps a
+   * reload from replaying every recent result as if it had just landed.
+   */
+  const recordSettled = useCallback((incoming: QueuedJob[]) => {
+    for (const job of incoming) {
+      const before = lastStatus.current.get(job.id);
+      lastStatus.current.set(job.id, job.status);
+      if (before && ACTIVE.has(before) && !ACTIVE.has(job.status)) {
+        settleListeners.current.forEach((listener) => listener(job));
+      }
+    }
+  }, []);
+
   const upsert = useCallback((incoming: QueuedJob | QueuedJob[]) => {
+    recordSettled(Array.isArray(incoming) ? incoming : [incoming]);
+
     setJobsById((current) => {
       const next = { ...current };
       for (const job of Array.isArray(incoming) ? incoming : [incoming]) next[job.id] = job;
@@ -71,23 +135,53 @@ export function JobsProvider({ children }: { children: ReactNode }) {
 
       return next;
     });
-  }, []);
+  }, [recordSettled]);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
     const result = await fetchJobs({ status: "all", limit: REFRESH_LIMIT });
     if (result.status === "success" && result.jobs) {
+      // Same announcement path as the socket: when the connection has dropped,
+      // this fetch is how a finished job first reaches the tab.
+      recordSettled(result.jobs);
+
       // Replaces rather than merges the active set: a job that finished while
       // this tab was away is gone from the response, and merging would leave it
       // spinning on screen forever.
       setJobsById((current) => {
+        const now = Date.now();
         const settled = Object.fromEntries(
           Object.entries(current).filter(([, job]) => !ACTIVE.has(job.status))
         );
-        return { ...settled, ...Object.fromEntries(result.jobs!.map((job) => [job.id, job])) };
+        // The server answers with everything recent, so long-finished jobs are
+        // filtered on the way in too — otherwise a reconnect would repopulate
+        // the rail with work that had already aged out of it.
+        const incoming = result.jobs!.filter((job) => isCurrent(job, now));
+        return { ...settled, ...Object.fromEntries(incoming.map((job) => [job.id, job])) };
       });
     }
-  }, [userId]);
+  }, [userId, recordSettled]);
+
+  /**
+   * Ages finished work out of the rail. Done on a timer against the store
+   * rather than by filtering at render time: a clock read during render would
+   * make the list depend on when React happened to re-run, and a result could
+   * vanish mid-glance.
+   *
+   * Returning the same object when nothing expired is what keeps this from
+   * re-rendering every consumer once a minute for no reason.
+   */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setJobsById((current) => {
+        const now = Date.now();
+        const kept = Object.entries(current).filter(([, job]) => isCurrent(job, now));
+        return kept.length === Object.keys(current).length ? current : Object.fromEntries(kept);
+      });
+    }, PRUNE_EVERY_MS);
+
+    return () => clearInterval(timer);
+  }, []);
 
   /**
    * One effect for both halves of staying in sync, because they are the same
@@ -112,6 +206,8 @@ export function JobsProvider({ children }: { children: ReactNode }) {
       refresh();
     });
     socket.on("disconnect", () => setConnected(false));
+    // `upsert` notes the status change and announces a finish, so the socket
+    // path needs nothing of its own here.
     socket.on("job:updated", (job: QueuedJob) => upsert(job));
 
     return () => {
@@ -126,8 +222,8 @@ export function JobsProvider({ children }: { children: ReactNode }) {
   const activeJobs = useMemo(() => jobs.filter((job) => ACTIVE.has(job.status)), [jobs]);
 
   const value = useMemo(
-    () => ({ jobs, activeJobs, connected, track: (job: QueuedJob) => upsert(job), refresh }),
-    [jobs, activeJobs, connected, upsert, refresh]
+    () => ({ jobs, activeJobs, connected, track: (job: QueuedJob) => upsert(job), refresh, onJobSettled }),
+    [jobs, activeJobs, connected, upsert, refresh, onJobSettled]
   );
 
   return <JobsContext.Provider value={value}>{children}</JobsContext.Provider>;
