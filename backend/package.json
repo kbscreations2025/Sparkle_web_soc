@@ -18,10 +18,13 @@
     "cookie": "^0.7.1",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
+    "dictionary-en": "^4.0.0",
+    "dictionary-en-gb": "^3.0.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "ioredis": "^6.0.0",
     "mongoose": "^9.9.5",
+    "nspell": "^2.1.5",
     "openai": "^7.13.0",
     "sharp": "^0.35.4",
     "socket.io": "^4.8.0"

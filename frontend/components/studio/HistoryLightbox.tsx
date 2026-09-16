@@ -46,7 +46,10 @@ export function HistoryLightbox({
   // Pan, in screen pixels, of the image's centre away from the viewport centre.
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const frameRef = useRef<HTMLDivElement>(null);
+  // The ref carries the grab point (needed synchronously while dragging); the
+  // flag is what the render reads, since a ref's value is invisible to it.
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   // Each generation opens on its first image, at 100%. Reset during render
   // (React's documented pattern for "state that depends on a changed prop")
@@ -214,6 +217,7 @@ export function HistoryLightbox({
             onPointerDown={(event) => {
               if (scale <= 1 || event.button !== 0) return;
               dragRef.current = { x: event.clientX - offset.x, y: event.clientY - offset.y };
+              setDragging(true);
               event.currentTarget.setPointerCapture(event.pointerId);
             }}
             onPointerMove={(event) => {
@@ -223,6 +227,7 @@ export function HistoryLightbox({
             }}
             onPointerUp={() => {
               dragRef.current = null;
+              setDragging(false);
             }}
           >
             {active && (
@@ -234,8 +239,8 @@ export function HistoryLightbox({
                 className="max-h-[70vh] max-w-[80vw] select-none rounded object-contain md:max-h-[76vh]"
                 style={{
                   transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                  transition: dragRef.current ? "none" : "transform 120ms ease",
-                  cursor: scale > 1 ? (dragRef.current ? "grabbing" : "grab") : "default",
+                  transition: dragging ? "none" : "transform 120ms ease",
+                  cursor: scale > 1 ? (dragging ? "grabbing" : "grab") : "default",
                 }}
                 onDoubleClick={() => {
                   setScale((s) => (s > 1 ? 1 : 2));

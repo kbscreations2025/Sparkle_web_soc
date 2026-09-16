@@ -9,14 +9,15 @@ import { ModelSelector } from "@/components/studio/ModelSelector";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatMessages } from "@/components/studio/ChatMessages";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
+import { SpellCheckedTextarea } from "@/components/studio/SpellCheckedTextarea";
 import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
-import { Lightbox } from "@/components/studio/Lightbox";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
+import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import type { ChatMsg } from "@/components/studio/chat";
-import type { Attachment } from "@/components/studio/AttachmentChips";
 import { cleanImage, refineImage, fetchConversationForTool, resolveModelId, toModelOptions } from "@/lib/api";
 import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
+import { useAttachments } from "@/lib/useAttachments";
 import { useJobs } from "@/lib/jobs-context";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
@@ -82,17 +83,9 @@ export function CleaningWorkspace<TModel extends string>({
   // A past result the user clicked in the thread — shown on the stage without
   // losing the job's actual `cleaned` value underneath it.
   const [selectedView, setSelectedView] = useState<string | null>(null);
-  // Reference images for the *next* refinement — inspiration only, cleared once sent.
-  const [referenceImages, setReferenceImages] = useState<string[]>([]);
-  // A marked-up copy of the result itself (not a reference) — annotating the
-  // stage again replaces this single slot instead of piling up new chips.
-  const [annotatedPhoto, setAnnotatedPhoto] = useState<string | null>(null);
-  // Set instead of lightboxSrc when a reference chip is opened, so the
-  // lightbox knows which one to offer Annotate for.
-  const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
-  // The image being marked up, and where the result should be written back
-  // to — the current result itself, or one reference. Null when closed.
-  const [annotating, setAnnotating] = useState<{ src: string; target: "stage" | "photo" | { ref: number } } | null>(null);
+
+  const attach = useAttachments({ onError: setError });
+  const { referenceImages, setReferenceImages, annotatedPhoto, setAnnotatedPhoto, annotating, setAnnotating } = attach;
 
   const searchParams = useSearchParams();
   const modelOptionsForInput = toModelOptions(modelOptions);
@@ -270,32 +263,6 @@ export function CleaningWorkspace<TModel extends string>({
     }
   }
 
-  async function addReferenceImages(files: File[]) {
-    setError("");
-    try {
-      const compressed = await Promise.all(files.map(compressImage));
-      setReferenceImages((current) => [...current, ...compressed]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read those files");
-    }
-  }
-
-  const attachments: Attachment[] = [
-    ...(annotatedPhoto ? [{ id: "photo", src: annotatedPhoto, label: "Photo" }] : []),
-    ...referenceImages.map((src, i) => ({ id: `ref-${i}`, src, label: "Ref" })),
-  ];
-
-  function removeAttachment(attachment: Attachment) {
-    if (attachment.id === "photo") return setAnnotatedPhoto(null);
-    const index = Number(attachment.id.replace("ref-", ""));
-    setReferenceImages((current) => current.filter((_, i) => i !== index));
-  }
-
-  /** Maps a chip back to the slot its re-annotated copy should be written into. */
-  function targetForAttachment(attachment: Attachment): "photo" | { ref: number } {
-    return attachment.id === "photo" ? "photo" : { ref: Number(attachment.id.replace("ref-", "")) };
-  }
-
   /**
    * Hands every photo to the queue and returns.
    *
@@ -444,8 +411,7 @@ export function CleaningWorkspace<TModel extends string>({
     setSelectedId(null);
     setSelectedView(null);
     setChatInput("");
-    setReferenceImages([]);
-    setAnnotatedPhoto(null);
+    attach.reset();
   }
 
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
@@ -489,12 +455,16 @@ export function CleaningWorkspace<TModel extends string>({
               </div>
 
               {useCustomPrompt ? (
-                <textarea
+                <SpellCheckedTextarea
                   value={customPrompt}
-                  onChange={(event) => setCustomPrompt(event.target.value)}
+                  onChange={setCustomPrompt}
                   rows={4}
+                  // Grows as it is written instead of needing the drag handle
+                  // the plain textarea had.
+                  autoGrowMaxHeight={320}
                   placeholder="Describe the retouch you want. This replaces the built-in cleaning instructions entirely."
-                  className="w-full resize-y rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-cream placeholder:text-faint outline-none focus:border-gold/40"
+                  className="rounded-lg border border-white/10 bg-white/[0.06] transition-colors focus-within:border-gold/40"
+                  textClassName="w-full px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap break-words"
                 />
               ) : (
                 <p className="text-[11px] text-faint">
@@ -559,11 +529,11 @@ export function CleaningWorkspace<TModel extends string>({
                   onChange={setChatInput}
                   onSend={() => handleRefine(chatInput)}
                   busy={refining || !selected?.cleaned}
-                  attachments={attachments}
-                  onOpenAttachment={setPreviewAttachment}
-                  onRemoveAttachment={removeAttachment}
-                  onAttachFiles={addReferenceImages}
-                  onPasteImage={(file) => addReferenceImages([file])}
+                  attachments={attach.attachments}
+                  onOpenAttachment={attach.setPreviewAttachment}
+                  onRemoveAttachment={attach.removeAttachment}
+                  onAttachFiles={attach.addReferenceImages}
+                  onPasteImage={(file) => attach.addReferenceImages([file])}
                   modelOptions={modelOptionsForInput}
                   modelValue={model}
                   onModelChange={setModel}
@@ -602,41 +572,7 @@ export function CleaningWorkspace<TModel extends string>({
         />
       )}
 
-      {/* Reference annotation replaces the preview it was opened from, so it
-          stays full-screen like the Lightbox instead of jumping to the stage. */}
-      {annotating && annotating.target !== "stage" && (
-        <AnnotationOverlay
-          fullscreen
-          src={annotating.src}
-          onAttach={(marked) => {
-            if (annotating.target === "photo") {
-              setAnnotatedPhoto(marked);
-            } else {
-              const refIndex = (annotating.target as { ref: number }).ref;
-              setReferenceImages((current) => current.map((src, i) => (i === refIndex ? marked : src)));
-            }
-            setAnnotating(null);
-          }}
-          onClose={() => setAnnotating(null)}
-        />
-      )}
-
-      <Lightbox
-        src={previewAttachment?.src ?? lightboxSrc}
-        onClose={() => {
-          setLightboxSrc(null);
-          setPreviewAttachment(null);
-        }}
-        downloadName={previewAttachment ? `${previewAttachment.label.toLowerCase()}.jpg` : undefined}
-        onAnnotate={
-          previewAttachment
-            ? () => {
-                setAnnotating({ src: previewAttachment.src, target: targetForAttachment(previewAttachment) });
-                setPreviewAttachment(null);
-              }
-            : undefined
-        }
-      />
+      <AnnotationLayer attachments={attach} lightboxSrc={lightboxSrc} onCloseLightbox={() => setLightboxSrc(null)} />
     </div>
   );
 }

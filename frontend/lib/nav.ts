@@ -63,6 +63,7 @@ export const TOOLS: Tool[] = [
     icon: Type,
     description: "Describe it, AI renders it",
     image: "/dashboard/image.png",
+    href: "/text-to-image",
     permission: "tool.text_to_image.run",
   },
   {
@@ -148,6 +149,7 @@ export const TOOL_LABELS: Record<string, string> = Object.fromEntries(TOOLS.map(
 export const TOOL_WORKSPACE_PATHS: Record<string, string> = {
   cleaning: "/cleaning/default",
   chat_to_edit: "/chat-to-edit",
+  text_to_image: "/text-to-image",
 };
 
 /**

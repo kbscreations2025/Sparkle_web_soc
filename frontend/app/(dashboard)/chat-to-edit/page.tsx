@@ -7,11 +7,10 @@ import { ChatMessages } from "@/components/studio/ChatMessages";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
 import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
-import { Lightbox } from "@/components/studio/Lightbox";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
+import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import type { ChatMsg } from "@/components/studio/chat";
-import type { Attachment } from "@/components/studio/AttachmentChips";
 import {
   chatEdit,
   fetchConversationForTool,
@@ -22,15 +21,13 @@ import {
   type SparkleModelId,
 } from "@/lib/api";
 import { compressImage, urlToDataUrl } from "@/lib/image";
+import { useAttachments } from "@/lib/useAttachments";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 
 const CHAT_TO_EDIT_PERMISSION = "tool.chat_to_edit.run";
 
 const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
-
-/** Where an annotated copy gets written back to once the user hits Attach. */
-type AnnotationTarget = "stage" | "photo" | { ref: number };
 
 const START_HINTS = ["Attach a jewellery photo to begin"];
 const EDIT_HINTS = [
@@ -47,11 +44,6 @@ export default function ChatToEditPage() {
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   // Staged before the first send; nothing is sent to the server until then.
   const [pendingImage, setPendingImage] = useState<string | null>(null);
-  // Reference images for the *next* turn — inspiration only, cleared on send.
-  const [referenceImages, setReferenceImages] = useState<string[]>([]);
-  // A marked-up copy of the current result (not a reference) — annotating
-  // the stage again replaces this single slot instead of piling up new chips.
-  const [annotatedPhoto, setAnnotatedPhoto] = useState<string | null>(null);
   // A past result the user clicked to browse back to, without losing `currentImage`.
   const [selectedView, setSelectedView] = useState<string | null>(null);
 
@@ -60,14 +52,17 @@ export default function ChatToEditPage() {
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
   const [busy, setBusy] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  // Set instead of lightboxSrc when a chip preview is opened, so the lightbox
-  // knows which slot to offer Annotate/Download for.
-  const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
-  // The image being marked up, and where the result should be written back
-  // to — the base photo, one reference, or (from the stage) the current
-  // result itself. Null when the annotation tools are closed.
-  const [annotating, setAnnotating] = useState<{ src: string; target: AnnotationTarget } | null>(null);
   const [error, setError] = useState("");
+
+  // An annotated *photo* goes back into whichever slot holds the base image:
+  // the pending one before the first send, the annotated-copy slot after it.
+  const attach = useAttachments({
+    extra: !currentImage && pendingImage ? { id: "pending", src: pendingImage, label: "Photo" } : null,
+    onRemoveExtra: () => setPendingImage(null),
+    onSavePhoto: (marked) => (currentImage ? attach.setAnnotatedPhoto(marked) : setPendingImage(marked)),
+    onError: setError,
+  });
+  const { referenceImages, annotatedPhoto, annotating, setAnnotating } = attach;
 
   const conversationId = useRef<string | null>(null);
   const parentGenerationId = useRef<string | null>(null);
@@ -137,8 +132,7 @@ export default function ChatToEditPage() {
   function resetAll() {
     setCurrentImage(null);
     setPendingImage(null);
-    setReferenceImages([]);
-    setAnnotatedPhoto(null);
+    attach.reset();
     setSelectedView(null);
     setHistory([]);
     setChatInput("");
@@ -154,39 +148,6 @@ export default function ChatToEditPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read that file");
     }
-  }
-
-  async function addReferenceImages(files: File[]) {
-    setError("");
-    try {
-      const compressed = await Promise.all(files.map(compressImage));
-      setReferenceImages((current) => [...current, ...compressed]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read those files");
-    }
-  }
-
-  const attachments: Attachment[] = [
-    ...(!currentImage && pendingImage ? [{ id: "pending", src: pendingImage, label: "Photo" }] : []),
-    ...(annotatedPhoto ? [{ id: "photo", src: annotatedPhoto, label: "Photo" }] : []),
-    ...referenceImages.map((src, i) => ({ id: `ref-${i}`, src, label: "Ref" })),
-  ];
-
-  function removeAttachment(attachment: Attachment) {
-    if (attachment.id === "pending") return setPendingImage(null);
-    if (attachment.id === "photo") return setAnnotatedPhoto(null);
-    const index = Number(attachment.id.replace("ref-", ""));
-    setReferenceImages((current) => current.filter((_, i) => i !== index));
-  }
-
-  function openAttachment(attachment: Attachment) {
-    setPreviewAttachment(attachment);
-  }
-
-  /** Maps a chip back to the slot its annotated copy should be written into. */
-  function targetForAttachment(attachment: Attachment): AnnotationTarget {
-    if (attachment.id === "pending" || attachment.id === "photo") return "photo";
-    return { ref: Number(attachment.id.replace("ref-", "")) };
   }
 
   /**
@@ -213,8 +174,8 @@ export default function ChatToEditPage() {
     };
     setHistory((current) => [...current, userMsg]);
     setChatInput("");
-    setReferenceImages([]);
-    setAnnotatedPhoto(null);
+    attach.setReferenceImages([]);
+    attach.setAnnotatedPhoto(null);
     setSelectedView(null);
     setError("");
     setBusy(true);
@@ -271,7 +232,7 @@ export default function ChatToEditPage() {
   function retry(msg: ChatMsg) {
     if (msg.retryInstruction === undefined) return;
     setChatInput(msg.retryInstruction);
-    setReferenceImages(msg.retryRefImages ?? []);
+    attach.setReferenceImages(msg.retryRefImages ?? []);
     // A failed *first* turn never produced a currentImage, so its image has
     // to go back into the pending slot rather than being assumed still current.
     if (!currentImage && msg.retryImage) setPendingImage(msg.retryImage);
@@ -303,11 +264,11 @@ export default function ChatToEditPage() {
                 onChange={setChatInput}
                 onSend={() => send()}
                 busy={busy}
-                attachments={attachments}
-                onOpenAttachment={openAttachment}
-                onRemoveAttachment={removeAttachment}
-                onAttachFiles={addReferenceImages}
-                onPasteImage={(file) => addReferenceImages([file])}
+                attachments={attach.attachments}
+                onOpenAttachment={attach.setPreviewAttachment}
+                onRemoveAttachment={attach.removeAttachment}
+                onAttachFiles={attach.addReferenceImages}
+                onPasteImage={(file) => attach.addReferenceImages([file])}
                 modelOptions={MODEL_OPTIONS}
                 modelValue={model}
                 onModelChange={setModel}
@@ -369,10 +330,7 @@ export default function ChatToEditPage() {
             {annotating && annotating.target === "stage" && (
               <AnnotationOverlay
                 src={annotating.src}
-                onAttach={(marked) => {
-                  setAnnotatedPhoto(marked);
-                  setAnnotating(null);
-                }}
+                onAttach={attach.saveAnnotation}
                 onClose={() => setAnnotating(null)}
               />
             )}
@@ -380,42 +338,7 @@ export default function ChatToEditPage() {
         }
       />
 
-      {/* Reference/photo annotation replaces the preview it was opened from,
-          so it stays full-screen like the Lightbox instead of jumping to the stage. */}
-      {annotating && annotating.target !== "stage" && (
-        <AnnotationOverlay
-          fullscreen
-          src={annotating.src}
-          onAttach={(marked) => {
-            const target = annotating.target as Exclude<AnnotationTarget, "stage">;
-            if (target === "photo") {
-              if (!currentImage) setPendingImage(marked);
-              else setAnnotatedPhoto(marked);
-            } else {
-              setReferenceImages((current) => current.map((src, i) => (i === target.ref ? marked : src)));
-            }
-            setAnnotating(null);
-          }}
-          onClose={() => setAnnotating(null)}
-        />
-      )}
-
-      <Lightbox
-        src={previewAttachment?.src ?? lightboxSrc}
-        onClose={() => {
-          setLightboxSrc(null);
-          setPreviewAttachment(null);
-        }}
-        downloadName={previewAttachment ? `${previewAttachment.label.toLowerCase()}.jpg` : undefined}
-        onAnnotate={
-          previewAttachment
-            ? () => {
-                setAnnotating({ src: previewAttachment.src, target: targetForAttachment(previewAttachment) });
-                setPreviewAttachment(null);
-              }
-            : undefined
-        }
-      />
+      <AnnotationLayer attachments={attach} lightboxSrc={lightboxSrc} onCloseLightbox={() => setLightboxSrc(null)} />
     </div>
   );
 }

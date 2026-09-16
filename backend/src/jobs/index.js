@@ -5,5 +5,9 @@
  * A new tool joins the queue by adding its handler file and one line here.
  */
 require("./cleaning");
+require("./textToImage");
 
-module.exports = { CLEANING_JOB: require("./cleaning").CLEANING_JOB };
+module.exports = {
+  CLEANING_JOB: require("./cleaning").CLEANING_JOB,
+  TEXT_TO_IMAGE_JOB: require("./textToImage").TEXT_TO_IMAGE_JOB,
+};

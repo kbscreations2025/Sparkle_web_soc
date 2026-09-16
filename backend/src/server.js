@@ -8,6 +8,8 @@ const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
 const cleaningRoutes = require("./routes/cleaning");
 const chatToEditRoutes = require("./routes/chatToEdit");
+const textToImageRoutes = require("./routes/textToImage");
+const lexiconRoutes = require("./routes/lexicon");
 const historyRoutes = require("./routes/history");
 const jobRoutes = require("./routes/jobs");
 const { initSocket } = require("./socket");
@@ -34,6 +36,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/cleaning", cleaningRoutes);
 app.use("/api/chat-to-edit", chatToEditRoutes);
+app.use("/api/text-to-image", textToImageRoutes);
+app.use("/api/lexicon", lexiconRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/jobs", jobRoutes);
 

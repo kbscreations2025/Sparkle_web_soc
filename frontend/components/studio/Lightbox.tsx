@@ -30,13 +30,20 @@ export function Lightbox({
   // Pan, in screen pixels, of the image's centre away from the viewport centre.
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const frameRef = useRef<HTMLDivElement>(null);
+  // The ref carries the grab point (needed synchronously while dragging); the
+  // flag is what the render reads, since a ref's value is invisible to it.
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
 
-  // Each image opens at 100%, centred, rather than inheriting the last one's view.
-  useEffect(() => {
+  // Each image opens at 100%, centred, rather than inheriting the last one's
+  // view. Adjusted during render rather than in an effect, so the new image
+  // never paints once at the previous one's zoom before snapping back.
+  const [viewedSrc, setViewedSrc] = useState(src);
+  if (src !== viewedSrc) {
+    setViewedSrc(src);
     setScale(1);
     setOffset({ x: 0, y: 0 });
-  }, [src]);
+  }
 
   /**
    * Zooms about a point on screen: whatever pixel of the photo sits under the
@@ -102,6 +109,7 @@ export function Lightbox({
       onPointerDown={(event) => {
         if (scale <= 1 || event.button !== 0) return;
         dragRef.current = { x: event.clientX - offset.x, y: event.clientY - offset.y };
+        setDragging(true);
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
@@ -112,6 +120,7 @@ export function Lightbox({
       onPointerUp={() => {
         // Cleared next tick so the click that ends a drag doesn't close the preview.
         setTimeout(() => (dragRef.current = null), 0);
+        setDragging(false);
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- transform-scaled, so next/image's fill sizing doesn't apply */}
@@ -122,7 +131,7 @@ export function Lightbox({
         className="block max-h-[86vh] max-w-[86vw] select-none"
         style={{
           transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-          cursor: scale > 1 ? (dragRef.current ? "grabbing" : "grab") : "default",
+          cursor: scale > 1 ? (dragging ? "grabbing" : "grab") : "default",
         }}
         onClick={(event) => event.stopPropagation()}
       />

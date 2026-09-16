@@ -393,12 +393,19 @@ export type QueuedJob = {
     customPrompt?: string | null;
     referenceCount?: number;
     conversationId?: string | null;
+    /** Text to Image only. */
+    prompt?: string | null;
+    style?: string | null;
+    aspect?: string | null;
+    count?: number;
   };
   result: {
     generationId: string;
     conversationId: string;
     /** Where the finished image is stored. Render this; fetch bytes only to edit further. */
     outputUrl: string | null;
+    /** Text to Image only — every variation this run delivered, `outputUrl` repeated as the first entry. */
+    outputUrls?: string[];
     model?: string;
     modelLabel?: string;
   } | null;
@@ -512,6 +519,76 @@ export function chatEdit(body: {
   return apiRequest<ChatEditResult>("/api/chat-to-edit", {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+// ── text to image ────────────────────────────────────────────────────────────
+
+/**
+ * Kicks off a Text to Image run — a prompt in, a queued job out, same as
+ * `cleanImage`. The backend fires `count` variations at the model in
+ * parallel and, once they land, the job's `result.outputUrls` carries
+ * whichever of them came back.
+ */
+export function textToImage(body: {
+  /** Free text plus whatever the jewelry builder assembled, already joined. */
+  prompt: string;
+  model: SparkleModelId;
+  style: string;
+  aspect: string;
+  /** How many variations to generate in parallel, e.g. 2/4/6/8. */
+  count: number;
+}) {
+  return apiRequest<QueuedResult>("/api/text-to-image", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** A follow-up on one generated image — also queued, exactly like `refineImage`. */
+export function refineTextToImage(body: {
+  refineImage: string;
+  instruction: string;
+  displayPrompt?: string;
+  model: SparkleModelId;
+  referenceImages?: string[];
+  conversationId?: string | null;
+  parentGenerationId?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/text-to-image", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// ── spelling ─────────────────────────────────────────────────────────────────
+
+/** One misspelling, as character offsets into the text that was checked. */
+export type SpellIssue = {
+  from: number;
+  to: number;
+  word: string;
+  /** Ranked corrections, best first — jewellery terms ahead of general English. */
+  suggestions: string[];
+};
+
+/**
+ * Checks a prompt against English (US and British) plus this organisation's
+ * jewellery lexicon. Called on a typing pause, never per keystroke — the
+ * dictionaries live on the server.
+ */
+export function checkSpelling(text: string) {
+  return apiRequest<{ issues?: SpellIssue[] }>("/api/lexicon/check", {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+/** "Add to dictionary" — teaches one word to the whole organisation. */
+export function addLexiconTerm(term: string) {
+  return apiRequest<{ term?: string }>("/api/lexicon", {
+    method: "POST",
+    body: JSON.stringify({ term }),
   });
 }
 

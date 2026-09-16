@@ -19,7 +19,7 @@ export function Breadcrumbs() {
   return (
     <nav
       aria-label="Breadcrumb"
-      className="hidden md:flex -translate-y-px items-center gap-1 min-w-0 text-xs"
+      className="hidden md:flex -translate-y-px items-center gap-1 min-w-0 text-xs ml-3"
     >
       {crumbs.map((crumb, index) => {
         const isHome = index === 0;

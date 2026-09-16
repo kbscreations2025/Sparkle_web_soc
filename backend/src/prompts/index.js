@@ -7,5 +7,14 @@
 const { IMAGE_CLEANING_PROMPT } = require("./imageCleaning");
 const { SCALE_NOTE, ANATOMY_NOTE, buildChatEditPrompt } = require("./chatToEdit");
 const { buildReferenceNote } = require("./shared");
+const { buildTextToImagePrompt, buildTextToImageRefinePrompt } = require("./textToImage");
 
-module.exports = { IMAGE_CLEANING_PROMPT, SCALE_NOTE, ANATOMY_NOTE, buildChatEditPrompt, buildReferenceNote };
+module.exports = {
+  IMAGE_CLEANING_PROMPT,
+  SCALE_NOTE,
+  ANATOMY_NOTE,
+  buildChatEditPrompt,
+  buildReferenceNote,
+  buildTextToImagePrompt,
+  buildTextToImageRefinePrompt,
+};

@@ -40,6 +40,6 @@ export function usePageToolbar(node: ReactNode) {
     setToolbar(node);
   });
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup-only: must fire on unmount alone, not whenever `node` changes identity
+  // Cleanup-only: clears the toolbar when the page unmounts.
   useEffect(() => () => setToolbar(null), [setToolbar]);
 }

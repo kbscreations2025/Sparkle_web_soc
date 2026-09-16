@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, type ClipboardEvent } from "react";
+import { useRef, type ClipboardEvent } from "react";
 import { ImagePlus, Send, Loader2 } from "lucide-react";
 import { AttachmentChips, type Attachment } from "./AttachmentChips";
+import { SpellCheckedTextarea } from "./SpellCheckedTextarea";
 import { cn } from "@/lib/utils";
 
 /**
@@ -44,17 +45,9 @@ export function ChatInputBar<TModel extends string>({
   placeholder?: string;
 }) {
   const quality = modelOptions.find((option) => option.value === modelValue)?.quality;
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canSend = (value.trim() !== "" || attachments.length > 0) && !busy;
-
-  useEffect(() => {
-    const node = textareaRef.current;
-    if (!node) return;
-    node.style.height = "auto";
-    node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
-  }, [value]);
 
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const imageItem = [...event.clipboardData.items].find((item) => item.type.startsWith("image/"));
@@ -70,10 +63,9 @@ export function ChatInputBar<TModel extends string>({
     <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] transition-colors focus-within:border-gold/30">
       <AttachmentChips attachments={attachments} onOpen={onOpenAttachment} onRemove={onRemoveAttachment} />
 
-      <textarea
-        ref={textareaRef}
+      <SpellCheckedTextarea
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
         onPaste={handlePaste}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
@@ -82,9 +74,10 @@ export function ChatInputBar<TModel extends string>({
           }
         }}
         rows={2}
+        autoGrowMaxHeight={160}
         placeholder={placeholder}
         disabled={busy}
-        className="w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-xs leading-relaxed text-cream placeholder:text-faint/60 outline-none disabled:opacity-50"
+        textClassName="w-full px-3 pb-1 pt-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words"
       />
 
       <div className="flex items-end justify-between gap-1.5 px-2 pb-2 pt-1">
