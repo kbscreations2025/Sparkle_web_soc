@@ -123,6 +123,9 @@ router.post("/", async (req, res) => {
       payload: {
         isRefinement: false,
         prompt: String(prompt).trim(),
+        // What History shows as the user's own words, distinct from the full
+        // prompt the model is actually sent.
+        userPrompt: String(prompt).trim(),
         style,
         aspect,
         count: numImages,

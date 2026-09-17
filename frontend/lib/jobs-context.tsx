@@ -24,6 +24,50 @@ const SETTLED_TTL_MS = 15 * 60 * 1000;
 /** Coarse on purpose: a minute either side of a 15-minute cut-off is invisible, and this wakes the tab. */
 const PRUNE_EVERY_MS = 60 * 1000;
 
+/**
+ * How often work in flight is re-read from the server, on top of the socket.
+ *
+ * Only ever runs while something is actually queued or running, so an idle tab
+ * polls nothing. The two rates say what this is for:
+ *
+ * · Connected — a safety net, nothing more. The socket is the live path; this
+ *   only exists so that a push which is dropped, misaddressed or missed can't
+ *   leave a bar frozen until the user thinks to open something.
+ * · Disconnected — this *is* the live path, so it runs fast enough to read as
+ *   live rather than as a page that has given up.
+ */
+const POLL_CONNECTED_MS = 8000;
+const POLL_OFFLINE_MS = 2500;
+
+/**
+ * Folds one update onto what this tab already knew about a job.
+ *
+ * Almost everything is last-write-wins, with one exception: the live previews
+ * of images a run has already produced. The server sends each one on the
+ * single tick it lands and never re-sends it, so that a per-second push stays
+ * a few bytes — which means a plain overwrite would show the first image and
+ * then lose it a second later. They are accumulated here instead, and dropped
+ * the moment the job settles, when `result` carries the stored urls and the
+ * previews are only wasted memory.
+ */
+function merge(previous: QueuedJob | undefined, incoming: QueuedJob): QueuedJob {
+  if (!ACTIVE.has(incoming.status)) return incoming;
+  if (!previous?.partials?.length) return incoming;
+
+  const seen = new Set(previous.partials);
+  const added = (incoming.partials ?? []).filter((src) => !seen.has(src));
+  return {
+    ...incoming,
+    // The same array when nothing new arrived, so the once-a-second tick
+    // doesn't hand every consumer a fresh reference to re-render against.
+    partials: added.length ? [...previous.partials, ...added] : previous.partials,
+    // Carried the same way and for the same reason: only the tick where a
+    // variation landed reports them, and the REST catch-up never does.
+    completedCount: incoming.completedCount ?? previous.completedCount,
+    totalCount: incoming.totalCount ?? previous.totalCount,
+  };
+}
+
 /** When a job finished, falling back to when it was created for older rows. */
 const settledAt = (job: QueuedJob) => Date.parse(job.finishedAt ?? job.createdAt);
 
@@ -124,7 +168,7 @@ export function JobsProvider({ children }: { children: ReactNode }) {
 
     setJobsById((current) => {
       const next = { ...current };
-      for (const job of Array.isArray(incoming) ? incoming : [incoming]) next[job.id] = job;
+      for (const job of Array.isArray(incoming) ? incoming : [incoming]) next[job.id] = merge(current[job.id], job);
 
       // Trim settled jobs once there are too many to be worth remembering.
       // Active ones are never dropped: something on screen is waiting for them.
@@ -157,7 +201,11 @@ export function JobsProvider({ children }: { children: ReactNode }) {
         // filtered on the way in too — otherwise a reconnect would repopulate
         // the rail with work that had already aged out of it.
         const incoming = result.jobs!.filter((job) => isCurrent(job, now));
-        return { ...settled, ...Object.fromEntries(incoming.map((job) => [job.id, job])) };
+        // Merged, not replaced, for the live-only fields: this response comes
+        // from the job document, which deliberately doesn't store the previews
+        // a running job has already streamed, and a catch-up fetch must not
+        // blank the images the user can already see.
+        return { ...settled, ...Object.fromEntries(incoming.map((job) => [job.id, merge(current[job.id], job)])) };
       });
     }
   }, [userId, recordSettled]);
@@ -220,6 +268,21 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     [jobsById]
   );
   const activeJobs = useMemo(() => jobs.filter((job) => ACTIVE.has(job.status)), [jobs]);
+
+  /**
+   * Keeps in-flight work current without anybody asking for it.
+   *
+   * Gated on there being something to watch — `hasActive`, not the job list
+   * itself, so a progress tick arriving once a second doesn't tear this timer
+   * down and rebuild it every time.
+   */
+  const hasActive = activeJobs.length > 0;
+  useEffect(() => {
+    if (!hasActive || !userId) return;
+
+    const timer = setInterval(refresh, connected ? POLL_CONNECTED_MS : POLL_OFFLINE_MS);
+    return () => clearInterval(timer);
+  }, [hasActive, connected, userId, refresh]);
 
   const value = useMemo(
     () => ({ jobs, activeJobs, connected, track: (job: QueuedJob) => upsert(job), refresh, onJobSettled }),

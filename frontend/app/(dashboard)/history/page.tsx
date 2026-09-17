@@ -334,7 +334,7 @@ export default function HistoryPage() {
         {filterControls}
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 md:px-5 md:py-5 lg:px-6">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 lg:p-4">
         {loading ? (
           <SkeletonGrid rows={3} />
         ) : visibleItems.length === 0 ? (
@@ -350,7 +350,7 @@ export default function HistoryPage() {
               >
                 <div
                   className="grid"
-                  style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP, paddingBottom: GRID_GAP }}
+                  style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP }}
                 >
                   {rows[virtualRow.index].map((item) => (
                     <HistoryTile

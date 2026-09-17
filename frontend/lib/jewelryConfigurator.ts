@@ -27,6 +27,28 @@ export const STYLES = [
 
 export type StyleId = (typeof STYLES)[number]["id"];
 
+/**
+ * The four drawing media the sketch tools offer. Text to Sketch leads with
+ * pencil; Image to Sketch orders them pencil-ink-charcoal-gouache, which is
+ * the order below — a page that wants its own order sorts it.
+ */
+export const SKETCH_STYLES = [
+  { id: "pencil", label: "Pencil" },
+  { id: "ink", label: "Ink Line Art" },
+  { id: "charcoal", label: "Charcoal" },
+  { id: "gouache", label: "Gouache Render" },
+] as const;
+
+export type SketchStyleId = (typeof SKETCH_STYLES)[number]["id"];
+
+/**
+ * Photo-driven tools produce fewer at a time than text-driven ones — Sketch to
+ * Image and Image to Sketch are following a piece that already exists, so
+ * there is far less to vary than when inventing one from a description.
+ */
+export const PHOTO_COUNT_OPTIONS = [1, 2, 3] as const;
+export const DEFAULT_PHOTO_COUNT = 1;
+
 export const JEWELRY_TYPE_OPTIONS = ["Ring", "Pendant", "Bangle", "Bracelet", "Cufflink", "Earring", "Necklace", "Set"];
 
 /** Selected by default whenever no jewelry type has been chosen yet. */
@@ -154,5 +176,6 @@ export function clearJewelryTypeDependentSelections(sel: Record<string, string>)
   return next;
 }
 
-export const TEXT_COUNT_OPTIONS = [2, 4, 6, 8] as const;
-export const DEFAULT_IMAGE_COUNT = 4;
+/** Text-driven tools — Text to Image and Text to Sketch — offer a run of 2 to 5. */
+export const TEXT_COUNT_OPTIONS = [2, 3, 4, 5] as const;
+export const DEFAULT_IMAGE_COUNT = 2;

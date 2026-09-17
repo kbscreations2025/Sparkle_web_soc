@@ -24,6 +24,7 @@ export function ChatMessages({
   history,
   busy,
   busyCount = 1,
+  busyImages,
   selectedSrc,
   onSelectResult,
   onRetry,
@@ -35,6 +36,8 @@ export function ChatMessages({
   busy?: boolean;
   /** How many results the in-flight turn will produce — one placeholder each. */
   busyCount?: number;
+  /** Results of the in-flight turn that have already arrived, filling those placeholders in order. */
+  busyImages?: string[];
   /** Which result is currently on the stage, so its thumbnail can be marked. */
   selectedSrc?: string | null;
   /** Called with a past assistant turn's image when its thumbnail is clicked. */
@@ -57,7 +60,7 @@ export function ChatMessages({
         )
       )}
 
-      {busy && <SkeletonBubble count={busyCount} />}
+      {busy && <SkeletonBubble count={busyCount} arrived={busyImages} onOpen={onSelectResult} />}
 
       {/* After the thread, not before it: these are what to say next. Whether
           they still apply is the caller's call — it passes none once they
@@ -196,23 +199,49 @@ function AssistantBubble({
 }
 
 /**
- * Placeholders in the assistant slot, one per result still to come and sized
- * like the thumbnails that replace them — so a run's size is visible from the
- * moment it is queued, not only once it lands.
+ * The assistant slot while a turn is in flight: one tile per result, in the
+ * same place and at the same size as the thumbnails that replace them — so a
+ * run's size is visible from the moment it is queued, not only once it lands.
+ *
+ * Tiles fill in as the results arrive rather than all at the end. A run of
+ * four is four separate provider calls, and there is no reason to hide the
+ * first image until the fourth one is done; each `arrived` preview takes the
+ * next placeholder, and the rest keep pulsing.
  */
-function SkeletonBubble({ count }: { count: number }) {
-  const tiles = Math.max(1, count);
+function SkeletonBubble({
+  count,
+  arrived = [],
+  onOpen,
+}: {
+  count: number;
+  arrived?: string[];
+  onOpen?: (src: string) => void;
+}) {
+  // A run can deliver more than it promised only if the caller's count is
+  // stale; trust what actually arrived over the prediction.
+  const tiles = Math.max(1, count, arrived.length);
 
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-xl rounded-bl-sm border border-white/10 bg-white/[0.04] p-1.5">
         <div className="flex flex-wrap gap-1">
-          {Array.from({ length: tiles }, (_, index) => (
-            <div
-              key={index}
-              className={cn("animate-pulse rounded-md bg-white/[0.09]", tiles > 1 ? TILE_MULTI : TILE_SINGLE)}
-            />
-          ))}
+          {Array.from({ length: tiles }, (_, index) => {
+            const src = arrived[index];
+            const size = tiles > 1 ? TILE_MULTI : TILE_SINGLE;
+
+            if (!src) return <div key={index} className={cn("animate-pulse rounded-md bg-white/[0.09]", size)} />;
+
+            return (
+              <button
+                key={index}
+                type="button"
+                onClick={() => onOpen?.(src)}
+                className="block overflow-hidden rounded-md border border-transparent transition-colors hover:border-gold/30"
+              >
+                <Thumb src={src} className={size} sizes={tiles > 1 ? "48px" : "64px"} />
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

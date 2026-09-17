@@ -373,6 +373,18 @@ export type QueuedJob = {
   progress: number;
   /** Which stage the run is in — "preparing", "generating", "saving", "done". Null on older jobs. */
   phase: string | null;
+  /**
+   * Images this run has already produced, as small inline previews, pushed the
+   * moment each one lands rather than when the whole run finishes. Replaced by
+   * the stored urls in `result` once the job completes.
+   *
+   * Live-only, and accumulated by the jobs store across ticks: the server sends
+   * each preview on the single tick it arrives, and never re-sends it.
+   */
+  partials?: string[];
+  /** How many of `totalCount` variations have actually come back. The exact figure behind the bar. */
+  completedCount?: number;
+  totalCount?: number | null;
   /** What this run was predicted to cost, fixed when it started. What "time left" is computed against. */
   estimatedMs: number | null;
   /** What it actually cost. Set once it finishes. */
@@ -559,6 +571,63 @@ export function refineTextToImage(body: {
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+// ── sketch tools ─────────────────────────────────────────────────────────────
+
+/**
+ * The follow-up turn every generate-then-refine tool shares. Only the endpoint
+ * differs, so `refineOn` builds the call for whichever tool is asking.
+ */
+export type RefineBody = {
+  refineImage: string;
+  instruction: string;
+  displayPrompt?: string;
+  referenceImages?: string[];
+  model: SparkleModelId;
+  conversationId?: string | null;
+  parentGenerationId?: string | null;
+};
+
+export function refineOn(path: string) {
+  return (body: RefineBody) =>
+    apiRequest<QueuedResult>(path, { method: "POST", body: JSON.stringify(body) });
+}
+
+/** A written brief drawn as a sketch, optionally starting from a reference photo. */
+export function textToSketch(body: {
+  prompt: string;
+  model: SparkleModelId;
+  style: string;
+  aspect: string;
+  count: number;
+  /** Optional photo the design is drawn from, as a data URI. */
+  referenceImage?: string;
+}) {
+  return apiRequest<QueuedResult>("/api/text-to-sketch", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** One or more hand-drawn sketches rendered as a photorealistic product shot. */
+export function sketchToImage(body: {
+  /** Every view of the piece, as data URIs — they go to the model together. */
+  images: string[];
+  description?: string;
+  model: SparkleModelId;
+  count: number;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/sketch-to-image", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** A photograph redrawn by hand as a sketch. */
+export function imageToSketch(body: {
+  image: string;
+  style: string;
+  model: SparkleModelId;
+  count: number;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/image-to-sketch", { method: "POST", body: JSON.stringify(body) });
 }
 
 // ── spelling ─────────────────────────────────────────────────────────────────

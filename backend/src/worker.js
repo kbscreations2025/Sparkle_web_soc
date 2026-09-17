@@ -74,7 +74,7 @@ async function processJob(bullJob) {
   // few seconds, the socket every second, and the client should see the
   // faster of the two.
   let lastPersistedAt = 0;
-  const publish = async (percent, phase, { persist = false } = {}) => {
+  const publish = async (percent, phase, { persist = false, partials, completed, total } = {}) => {
     const rounded = Math.max(0, Math.min(100, Math.round(percent)));
     job.progress = rounded;
     if (phase) job.phase = phase;
@@ -88,6 +88,11 @@ async function processJob(bullJob) {
       phase: job.phase,
       estimatedMs: job.estimatedMs,
       startedAt: job.startedAt,
+      // Only ever sent on the tick where something actually finished. Every
+      // other tick leaves them out, so a per-second push stays a few bytes
+      // instead of re-shipping every preview; the client accumulates them.
+      ...(partials?.length ? { partials } : {}),
+      ...(typeof completed === "number" ? { completed, total } : {}),
     });
   };
 
@@ -100,28 +105,62 @@ async function processJob(bullJob) {
   /**
    * Runs `fn` while walking the bar from `from` towards `to`.
    *
-   * This is the whole fix for a percentage that used to sit still: the
-   * provider call is nearly all of a job's wall time and reports nothing
-   * while it runs, so without a clock driving the bar there is simply
-   * nothing to send between the two milestones either side of it.
+   * Two things drive the bar, and they answer different halves of the problem.
+   *
+   * The clock answers "is it alive": the provider call is nearly all of a
+   * job's wall time and reports nothing while it runs, so without a ticker
+   * there is simply nothing to send between the two milestones either side of
+   * it, and the percentage sits still.
+   *
+   * `steps` answers "how far along, exactly". A run producing four images is
+   * four provider calls, and each one that lands is a fact — not an estimate.
+   * The band is divided into that many equal slices, and a finished call snaps
+   * the bar to its slice boundary. Between boundaries the clock creeps within
+   * the current slice only, so it can never claim more than has actually been
+   * delivered, and every reported percentage is one the work has earned.
+   *
+   * `fn` receives `{ stepDone }` to report each completion, along with the
+   * preview to push out with it.
    *
    * The ticker is cleared in a `finally`, so a throw can't leave an interval
    * running against a settled job.
    */
-  const withProgress = async ({ from, to, phase }, fn) => {
-    const startedAt = Date.now();
-    await publish(from, phase, { persist: true });
+  const withProgress = async ({ from, to, phase, steps = 1 }, fn) => {
+    const slice = (to - from) / Math.max(1, steps);
+
+    let done = 0;
+    let sliceStartedAt = Date.now();
+    await publish(from, phase, { persist: true, completed: 0, total: steps });
 
     const ticker = setInterval(() => {
-      publish(rampedPercent(from, to, Date.now() - startedAt, job.estimatedMs), phase).catch((err) =>
+      // Never past the next real milestone. The steps run concurrently, so one
+      // of them is expected to cost roughly the whole estimate rather than a
+      // share of it — measuring against `estimatedMs` undivided is what keeps
+      // the clock from saturating its slice in the first few seconds and then
+      // sitting there. Between milestones the bar creeps; only a delivered
+      // image moves it to a boundary.
+      const base = from + slice * done;
+      publish(rampedPercent(base, base + slice, Date.now() - sliceStartedAt, job.estimatedMs), phase).catch((err) =>
         console.error(`[worker] progress tick failed for ${jobId}:`, err.message)
       );
     }, TICK_MS);
     // Nothing should be kept alive purely by a progress bar.
     ticker.unref?.();
 
+    /** One unit of the band is genuinely finished. Snaps the bar to its boundary. */
+    const stepDone = async (preview) => {
+      done = Math.min(steps, done + 1);
+      sliceStartedAt = Date.now();
+      await publish(from + slice * done, phase, {
+        persist: true,
+        completed: done,
+        total: steps,
+        partials: preview ? [preview] : undefined,
+      }).catch((err) => console.error(`[worker] step report failed for ${jobId}:`, err.message));
+    };
+
     try {
-      return await fn();
+      return await fn({ stepDone });
     } finally {
       clearInterval(ticker);
     }

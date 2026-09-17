@@ -40,6 +40,15 @@ type Job = {
   original: string;
   /** Latest cleaned version. Replaced by each refinement. */
   cleaned: string | null;
+  /**
+   * A small preview of the run in flight, pushed the moment the model answers
+   * and before the full image has been stored.
+   *
+   * Kept apart from `cleaned` on purpose: `cleaned` is what a refinement is
+   * sent, and that must always be the full-resolution image, never the
+   * downscaled stand-in shown while waiting.
+   */
+  preview?: string | null;
   status: "queued" | "running" | "done" | "failed";
   error?: string;
   conversationId?: string | null;
@@ -187,6 +196,12 @@ export function CleaningWorkspace<TModel extends string>({
       const pending = pendingJobs.current[queueJob.id];
       if (!pending) continue;
 
+      // Shown while the rest of the run finishes, so the wait ends when the
+      // model answers rather than when the upload does.
+      if (queueJob.status === "running" && queueJob.partials?.length) {
+        updateJob(pending.localJobId, { preview: queueJob.partials[queueJob.partials.length - 1] });
+      }
+
       if (queueJob.status === "completed" && queueJob.result) {
         delete pendingJobs.current[queueJob.id];
         const { outputUrl, conversationId, generationId } = queueJob.result;
@@ -195,6 +210,8 @@ export function CleaningWorkspace<TModel extends string>({
           updateJob(pending.localJobId, {
             status: "done",
             cleaned: outputUrl,
+            // The stored image is here; the stand-in has done its job.
+            preview: null,
             conversationId,
             generationId,
             // Empty, not seeded with the result: the initial clean already
@@ -204,7 +221,7 @@ export function CleaningWorkspace<TModel extends string>({
             history: [],
           });
         } else {
-          updateJob(pending.localJobId, { cleaned: outputUrl, generationId });
+          updateJob(pending.localJobId, { cleaned: outputUrl, preview: null, generationId });
           appendMessage(pending.localJobId, {
             id: crypto.randomUUID(),
             role: "assistant",
@@ -502,7 +519,13 @@ export function CleaningWorkspace<TModel extends string>({
                           job.id === selectedId ? "border-gold/50" : "border-white/10 hover:border-gold/25"
                         )}
                       >
-                        <Image src={job.cleaned ?? job.original} alt={job.name} fill sizes="60px" className="object-cover" />
+                        <Image
+                          src={job.cleaned ?? job.preview ?? job.original}
+                          alt={job.name}
+                          fill
+                          sizes="60px"
+                          className="object-cover"
+                        />
                         {job.status !== "done" && (
                           <span className="absolute inset-0 flex items-center justify-center bg-black/50">
                             {job.status === "running" && <Loader2 size={12} className="animate-spin text-white" />}
@@ -517,6 +540,7 @@ export function CleaningWorkspace<TModel extends string>({
               <ChatMessages
                 history={selected?.history ?? []}
                 busy={refining || generatingSelected}
+                busyImages={selected?.preview ? [selected.preview] : undefined}
                 onSelectResult={setSelectedView}
                 onRetry={retry}
                 hints={selected?.cleaned && selected.history.length === 0 ? REFINE_SUGGESTIONS : undefined}
@@ -545,8 +569,10 @@ export function CleaningWorkspace<TModel extends string>({
           stage={
             <>
               <GenerationStage
-                src={selectedView ?? selected?.cleaned ?? null}
-                busy={generatingSelected}
+                src={selectedView ?? selected?.cleaned ?? selected?.preview ?? null}
+                // Only until the preview lands — after that the stage has the
+                // result to show, dimmed behind nothing.
+                busy={generatingSelected && !selected?.preview}
                 busyLabel="Generating…"
                 emptyLabel={selected?.error ?? "Nothing yet"}
                 downloadName={selected ? `cleaned-${selected.name}` : undefined}

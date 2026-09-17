@@ -136,10 +136,17 @@ export function describeJob(job: QueuedJob, now: number): JobTiming {
           : null;
 
     const phase = PHASE_LABELS[job.phase ?? ""] || "Generating";
+
+    // For a run producing several images, how many have actually come back is
+    // the one exact thing there is to say — the percentage between those
+    // milestones is still a prediction, this isn't.
+    const delivered =
+      job.totalCount && job.totalCount > 1 ? `${job.completedCount ?? 0}/${job.totalCount} images` : null;
+
     return {
       elapsedMs,
       remainingMs,
-      label: `${phase}… ${job.progress}%${clock ? ` · ${clock}` : ""}`,
+      label: [`${phase}… ${job.progress}%`, delivered, clock].filter(Boolean).join(" · "),
     };
   }
 

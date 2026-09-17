@@ -1,6 +1,7 @@
 const { IMAGE_CLEANING_PROMPT, buildReferenceNote } = require("../prompts");
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
+const { createLivePreview } = require("../storage/thumbnail");
 const { registerJobHandler } = require("./registry");
 const User = require("../models/user");
 
@@ -67,8 +68,8 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
   // ends of it. `withProgress` stops the ticker however this exits.
   const { output, providerId } = await withProgress(
     { from: 20, to: 85, phase: "generating" },
-    () =>
-      routeProviderCall({
+    async ({ stepDone }) => {
+      const result = await routeProviderCall({
         tenant,
         provider,
         modelId: model,
@@ -77,7 +78,14 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
           { mimeType: image.mimeType, base64: image.base64 },
           ...references.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),
         ],
-      })
+      });
+
+      // Pushed the moment the model answers, so the wait ends there rather
+      // than after the upload below. Same treatment every other tool gets.
+      const preview = await createLivePreview(Buffer.from(result.output.base64, "base64"));
+      await stepDone(preview?.dataUrl ?? null);
+      return result;
+    }
   );
 
   // The model has answered; what's left is storage, which is quick but not

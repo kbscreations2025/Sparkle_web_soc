@@ -1,5 +1,6 @@
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
+const { createLivePreview } = require("../storage/thumbnail");
 const User = require("../models/user");
 
 /**
@@ -18,7 +19,14 @@ const User = require("../models/user");
  */
 
 const MAX_IMAGE_COUNT = 8;
-const DEFAULT_IMAGE_COUNT = 4;
+/**
+ * What a text-driven run produces when the client names no count.
+ *
+ * The photo-driven tools pass their own fallback of 1 at the route, so this is
+ * only ever the text default — it must stay in step with the picker's default
+ * in the frontend's `DEFAULT_IMAGE_COUNT`.
+ */
+const DEFAULT_IMAGE_COUNT = 2;
 
 /** Clamps whatever the client asked for into what a run is allowed to produce. */
 function clampCount(count, fallback = DEFAULT_IMAGE_COUNT) {
@@ -50,15 +58,21 @@ async function runGenerationJob({ job, data, setProgress, withProgress, tool, bu
     const { refineImage, references = [], instruction, displayPrompt } = data;
     const prompt = buildRefinePrompt({ instruction, referenceCount: references.length });
 
-    const { output, providerId } = await withProgress({ from: 20, to: 85, phase: "generating" }, () =>
-      routeProviderCall({
+    const { output, providerId } = await withProgress({ from: 20, to: 85, phase: "generating" }, async ({ stepDone }) => {
+      const result = await routeProviderCall({
         tenant,
         provider,
         modelId: model,
         prompt,
         images: [refineImage, ...references].map(({ mimeType, base64 }) => ({ mimeType, base64 })),
-      })
-    );
+      });
+
+      // Shown while the result is still being uploaded and recorded, so the
+      // wait ends when the model answers rather than when storage does.
+      const preview = await createLivePreview(Buffer.from(result.output.base64, "base64"));
+      await stepDone(preview?.dataUrl ?? null);
+      return result;
+    });
 
     await setProgress(88, "saving");
 
@@ -83,17 +97,26 @@ async function runGenerationJob({ job, data, setProgress, withProgress, tool, bu
   const sourceImages = data.sourceImages ?? [];
   const prompt = buildPrompt({ data, count });
 
-  const settled = await withProgress({ from: 20, to: 85, phase: "generating" }, () =>
+  // One slice of the bar per variation, and each one reports the moment it
+  // lands: the user sees the first image while the rest are still running,
+  // and the percentage moves on facts rather than on a clock alone.
+  const settled = await withProgress({ from: 20, to: 85, phase: "generating", steps: count }, ({ stepDone }) =>
     Promise.allSettled(
-      Array.from({ length: count }, () =>
-        routeProviderCall({
+      Array.from({ length: count }, async () => {
+        const result = await routeProviderCall({
           tenant,
           provider,
           modelId: model,
           prompt,
           images: sourceImages.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
-        })
-      )
+        });
+
+        // Best-effort, and awaited only so the bar and the preview move
+        // together: a preview that fails still leaves a counted variation.
+        const preview = await createLivePreview(Buffer.from(result.output.base64, "base64"));
+        await stepDone(preview?.dataUrl ?? null);
+        return result;
+      })
     )
   );
 
@@ -103,6 +126,8 @@ async function runGenerationJob({ job, data, setProgress, withProgress, tool, bu
     throw firstFailure ? firstFailure.reason : new Error("Every variation failed to generate");
   }
 
+  // A variation that failed never reported a step, so the bar would stop short
+  // of the band. Close the gap rather than leaving it stuck below 85%.
   await setProgress(88, "saving");
 
   const saved = await recordGeneration({

@@ -167,6 +167,15 @@ function startQueueEventsBridge() {
         if (typeof live.percent === "number") payload.progress = live.percent;
         if (live.phase) payload.phase = live.phase;
         if (typeof live.estimatedMs === "number") payload.estimatedMs = live.estimatedMs;
+        // Images the run has already produced, and how many of the expected
+        // total they are. Live-only: these are inline previews, which is
+        // exactly what the job document must not be made to carry. The client
+        // accumulates them across ticks, so sending each one once is enough.
+        if (Array.isArray(live.partials) && live.partials.length) payload.partials = live.partials;
+        if (typeof live.completed === "number") {
+          payload.completedCount = live.completed;
+          payload.totalCount = live.total ?? null;
+        }
       }
 
       emitToUser(job.userId, "job:updated", payload);

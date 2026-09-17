@@ -72,6 +72,7 @@ export const TOOLS: Tool[] = [
     icon: PenTool,
     description: "Describe it, AI sketches it",
     image: "/dashboard/sketch2.png",
+    href: "/text-to-sketch",
     permission: "tool.text_to_sketch.run",
   },
   {
@@ -80,6 +81,7 @@ export const TOOLS: Tool[] = [
     icon: ImageIcon,
     description: "Upload a sketch, AI renders it",
     image: "/dashboard/image2.png",
+    href: "/sketch-to-image",
     permission: "tool.sketch_to_image.run",
   },
   {
@@ -96,6 +98,7 @@ export const TOOLS: Tool[] = [
     icon: PenLine,
     description: "Upload an image, AI sketches it",
     image: "/dashboard/sketch.png",
+    href: "/image-to-sketch",
     permission: "tool.image_to_sketch.run",
   },
   {
@@ -150,6 +153,9 @@ export const TOOL_WORKSPACE_PATHS: Record<string, string> = {
   cleaning: "/cleaning/default",
   chat_to_edit: "/chat-to-edit",
   text_to_image: "/text-to-image",
+  text_to_sketch: "/text-to-sketch",
+  sketch_to_image: "/sketch-to-image",
+  image_to_sketch: "/image-to-sketch",
 };
 
 /**

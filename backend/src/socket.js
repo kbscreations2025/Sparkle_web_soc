@@ -3,10 +3,31 @@ const cookie = require("cookie");
 const config = require("./config");
 const { decodeUserProfile } = require("./cookies");
 const { resolveSession } = require("./session");
+const User = require("./models/user");
 
 const REVALIDATE_INTERVAL_MS = 60 * 1000;
 
 let ioInstance = null;
+
+/**
+ * This app's User `_id` for a central `user_id`, or null for someone with no
+ * row here yet (a super admin before provisioning).
+ *
+ * A read, never a write: linking an account is the login path's job, and a
+ * websocket handshake must not be able to create rows.
+ */
+async function appUserIdFor(centralUserId) {
+  if (!centralUserId) return null;
+  try {
+    const row = await User.findOne({ authUserId: centralUserId }).select("_id").lean();
+    return row ? String(row._id) : null;
+  } catch (err) {
+    // A socket that can't resolve its second room still gets auth events on
+    // the first one — worth degrading rather than refusing the connection.
+    console.error("[socket] could not resolve app user id:", err.message);
+    return null;
+  }
+}
 
 function initSocket(httpServer) {
   const io = new Server(httpServer, {
@@ -25,11 +46,30 @@ function initSocket(httpServer) {
     // verify-token returns no email, so it comes from the profile cookie we
     // wrote at login.
     socket.data.email = decodeUserProfile(cookies.user_profile).email?.toLowerCase() || null;
+
+    // This app's own id for the same person. Resolved here rather than in the
+    // connection handler on purpose: an await there would leave a window after
+    // the socket is live but before it has joined its rooms, and anything
+    // emitted in that window would be dropped.
+    socket.data.appUserId = await appUserIdFor(socket.data.user.user_id);
     next();
   });
 
   io.on("connection", (socket) => {
     socket.join(`user:${socket.data.user.user_id}`);
+
+    /**
+     * The same person has two ids, and both address them here.
+     *
+     * The central login knows them as `user_id`; everything this application
+     * stores — jobs, generations, assets — references the Mongo `_id` of their
+     * User row. Auth-side events (a forced logout) are addressed by the
+     * former, and every application event by the latter, so a socket that
+     * joined only one of the two rooms silently received half the traffic:
+     * job progress was emitted to a room with nobody in it, and the queue only
+     * appeared to update because opening it triggers a REST refresh.
+     */
+    if (socket.data.appUserId) socket.join(`user:${socket.data.appUserId}`);
 
     // Also joined by email, because a login that still needs an OTP is
     // answered with `otp_required` and no user object — the email is the only

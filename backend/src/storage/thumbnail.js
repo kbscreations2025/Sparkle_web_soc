@@ -96,6 +96,51 @@ async function createThumbnail(buffer) {
   };
 }
 
+/**
+ * Long edge of the copy sent to the browser *while a run is still going*.
+ *
+ * Deliberately much smaller than a stored thumbnail: this one is inlined as a
+ * data URI and travels over Redis and a websocket, so its size is paid on
+ * every push rather than once on upload. 384px at quality 70 lands around
+ * 20–30KB — small enough to ship the moment a variation lands, and sharp
+ * enough to fill a result tile until the stored image replaces it.
+ */
+const PREVIEW_MAX_SIDE = 384;
+const PREVIEW_QUALITY = 70;
+
+/**
+ * A finished image, small enough to push down a socket as a data URI.
+ *
+ * The point is that a run producing four images shouldn't show the user
+ * nothing until the fourth one is done. Each variation is previewed here the
+ * moment the provider answers, and swapped for the stored url when the job
+ * completes.
+ *
+ * Returns null rather than throwing: a preview is a nicety on top of a run
+ * that is already succeeding, and must never be able to fail it.
+ */
+async function createLivePreview(buffer) {
+  try {
+    const { data, info } = await sharp(buffer, { failOn: "none" })
+      .rotate()
+      .resize({
+        width: PREVIEW_MAX_SIDE,
+        height: PREVIEW_MAX_SIDE,
+        fit: "inside",
+        withoutEnlargement: true,
+        kernel: "lanczos3",
+      })
+      .flatten({ background: "#ffffff" })
+      .webp({ quality: PREVIEW_QUALITY, effort: 3 })
+      .toBuffer({ resolveWithObject: true });
+
+    return { dataUrl: `data:image/webp;base64,${data.toString("base64")}`, width: info.width, height: info.height };
+  } catch (err) {
+    console.error("createLivePreview: could not build preview:", err.message);
+    return null;
+  }
+}
+
 // `THUMB_MIME` stays internal: it already rides back on every result, so
 // exporting it too would be a second way to learn the same thing.
-module.exports = { createThumbnail, THUMB_EXTENSION };
+module.exports = { createThumbnail, createLivePreview, THUMB_EXTENSION };
