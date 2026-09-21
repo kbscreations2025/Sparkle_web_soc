@@ -78,7 +78,10 @@ async function runGenerationJob({
   const dbUser = await User.findById(job.userId);
   if (!dbUser) throw new Error("the user who queued this job no longer exists");
 
-  const { provider, model, quality, modelLabel } = resolveProviderModel(data.requestedModel);
+  const { provider, model, quality, modelLabel } = resolveProviderModel(
+    data.requestedModel,
+    data.requestedQuality
+  );
   const tenant = await loadTenantOrThrow(dbUser);
 
   const common = { tenant, user: dbUser, tool, model, modelLabel, quality, provider, params };
@@ -93,6 +96,7 @@ async function runGenerationJob({
         provider,
         modelId: model,
         prompt,
+        quality,
         images: [refineImage, ...references].map(({ mimeType, base64 }) => ({ mimeType, base64 })),
       });
 
@@ -156,6 +160,7 @@ async function runGenerationJob({
           provider,
           modelId: model,
           prompt: shot.prompt,
+          quality,
           images: shot.images.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
         });
 

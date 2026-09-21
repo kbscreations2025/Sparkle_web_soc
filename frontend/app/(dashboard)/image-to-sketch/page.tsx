@@ -26,6 +26,7 @@ import {
 import { compressImage, makeThumbnail } from "@/lib/image";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
+import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,7 @@ export default function ImageToSketchPage() {
   const [photo, setPhoto] = useState<string | null>(null);
   const [style, setStyle] = useState<SketchStyleId>("pencil");
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_PHOTO_COUNT);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
@@ -55,7 +57,7 @@ export default function ImageToSketchPage() {
   const workspace = useGenerationWorkspace({
     tool: "image_to_sketch",
     resumeLabel: "Sketch this photo",
-    onRefine: (body) => refineSketch({ ...body, model }),
+    onRefine: (body) => refineSketch({ ...body, model, quality }),
   });
 
   if (!can(user, PERMISSION)) {
@@ -74,7 +76,7 @@ export default function ImageToSketchPage() {
   async function handleGenerate() {
     if (!photo) return;
     const preview = await makeThumbnail(photo);
-    workspace.generate(() => imageToSketch({ image: photo, style, model, count, preview }), {
+    workspace.generate(() => imageToSketch({ image: photo, style, model, quality, count, preview }), {
       count,
       prompt: `Sketch this photo — ${SKETCH_STYLES.find((entry) => entry.id === style)?.label}`,
     });
@@ -87,6 +89,8 @@ export default function ImageToSketchPage() {
         modelOptions={MODEL_OPTIONS}
         modelValue={model}
         onModelChange={setModel}
+        qualityValue={quality}
+        onQualityChange={setQuality}
         hints={REFINE_HINTS}
         busyLabel={`Sketching ${count > 1 ? `${count} versions` : "your photo"}…`}
         resetLabel="New sketch"
@@ -167,7 +171,7 @@ export default function ImageToSketchPage() {
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-surface-raised px-3 py-2.5">
             <ImageCountSelector count={count} onChange={setCount} options={PHOTO_COUNT_OPTIONS} />
 
-            <InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} />
+            <InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />
           </div>
 
           <RunButton onClick={handleGenerate} disabled={!photo} icon={<PenLine size={14} />}>

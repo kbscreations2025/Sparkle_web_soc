@@ -20,9 +20,21 @@ function labelFor(modelId) {
   return OPENAI_MODEL_LABELS[modelId] || modelId;
 }
 
-/** gpt-image-1 has no separate "4K" tier like the Gemini models — one quality level, rendered up to 4096x4096. */
-function qualityFor() {
-  return "HD";
+/**
+ * gpt-image-1's quality axis is a compute tier, not a resolution — it renders
+ * up to 4096x4096 at any of these, so the Gemini vocabulary ("4K"/"2K"/"1K")
+ * does not apply and is deliberately not borrowed. Best first, matching
+ * `gemini.qualitiesFor`, so a picker can read either provider's list the same
+ * way.
+ */
+const OPENAI_QUALITIES = ["high", "medium", "low"];
+
+function qualitiesFor() {
+  return OPENAI_QUALITIES;
+}
+
+function qualityFor(modelId, requested) {
+  return OPENAI_QUALITIES.includes(requested) ? requested : OPENAI_QUALITIES[0];
 }
 
 function isKnownModel(modelId) {
@@ -124,7 +136,7 @@ function extensionFor(mimeType) {
  * accepts more than one), mirroring gemini.js's `generateImage` contract so
  * `aiRouting.js` can call either provider identically.
  */
-async function generateImage({ apiKey, modelId, prompt, images }) {
+async function generateImage({ apiKey, modelId, prompt, images, quality }) {
   const client = new OpenAI({ apiKey, timeout: 150_000 });
 
   const files = await Promise.all(
@@ -138,7 +150,7 @@ async function generateImage({ apiKey, modelId, prompt, images }) {
       model: modelId,
       image: files.length === 1 ? files[0] : files,
       prompt,
-      quality: "high",
+      quality: qualityFor(modelId, quality),
     })
   );
 
@@ -156,6 +168,7 @@ module.exports = {
   OPENAI_MODELS,
   DEFAULT_OPENAI_MODEL,
   qualityFor,
+  qualitiesFor,
   resolveModel,
   isKnownModel,
   labelFor,

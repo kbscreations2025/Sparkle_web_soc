@@ -52,6 +52,10 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
   const dbUser = await User.findById(job.userId);
   if (!dbUser) throw new Error("the user who queued this job no longer exists");
 
+  // Deliberately no requested quality: cleaning is the one tool with no size
+  // picker. A retouched photograph is the deliverable here, not a preview, so
+  // it always runs at the model's best — 4K on the models that offer it —
+  // whatever a client might try to send.
   const { provider, model, quality, modelLabel } = resolveProviderModel(requestedModel);
   const tenant = await loadTenantOrThrow(dbUser);
 
@@ -74,6 +78,7 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
         provider,
         modelId: model,
         prompt,
+        quality,
         images: [
           { mimeType: image.mimeType, base64: image.base64 },
           ...references.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),

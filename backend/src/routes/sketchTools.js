@@ -43,7 +43,7 @@ router.use(requireAuth);
 // ── Text to Sketch ──────────────────────────────────────────────────────────
 router.post("/text-to-sketch", requirePermission("tool.text_to_sketch.run"), async (req, res) => {
   const body = req.body || {};
-  const { provider, model, modelLabel, quality } = resolveProviderModel(body.model);
+  const { provider, model, modelLabel, quality } = resolveProviderModel(body.model, body.quality);
   const refinement = readRefinement(body);
 
   if (!refinement && !body.prompt?.trim() && !body.referenceImage) {
@@ -61,10 +61,11 @@ router.post("/text-to-sketch", requirePermission("tool.text_to_sketch.run"), asy
       ? { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length }
       : { ...shared, isRefinement: false, prompt: body.prompt?.trim() || null, style: body.style ?? null, aspect: body.aspect ?? null, count },
     payload: refinement
-      ? { ...refinement, requestedModel: body.model }
+      ? { ...refinement, requestedModel: body.model, requestedQuality: body.quality }
       : {
           isRefinement: false,
           requestedModel: body.model,
+          requestedQuality: body.quality,
           prompt: body.prompt?.trim() || "",
           userPrompt: body.prompt?.trim() || null,
           style: body.style,
@@ -83,7 +84,7 @@ router.post("/text-to-sketch", requirePermission("tool.text_to_sketch.run"), asy
 // ── Sketch to Image ─────────────────────────────────────────────────────────
 router.post("/sketch-to-image", requirePermission("tool.sketch_to_image.run"), async (req, res) => {
   const body = req.body || {};
-  const { provider, model, modelLabel, quality } = resolveProviderModel(body.model);
+  const { provider, model, modelLabel, quality } = resolveProviderModel(body.model, body.quality);
   const refinement = readRefinement(body);
 
   // Every uploaded view of the piece goes into one request, so the model sees
@@ -104,10 +105,11 @@ router.post("/sketch-to-image", requirePermission("tool.sketch_to_image.run"), a
       ? { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length }
       : { ...shared, isRefinement: false, description: body.description?.trim() || null, sketchCount: sketches.length, count },
     payload: refinement
-      ? { ...refinement, requestedModel: body.model }
+      ? { ...refinement, requestedModel: body.model, requestedQuality: body.quality }
       : {
           isRefinement: false,
           requestedModel: body.model,
+          requestedQuality: body.quality,
           description: body.description?.trim() || "",
           userPrompt: body.description?.trim() || null,
           count,
@@ -123,7 +125,7 @@ router.post("/sketch-to-image", requirePermission("tool.sketch_to_image.run"), a
 // ── Image to Sketch ─────────────────────────────────────────────────────────
 router.post("/image-to-sketch", requirePermission("tool.image_to_sketch.run"), async (req, res) => {
   const body = req.body || {};
-  const { provider, model, modelLabel, quality } = resolveProviderModel(body.model);
+  const { provider, model, modelLabel, quality } = resolveProviderModel(body.model, body.quality);
   const refinement = readRefinement(body);
 
   const photo = refinement ? [] : parseImages(body.image);
@@ -142,10 +144,11 @@ router.post("/image-to-sketch", requirePermission("tool.image_to_sketch.run"), a
       ? { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length }
       : { ...shared, isRefinement: false, style: body.style ?? null, count },
     payload: refinement
-      ? { ...refinement, requestedModel: body.model }
+      ? { ...refinement, requestedModel: body.model, requestedQuality: body.quality }
       : {
           isRefinement: false,
           requestedModel: body.model,
+          requestedQuality: body.quality,
           style: body.style,
           count,
           sourceImages: photo,

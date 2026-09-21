@@ -105,14 +105,14 @@ router.delete("/models/:id", requireAnyPermission(MODEL_LIBRARY_PERMISSIONS), as
 
 /** Generating a new model — slow, so queued like any other model call. */
 router.post("/model", requireAnyPermission(MODEL_LIBRARY_PERMISSIONS), async (req, res) => {
-  const { attrs, notes, name, model: requestedModel } = req.body || {};
-  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel);
+  const { attrs, notes, name, model: requestedModel, quality: requestedQuality } = req.body || {};
+  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
 
   return queueGeneration(req, res, {
     type: LIFESTYLE_MODEL_JOB,
     tool: "life_style",
     request: { provider, model, modelLabel, quality, kind: "model", name: name || null },
-    payload: { attrs: attrs || {}, notes: notes || null, name, requestedModel },
+    payload: { attrs: attrs || {}, notes: notes || null, name, requestedModel, requestedQuality },
     message: `queued a Lifestyle model generation on ${modelLabel}`,
   });
 });
@@ -134,6 +134,7 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     sceneInstruction,
     description,
     model: requestedModel,
+    quality: requestedQuality,
     refineImage,
     referenceImages,
     instruction,
@@ -142,7 +143,7 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     parentGenerationId,
   } = req.body || {};
 
-  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel);
+  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
 
   /*
    * A refinement re-attaches the original jewellery photos on every turn, in
@@ -182,6 +183,7 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
         instruction,
         displayPrompt,
         requestedModel,
+        requestedQuality,
         conversationId,
         parentGenerationId,
       },
@@ -240,6 +242,7 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
       // One composite per run, however many references went in.
       count: 1,
       requestedModel,
+      requestedQuality,
       conversationId: conversationId || null,
     },
     message: `queued a Lifestyle run (${jewelryList.length} piece${jewelryList.length > 1 ? "s" : ""}) on ${modelLabel}`,

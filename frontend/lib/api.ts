@@ -282,6 +282,7 @@ export const CLEANING_MODELS = [
     id: "gemini-3-pro-image",
     label: "Sparkle 3 Pro Image",
     quality: "4K",
+    qualities: ["4K", "2K", "1K"],
     description: "Highest fidelity · complex detail",
     badge: "Best quality",
   },
@@ -289,6 +290,7 @@ export const CLEANING_MODELS = [
     id: "gemini-3.1-flash-image",
     label: "Sparkle 3.1 Flash Image",
     quality: "4K",
+    qualities: ["4K", "2K", "1K"],
     description: "Optimised for speed · high volume",
     badge: "Fast",
   },
@@ -296,10 +298,32 @@ export const CLEANING_MODELS = [
     id: "gemini-2.5-flash-image",
     label: "Sparkle 2.5 Flash Image",
     quality: "1K",
+    qualities: ["1K"],
     description: "Budget-friendly · quick turnaround",
     badge: "Budget",
   },
 ] as const;
+
+/**
+ * The sizes a model can actually be run at, and the one it defaults to.
+ *
+ * `qualities` mirrors `GEMINI_IMAGE_QUALITIES` in backend/src/gemini.js — one
+ * lives in each language, so they are kept in step by hand. The backend is
+ * the authority: it re-resolves whatever arrives against the same table and
+ * falls back to the model's best, so a list that drifts here degrades to a
+ * picker offering the wrong options rather than to a failed generation.
+ *
+ * `quality` stays as the default (and as the badge the cleaning workspace
+ * shows), which is always the first and best entry in `qualities`.
+ */
+export function qualitiesFor(modelId: string): readonly string[] {
+  return CLEANING_MODELS.find((m) => m.id === modelId)?.qualities ?? ["1K"];
+}
+
+/** The size a freshly-picked model starts on — its best. */
+export function defaultQualityFor(modelId: string): string {
+  return qualitiesFor(modelId)[0];
+}
 
 export type CleaningModelId = (typeof CLEANING_MODELS)[number]["id"];
 
@@ -330,7 +354,12 @@ export const GPT_CLEANING_MODELS = [
   {
     id: "gpt-image-1",
     label: "Sparkle GPT Image",
-    quality: "HD",
+    quality: "high",
+    // gpt-image-1's quality is a compute tier, not a resolution — see the
+    // note on OPENAI_QUALITIES in backend/src/openai.js. Only the Dust &
+    // Scratches workspace offers this model, and that workspace is cleaning,
+    // which has no picker, so the list is here for completeness.
+    qualities: ["high", "medium", "low"],
     description: "OpenAI's image model · same studio-clean prompt",
     badge: "GPT",
   },
@@ -345,10 +374,19 @@ export const DEFAULT_GPT_CLEANING_MODEL: GptCleaningModelId = "gpt-image-1";
  * TS widens `entry.id`'s literal union to plain `string`, which is what let
  * a caller's `onModelChange` mismatch its own state setter's type.
  */
-export function toModelOptions<T extends { id: string; label: string; quality: string }>(
+export function toModelOptions<
+  T extends { id: string; label: string; quality: string; qualities?: readonly string[] },
+>(
   models: readonly T[]
-): { value: T["id"]; label: string; quality: string }[] {
-  return models.map((entry) => ({ value: entry.id, label: entry.label, quality: entry.quality }));
+): { value: T["id"]; label: string; quality: string; qualities: readonly string[] }[] {
+  return models.map((entry) => ({
+    value: entry.id,
+    label: entry.label,
+    quality: entry.quality,
+    // Defaulted rather than optional so a consumer can count the options
+    // without a null check; a model with one size is a list of one.
+    qualities: entry.qualities ?? [entry.quality],
+  }));
 }
 
 // ── background jobs ─────────────────────────────────────────────────────────
@@ -516,6 +554,8 @@ export function chatEdit(body: {
   /** What the UI shows for this turn. Falls back to `instruction` server-side if omitted. */
   displayPrompt?: string;
   model: SparkleModelId;
+  /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
+  quality?: string;
   conversationId?: string | null;
   parentGenerationId?: string | null;
 }) {
@@ -537,6 +577,8 @@ export function textToImage(body: {
   /** Free text plus whatever the jewelry builder assembled, already joined. */
   prompt: string;
   model: SparkleModelId;
+  /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
+  quality?: string;
   style: string;
   aspect: string;
   /** How many variations to generate in parallel, e.g. 2/4/6/8. */
@@ -569,6 +611,11 @@ export type RefineBody<TModel extends string = SparkleModelId> = {
   displayPrompt?: string;
   referenceImages?: string[];
   model: TModel;
+  /**
+   * Output size for this turn. Cleaning's refinements leave it unset — that
+   * tool has no picker and always runs at the model's best.
+   */
+  quality?: string;
   conversationId?: string | null;
   parentGenerationId?: string | null;
   /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
@@ -590,6 +637,8 @@ export const refineImage = refineOn<string>("/api/cleaning");
 export function textToSketch(body: {
   prompt: string;
   model: SparkleModelId;
+  /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
+  quality?: string;
   style: string;
   aspect: string;
   count: number;
@@ -605,6 +654,8 @@ export function sketchToImage(body: {
   images: string[];
   description?: string;
   model: SparkleModelId;
+  /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
+  quality?: string;
   count: number;
   preview?: string | null;
 }) {
@@ -616,6 +667,8 @@ export function imageToSketch(body: {
   image: string;
   style: string;
   model: SparkleModelId;
+  /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
+  quality?: string;
   count: number;
   preview?: string | null;
 }) {
@@ -682,6 +735,8 @@ export function generateLifestyleModel(body: {
   notes?: string | null;
   name?: string;
   model: SparkleModelId;
+  /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
+  quality?: string;
 }) {
   return apiRequest<QueuedResult>("/api/lifestyle/model", { method: "POST", body: JSON.stringify(body) });
 }
@@ -704,6 +759,8 @@ export function lifestyle(body: {
   sceneInstruction?: string;
   description?: string;
   model: SparkleModelId;
+  /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
+  quality?: string;
   preview?: string | null;
 }) {
   return apiRequest<QueuedResult>("/api/lifestyle", { method: "POST", body: JSON.stringify(body) });
@@ -927,6 +984,8 @@ export function campaignKit(body: {
   studioProps?: string[];
   aspect: string;
   model: SparkleModelId;
+  /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
+  quality?: string;
   preview?: string | null;
 }) {
   return apiRequest<QueuedResult>("/api/marketing-kit/campaign", { method: "POST", body: JSON.stringify(body) });

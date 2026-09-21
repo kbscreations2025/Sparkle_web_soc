@@ -32,18 +32,30 @@ async function loadTenantOrThrow(dbUser) {
  * checked first: Gemini's `resolveModel` silently falls back to its own
  * default for anything it doesn't recognise, which would otherwise swallow an
  * OpenAI id and run it on Gemini instead of reporting it as OpenAI.
+ *
+ * `requestedQuality` is what the user picked, and is resolved against the
+ * *resolved* model rather than the requested one — the two differ whenever a
+ * bad model id falls back, and validating against the id that will not be
+ * used would let a size the real model cannot produce through. Omitting it
+ * yields that model's best, which is what every caller got before the picker
+ * existed.
  */
-function resolveProviderModel(requestedModel) {
+function resolveProviderModel(requestedModel, requestedQuality) {
   if (openai.isKnownModel(requestedModel)) {
     return {
       provider: "openai",
       model: requestedModel,
-      quality: openai.qualityFor(requestedModel),
+      quality: openai.qualityFor(requestedModel, requestedQuality),
       modelLabel: openai.labelFor(requestedModel),
     };
   }
   const model = gemini.resolveModel(requestedModel);
-  return { provider: "gemini", model, quality: gemini.qualityFor(model), modelLabel: gemini.labelFor(model) };
+  return {
+    provider: "gemini",
+    model,
+    quality: gemini.qualityFor(model, requestedQuality),
+    modelLabel: gemini.labelFor(model),
+  };
 }
 
 /**
@@ -142,11 +154,11 @@ async function routeProviderOperation({ tenant, provider, call }) {
  * An image out. The original shape of this function, now one of three
  * operations over the same failover policy.
  */
-async function routeProviderCall({ tenant, provider, modelId, prompt, images }) {
+async function routeProviderCall({ tenant, provider, modelId, prompt, images, quality }) {
   return routeProviderOperation({
     tenant,
     provider,
-    call: ({ apiKey, mod }) => mod.generateImage({ apiKey, modelId, prompt, images }),
+    call: ({ apiKey, mod }) => mod.generateImage({ apiKey, modelId, prompt, images, quality }),
   });
 }
 
@@ -183,8 +195,8 @@ async function routeVideoCall({ tenant, modelId, prompt, image, config, onPoll }
 }
 
 /** Back-compat shorthand for the pre-multi-provider call sites. */
-async function routeGeminiCall({ tenant, modelId, prompt, images }) {
-  return routeProviderCall({ tenant, provider: "gemini", modelId, prompt, images });
+async function routeGeminiCall({ tenant, modelId, prompt, images, quality }) {
+  return routeProviderCall({ tenant, provider: "gemini", modelId, prompt, images, quality });
 }
 
 module.exports = {

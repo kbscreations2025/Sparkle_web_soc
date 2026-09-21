@@ -22,6 +22,7 @@ import { PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT } from "@/lib/jewelryConfigura
 import { compressImage, makeThumbnail } from "@/lib/image";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
+import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
@@ -46,6 +47,7 @@ export default function SketchToImagePage() {
   const [sketches, setSketches] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_PHOTO_COUNT);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
@@ -56,7 +58,7 @@ export default function SketchToImagePage() {
   const workspace = useGenerationWorkspace({
     tool: "sketch_to_image",
     resumeLabel: "Render this sketch",
-    onRefine: (body) => refineRender({ ...body, model }),
+    onRefine: (body) => refineRender({ ...body, model, quality }),
   });
 
   if (!can(user, PERMISSION)) {
@@ -77,7 +79,7 @@ export default function SketchToImagePage() {
     if (sketches.length === 0) return;
     const preview = await makeThumbnail(sketches[0]);
     workspace.generate(
-      () => sketchToImage({ images: sketches, description: notes.trim() || undefined, model, count, preview }),
+      () => sketchToImage({ images: sketches, description: notes.trim() || undefined, model, quality, count, preview }),
       { count, prompt: notes.trim() || `Render ${sketches.length > 1 ? `${sketches.length} sketch views` : "this sketch"}` }
     );
   }
@@ -89,6 +91,8 @@ export default function SketchToImagePage() {
         modelOptions={MODEL_OPTIONS}
         modelValue={model}
         onModelChange={setModel}
+        qualityValue={quality}
+        onQualityChange={setQuality}
         hints={REFINE_HINTS}
         busyLabel={`Rendering ${count > 1 ? `${count} images` : "your sketch"}…`}
         resetLabel="New render"
@@ -236,7 +240,7 @@ export default function SketchToImagePage() {
               onChange={setNotes}
               placeholder="Metal, stone types, finish — anything the sketch doesn't show…"
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={PHOTO_COUNT_OPTIONS} />}
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} />}
+              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} disabled={sketches.length === 0} icon={<Sparkles size={14} />}>

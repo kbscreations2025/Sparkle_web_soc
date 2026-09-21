@@ -22,6 +22,8 @@ export function GenerationResults<TModel extends string>({
   modelOptions,
   modelValue,
   onModelChange,
+  qualityValue,
+  onQualityChange,
   hints,
   busyLabel,
   resetLabel = "Start over",
@@ -29,9 +31,17 @@ export function GenerationResults<TModel extends string>({
   modelLabel,
 }: {
   workspace: ReturnType<typeof useGenerationWorkspace>;
-  modelOptions: readonly { value: TModel; label: string; quality?: string }[];
+  modelOptions: readonly {
+    value: TModel;
+    label: string;
+    quality?: string;
+    qualities?: readonly string[];
+  }[];
   modelValue: TModel;
   onModelChange: (value: TModel) => void;
+  /** The output size for a refinement — see ChatInputBar. */
+  qualityValue?: string;
+  onQualityChange?: (quality: string) => void;
   /** Suggestions offered until the first refinement comes back. */
   hints?: string[];
   busyLabel: string;
@@ -119,6 +129,8 @@ export function GenerationResults<TModel extends string>({
                 modelOptions={modelOptions}
                 modelValue={modelValue}
                 onModelChange={onModelChange}
+                qualityValue={qualityValue}
+                onQualityChange={onQualityChange}
                 placeholder={displayImg ? "Describe a change…" : "Waiting for the first result…"}
               />
             </div>

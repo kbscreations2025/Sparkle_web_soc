@@ -65,14 +65,45 @@ function labelFor(modelId) {
   return GEMINI_MODEL_LABELS[modelId] || modelId;
 }
 
-// Only the newer two accept an explicit output size; 2.5-flash-image predates
-// imageConfig and is fixed at 1024x1024 regardless of what's asked for.
-function supports4K(modelId) {
-  return modelId === "gemini-3-pro-image" || modelId === "gemini-3.1-flash-image";
+/**
+ * The output sizes each image model accepts, best first — the first entry is
+ * what a run gets when the caller names nothing.
+ *
+ * Only the newer two accept an explicit size; 2.5-flash-image predates
+ * `imageConfig` and is fixed at 1024x1024 regardless of what's asked for, so
+ * it is listed with its one real option rather than being offered a choice it
+ * would silently ignore. That distinction is what `supportsImageSize` below
+ * guards: sending `imageConfig` to a model that predates it is not a no-op to
+ * rely on, and the API's own default is 1K, so the field has to be sent
+ * explicitly for 4K or 2K to happen at all.
+ */
+const GEMINI_IMAGE_QUALITIES = {
+  "gemini-3-pro-image": ["4K", "2K", "1K"],
+  "gemini-3.1-flash-image": ["4K", "2K", "1K"],
+  "gemini-2.5-flash-image": ["1K"],
+};
+
+/** The sizes a picker should offer for this model. Never empty. */
+function qualitiesFor(modelId) {
+  return GEMINI_IMAGE_QUALITIES[modelId] || ["1K"];
 }
 
-function qualityFor(modelId) {
-  return supports4K(modelId) ? "4K" : "1K";
+function supportsImageSize(modelId) {
+  return qualitiesFor(modelId).length > 1;
+}
+
+/**
+ * The size this run will actually be generated at.
+ *
+ * Falls back to the model's best rather than rejecting: the picker resets
+ * when the model changes, but an in-flight request (or a queued job written
+ * before the model was switched) can still carry a size the new model has
+ * never supported, and failing that outright would turn a cosmetic mismatch
+ * into a dead generation.
+ */
+function qualityFor(modelId, requested) {
+  const allowed = qualitiesFor(modelId);
+  return allowed.includes(requested) ? requested : allowed[0];
 }
 
 /** Falls back to the default model whenever the requested one isn't offered. */
@@ -214,7 +245,7 @@ async function withKeyFailover(entries, attempt) {
  * Resolves with the first image part in the response; throws if none came
  * back (a text-only response, most often a declined or unsupported request).
  */
-async function generateImage({ apiKey, modelId, prompt, images }) {
+async function generateImage({ apiKey, modelId, prompt, images, quality }) {
   const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 150_000 } });
 
   const parts = [
@@ -228,7 +259,7 @@ async function generateImage({ apiKey, modelId, prompt, images }) {
       contents: [{ role: "user", parts }],
       config: {
         responseModalities: ["IMAGE", "TEXT"],
-        ...(supports4K(modelId) ? { imageConfig: { imageSize: "4K" } } : {}),
+        ...(supportsImageSize(modelId) ? { imageConfig: { imageSize: qualityFor(modelId, quality) } } : {}),
       },
     })
   );
@@ -409,6 +440,7 @@ module.exports = {
   GEMINI_VIDEO_MODELS,
   DEFAULT_VIDEO_MODEL,
   qualityFor,
+  qualitiesFor,
   resolveModel,
   resolveVideoModel,
   labelFor,

@@ -31,6 +31,7 @@ router.post("/", async (req, res) => {
       instruction,
       displayPrompt,
       model: requestedModel,
+      quality: requestedQuality,
       conversationId: requestedConversationId,
       parentGenerationId,
     } = req.body || {};
@@ -50,7 +51,7 @@ router.post("/", async (req, res) => {
     const parsedReferences = Array.isArray(referenceImages) ? referenceImages.map(parseDataUri).filter(Boolean) : [];
 
     const model = resolveModel(requestedModel);
-    const quality = qualityFor(model);
+    const quality = qualityFor(model, requestedQuality);
 
     const tenant = await loadTenantOrThrow(dbUser);
 
@@ -60,6 +61,7 @@ router.post("/", async (req, res) => {
       tenant,
       modelId: model,
       prompt,
+      quality,
       images: [
         { mimeType: parsedBase.mimeType, base64: parsedBase.base64 },
         ...parsedReferences.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),

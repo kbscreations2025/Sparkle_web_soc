@@ -26,6 +26,7 @@ router.post("/", async (req, res) => {
     aspect,
     count,
     model: requestedModel,
+    quality: requestedQuality,
     refineImage,
     referenceImages,
     instruction,
@@ -35,7 +36,7 @@ router.post("/", async (req, res) => {
     parentGenerationId,
   } = req.body || {};
 
-  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel);
+  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
 
   if (refineImage && instruction) {
     const parsedImage = parseDataUri(refineImage);
@@ -65,6 +66,7 @@ router.post("/", async (req, res) => {
         instruction,
         displayPrompt,
         requestedModel,
+        requestedQuality,
         conversationId,
         parentGenerationId,
       },
@@ -104,6 +106,7 @@ router.post("/", async (req, res) => {
       aspect,
       count: numImages,
       requestedModel,
+      requestedQuality,
       conversationId: conversationId || null,
     },
     message: `queued a text-to-image run (${numImages} image${numImages > 1 ? "s" : ""}) on ${modelLabel}`,

@@ -24,6 +24,7 @@ import {
 import { compressImage, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useAuth } from "@/lib/auth-context";
+import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
@@ -52,6 +53,7 @@ export default function ChatToEditPage() {
   const [history, setHistory] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [quality, setQuality] = useModelQuality(model);
   const [busy, setBusy] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -183,6 +185,7 @@ export default function ChatToEditPage() {
         instruction,
         displayPrompt: instruction,
         model,
+        quality,
         conversationId: conversationId.current,
         parentGenerationId: parentGenerationId.current,
       });
@@ -266,6 +269,8 @@ export default function ChatToEditPage() {
                 modelOptions={MODEL_OPTIONS}
                 modelValue={model}
                 onModelChange={setModel}
+                qualityValue={quality}
+                onQualityChange={setQuality}
                 placeholder={
                   currentImage || pendingImage
                     ? "Describe what to change…"

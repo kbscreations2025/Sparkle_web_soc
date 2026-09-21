@@ -4,6 +4,7 @@ import { useRef, type ClipboardEvent } from "react";
 import { ImagePlus, Send, Loader2 } from "lucide-react";
 import { AttachmentChips, type Attachment } from "./AttachmentChips";
 import { SpellCheckedTextarea } from "./SpellCheckedTextarea";
+import { InlineDropdown } from "./InlineDropdown";
 import { cn } from "@/lib/utils";
 
 /**
@@ -26,6 +27,8 @@ export function ChatInputBar<TModel extends string>({
   modelOptions,
   modelValue,
   onModelChange,
+  qualityValue,
+  onQualityChange,
   placeholder = "Describe a change… or paste/attach reference images",
 }: {
   value: string;
@@ -39,12 +42,27 @@ export function ChatInputBar<TModel extends string>({
   onAttachFiles: (files: File[]) => void;
   /** An image pasted straight into the textarea. */
   onPasteImage: (file: File) => void;
-  modelOptions: readonly { value: TModel; label: string; quality?: string }[];
+  modelOptions: readonly {
+    value: TModel;
+    label: string;
+    quality?: string;
+    qualities?: readonly string[];
+  }[];
   modelValue: TModel;
   onModelChange: (value: TModel) => void;
+  /**
+   * The chosen output size. Omitting `onQualityChange` keeps the slot
+   * read-only, which is what cleaning's refinement bar wants — that tool
+   * always runs at the model's best and offers no choice.
+   */
+  qualityValue?: string;
+  onQualityChange?: (quality: string) => void;
   placeholder?: string;
 }) {
-  const quality = modelOptions.find((option) => option.value === modelValue)?.quality;
+  const selected = modelOptions.find((option) => option.value === modelValue);
+  const qualityOptions = selected?.qualities ?? [];
+  const quality = qualityValue ?? selected?.quality;
+  const qualitySelectable = Boolean(onQualityChange) && qualityOptions.length > 1;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canSend = (value.trim() !== "" || attachments.length > 0) && !busy;
@@ -104,27 +122,32 @@ export function ChatInputBar<TModel extends string>({
             }}
           />
 
-          <label className="flex min-w-0 flex-col items-start gap-0.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1 transition-colors hover:border-white/[0.14] focus-within:border-gold/30">
-            <span className="text-[8px] font-semibold uppercase leading-none tracking-wide text-faint">Model</span>
-            <select
-              value={modelValue}
-              onChange={(event) => onModelChange(event.target.value as TModel)}
-              disabled={busy}
-              className="-ml-0.5 w-full max-w-[112px] cursor-pointer truncate bg-transparent text-[10px] font-medium text-cream outline-none disabled:opacity-40"
-            >
-              {modelOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <InlineDropdown
+            label="Model"
+            value={modelValue}
+            onChange={onModelChange}
+            disabled={busy}
+            options={modelOptions.map((option) => ({ value: option.value, label: option.label }))}
+            triggerClassName="max-w-[150px] sm:max-w-[170px]"
+            panelClassName="w-[190px]"
+          />
 
-          {quality && (
-            <div className="flex shrink-0 flex-col items-start gap-0.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1">
-              <span className="text-[8px] font-semibold uppercase leading-none tracking-wide text-faint">Quality</span>
-              <span className="text-[10px] font-medium text-cream">{quality}</span>
-            </div>
+          {qualitySelectable ? (
+            <InlineDropdown
+              label="Quality"
+              value={quality ?? ""}
+              onChange={(next) => onQualityChange?.(next)}
+              disabled={busy}
+              options={qualityOptions.map((option) => ({ value: option, label: option }))}
+              panelClassName="w-[92px]"
+            />
+          ) : (
+            quality && (
+              <div className="flex shrink-0 flex-col items-start gap-0.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1">
+                <span className="text-[8px] font-semibold uppercase leading-none tracking-wide text-faint">Quality</span>
+                <span className="text-[10px] font-medium text-cream">{quality}</span>
+              </div>
+            )
           )}
         </div>
 

@@ -31,6 +31,7 @@ import {
 import { compressImage } from "@/lib/image";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
+import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
@@ -52,6 +53,7 @@ export default function TextToSketchPage() {
   const [style, setStyle] = useState<SketchStyleId>("pencil");
   const [aspect, setAspect] = useState<AspectId>("square");
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_IMAGE_COUNT);
   /** An optional photo the design is drawn from, separate from chat attachments. */
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
@@ -59,7 +61,7 @@ export default function TextToSketchPage() {
   const referenceInput = useRef<HTMLInputElement>(null);
 
   const builder = useJewelryBuilder();
-  const workspace = useGenerationWorkspace({ tool: "text_to_sketch", onRefine: (body) => refineSketch({ ...body, model }) });
+  const workspace = useGenerationWorkspace({ tool: "text_to_sketch", onRefine: (body) => refineSketch({ ...body, model, quality }) });
 
   // The builder and the free text are independent: either can be used alone,
   // and typing never clobbers a selection or the other way round.
@@ -83,6 +85,7 @@ export default function TextToSketchPage() {
         textToSketch({
           prompt: finalDescription,
           model,
+          quality,
           style,
           aspect,
           count,
@@ -99,6 +102,8 @@ export default function TextToSketchPage() {
         modelOptions={MODEL_OPTIONS}
         modelValue={model}
         onModelChange={setModel}
+        qualityValue={quality}
+        onQualityChange={setQuality}
         hints={REFINE_HINTS}
         busyLabel={`Sketching ${count > 1 ? `${count} designs` : "your design"}…`}
         resetLabel="New sketch"
@@ -180,7 +185,7 @@ export default function TextToSketchPage() {
               rows={4}
               placeholder="Pick options in the Jewelry Builder, or type freely…"
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={TEXT_COUNT_OPTIONS} />}
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} />}
+              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} icon={<Wand2 size={14} />}>

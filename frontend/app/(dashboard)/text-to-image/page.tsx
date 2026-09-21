@@ -30,6 +30,7 @@ import {
 } from "@/lib/jewelryConfigurator";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
+import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
@@ -50,13 +51,14 @@ export default function TextToImagePage() {
   const [style, setStyle] = useState<StyleId>("product-studio");
   const [aspect, setAspect] = useState<AspectId>("square");
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_IMAGE_COUNT);
   const [spellIssueCount, setSpellIssueCount] = useState(0);
 
   const builder = useJewelryBuilder();
   const workspace = useGenerationWorkspace({
     tool: "text_to_image",
-    onRefine: (body) => refineTextToImage({ ...body, model }),
+    onRefine: (body) => refineTextToImage({ ...body, model, quality }),
     // Reopening a thread puts the picker back on whatever it was last run on,
     // so a refinement continues on the same model rather than silently
     // switching to this page's default.
@@ -75,7 +77,7 @@ export default function TextToImagePage() {
   }
 
   function handleGenerate() {
-    workspace.generate(() => textToImage({ prompt: finalDescription, model, style, aspect, count }), {
+    workspace.generate(() => textToImage({ prompt: finalDescription, model, quality, style, aspect, count }), {
       count,
       prompt: finalDescription,
     });
@@ -88,6 +90,8 @@ export default function TextToImagePage() {
         modelOptions={MODEL_OPTIONS}
         modelValue={model}
         onModelChange={setModel}
+        qualityValue={quality}
+        onQualityChange={setQuality}
         hints={REFINE_HINTS}
         busyLabel={`Generating ${count > 1 ? `${count} images` : "image"}…`}
         resetLabel="New image"
@@ -128,7 +132,7 @@ export default function TextToImagePage() {
                 )
               }
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={TEXT_COUNT_OPTIONS} />}
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality />}
+              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} icon={<Wand2 size={14} />}>

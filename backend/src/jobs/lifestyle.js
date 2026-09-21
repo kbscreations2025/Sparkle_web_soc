@@ -54,7 +54,10 @@ registerJobHandler(LIFESTYLE_MODEL_JOB, async ({ job, data, setProgress, withPro
   if (!dbUser) throw new Error("the user who queued this job no longer exists");
 
   const tenant = await loadTenantOrThrow(dbUser);
-  const { provider, model, modelLabel } = resolveProviderModel(data.requestedModel);
+  const { provider, model, modelLabel, quality } = resolveProviderModel(
+    data.requestedModel,
+    data.requestedQuality
+  );
 
   // Chosen here rather than at the route: the outfit may be picked at random
   // from the ones selected, and the saved model should record the one it is
@@ -62,7 +65,7 @@ registerJobHandler(LIFESTYLE_MODEL_JOB, async ({ job, data, setProgress, withPro
   const { prompt, outfit } = buildLifestyleModelPrompt(data.attrs, data.notes);
 
   const { output } = await withProgress({ from: 20, to: 85, phase: "generating" }, async ({ stepDone }) => {
-    const result = await routeProviderCall({ tenant, provider, modelId: model, prompt, images: [] });
+    const result = await routeProviderCall({ tenant, provider, modelId: model, prompt, quality, images: [] });
     const preview = await createLivePreview(Buffer.from(result.output.base64, "base64"));
     await stepDone(preview?.dataUrl ?? null);
     return result;

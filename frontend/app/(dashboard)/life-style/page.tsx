@@ -23,6 +23,7 @@ import { filesToUploadItems, uploadErrorMessage } from "@/lib/uploads";
 import { useGenerationWorkspace, type RefineRequest } from "@/lib/useGenerationWorkspace";
 import { modelRequestFields, useModelLibrary } from "@/lib/useModelLibrary";
 import { useAuth } from "@/lib/auth-context";
+import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,7 @@ export default function LifeStylePage() {
   const [theme, setTheme] = useState(THEMES[0].id);
   const [description, setDescription] = useState("");
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [quality, setQuality] = useModelQuality(model);
 
   /**
    * The jewellery photos, kept for the refine turns as well as the first
@@ -50,8 +52,8 @@ export default function LifeStylePage() {
   const jewelryImages = useMemo(() => jewelry.map((item) => item.dataUrl), [jewelry]);
 
   const onRefine = useCallback(
-    (body: RefineRequest) => refineLifestyle({ ...body, model, jewelryImages }),
-    [model, jewelryImages]
+    (body: RefineRequest) => refineLifestyle({ ...body, model, quality, jewelryImages }),
+    [model, quality, jewelryImages]
   );
 
   const workspace = useGenerationWorkspace({
@@ -95,6 +97,7 @@ export default function LifeStylePage() {
           sceneInstruction: scene.value,
           description,
           model,
+          quality,
           preview,
         }),
       {
@@ -114,6 +117,8 @@ export default function LifeStylePage() {
         modelOptions={MODEL_OPTIONS}
         modelValue={model}
         onModelChange={setModel}
+        qualityValue={quality}
+        onQualityChange={setQuality}
         hints={HINTS}
         busyLabel="Placing the jewellery…"
         resetLabel="New shot"
@@ -180,7 +185,7 @@ export default function LifeStylePage() {
               value={description}
               onChange={setDescription}
               placeholder="Optional — e.g. warmer light, a softer background"
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} />}
+              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} disabled={!ready} icon={<Sparkles size={14} />}>

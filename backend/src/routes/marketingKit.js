@@ -111,6 +111,7 @@ router.post("/campaign", async (req, res) => {
     studioProps,
     aspect,
     model: requestedModel,
+    quality: requestedQuality,
     refineImage,
     referenceImages,
     instruction,
@@ -120,7 +121,7 @@ router.post("/campaign", async (req, res) => {
     parentGenerationId,
   } = req.body || {};
 
-  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel);
+  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
 
   // Retouching one shot costs one image, not another whole kit.
   if (refineImage && instruction) {
@@ -151,6 +152,7 @@ router.post("/campaign", async (req, res) => {
         displayPrompt,
         shotLabel: shotLabel || null,
         requestedModel,
+        requestedQuality,
         conversationId,
         parentGenerationId,
       },
@@ -203,6 +205,7 @@ router.post("/campaign", async (req, res) => {
       options,
       userPrompt: description || null,
       requestedModel,
+      requestedQuality,
       conversationId: conversationId || null,
     },
     message: `queued a Campaign Kit (4 shots) on ${modelLabel}`,

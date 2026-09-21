@@ -28,6 +28,7 @@ import { filesToUploadItems, uploadErrorMessage } from "@/lib/uploads";
 import { useGenerationWorkspace, type RefineRequest } from "@/lib/useGenerationWorkspace";
 import { modelRequestFields, useModelLibrary } from "@/lib/useModelLibrary";
 import { useAuth } from "@/lib/auth-context";
+import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
@@ -87,8 +88,9 @@ function CampaignKitWorkspace() {
   const [box, setBox] = useState<string>(BOX_STYLE_OPTIONS[0].id);
   const [prop, setProp] = useState<string>(STUDIO_PROP_OPTIONS[0].id);
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [quality, setQuality] = useModelQuality(model);
 
-  const onRefine = useCallback((body: RefineRequest) => refineCampaignKit({ ...body, model }), [model]);
+  const onRefine = useCallback((body: RefineRequest) => refineCampaignKit({ ...body, model, quality }), [model, quality]);
 
   const workspace = useGenerationWorkspace({
     tool: "marketing_kit",
@@ -128,6 +130,7 @@ function CampaignKitWorkspace() {
           studioProps: prop === "auto" ? [] : [prop],
           aspect,
           model,
+          quality,
           preview,
         }),
       { count: 4, prompt: "Build a campaign kit — two lifestyle shots and two studio shots" }
@@ -151,6 +154,8 @@ function CampaignKitWorkspace() {
         modelOptions={MODEL_OPTIONS}
         modelValue={model}
         onModelChange={setModel}
+        qualityValue={quality}
+        onQualityChange={setQuality}
         hints={HINTS}
         busyLabel="Shooting the kit…"
         resetLabel="New kit"
@@ -212,7 +217,7 @@ function CampaignKitWorkspace() {
               value={description}
               onChange={setDescription}
               placeholder="Optional — applied to all four shots"
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} />}
+              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} disabled={!ready} icon={<Newspaper size={14} />}>
