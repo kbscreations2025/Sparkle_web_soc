@@ -1,55 +1,50 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import {
-  ArrowUpRight,
-  Check,
-  Circle,
-  Eraser,
-  Minus,
-  Pencil,
-  Redo2,
-  Square,
-  Trash2,
-  Type,
-  Undo2,
-  X,
-} from "lucide-react";
+import {  draw as drawShape,  handlesFor,  hit,  isBox,  isTooSmall,  moved,  resized,  type Handle,  type HandleId,  type Shape} from "@/lib/annotationShapes";
+import { DrawingToolbar, isShapeTool, type Tool } from "./DrawingToolbar";
+import { urlToDataUrl } from "@/lib/image";
 import { cn } from "@/lib/utils";
 
-type Tool = "pen" | "eraser" | "rect" | "circle" | "line" | "arrow" | "text";
+/** Handle square and grab radius, in CSS pixels — scaled to canvas pixels per canvas. */
+const HANDLE_SCREEN_SIZE = 9;
 
-const TOOLS: { id: Tool; label: string; icon: typeof Pencil }[] = [
-  { id: "pen", label: "Pen", icon: Pencil },
-  { id: "eraser", label: "Eraser", icon: Eraser },
-  { id: "rect", label: "Rectangle", icon: Square },
-  { id: "circle", label: "Circle", icon: Circle },
-  { id: "line", label: "Line", icon: Minus },
-  { id: "arrow", label: "Arrow", icon: ArrowUpRight },
-  { id: "text", label: "Text", icon: Type },
-];
+/**
+ * Longest edge of the drawing surface.
+ *
+ * A stored original can be 5000px or more on a side, which means two canvases
+ * of ~17 megapixels each, a `getImageData` of that size on every pointer down,
+ * and an exported JPEG far larger than anything downstream wants. Capping here
+ * matches what the app already does to uploads — they are resized to 2048
+ * before being sent — so the marked-up copy is no coarser than a photo the
+ * user could have supplied in the first place.
+ */
+const MAX_SURFACE = 2048;
+
+/** The size to draw at: the image's own, unless it is larger than the cap. */
+function surfaceSize(width: number, height: number) {
+  const longest = Math.max(width, height);
+  if (longest <= MAX_SURFACE) return { width, height };
+
+  const ratio = MAX_SURFACE / longest;
+  return { width: Math.round(width * ratio), height: Math.round(height * ratio) };
+}
+
+/** A measured, canvas-safe image, tagged with the src it was resolved from. */
+type Loaded = { src: string; source: string; width: number; height: number };
+
+/** Both halves of the drawing, as one undoable step. */
+type Snapshot = { raster: string; shapes: Shape[] };
+
+/** What a pointer drag is doing, decided once on pointerdown. */
+type Gesture =
+  | { mode: "freehand" }
+  | { mode: "create"; id: string }
+  | { mode: "move"; id: string; from: { x: number; y: number }; origin: Shape }
+  | { mode: "resize"; id: string; handle: HandleId };
 
 /** Enough headroom to undo a session's worth of marks without hoarding bitmaps. */
 const HISTORY_LIMIT = 30;
-
-const MIN_WIDTH = 2;
-const MAX_WIDTH = 48;
-/**
- * Curve of the size slider. Fine work needs single-pixel control, so most of
- * the travel stays in the thin range (~12px at two thirds along) and the last
- * stretch ramps up to the marker-thick end.
- */
-const WIDTH_CURVE = 3.5;
-
-function sliderToWidth(position: number) {
-  const eased = Math.pow(position / 100, WIDTH_CURVE);
-  return Math.round(MIN_WIDTH + (MAX_WIDTH - MIN_WIDTH) * eased);
-}
-
-function widthToSlider(width: number) {
-  const ratio = (width - MIN_WIDTH) / (MAX_WIDTH - MIN_WIDTH);
-  return Math.round(Math.pow(Math.max(ratio, 0), 1 / WIDTH_CURVE) * 100);
-}
 
 /**
  * Draw over a result to point out what should change, then attach the marked
@@ -64,6 +59,8 @@ export function AnnotationOverlay({
   onAttach,
   onClose,
   fullscreen,
+  attachLabel = "Attach",
+  defaultColor = "#F43F5E",
 }: {
   src: string;
   /** The image with its annotations burned in, as a data URI. */
@@ -71,91 +68,279 @@ export function AnnotationOverlay({
   onClose: () => void;
   /** Covers the whole viewport like the Lightbox it replaces, instead of just the stage. */
   fullscreen?: boolean;
+  /** Wording of the confirm button — "Attach" when marking up, "Use sketch" when drawing one. */
+  attachLabel?: string;
+  /**
+   * Starting ink. Marks on a photo default to a colour that can't be mistaken
+   * for part of it; a drawing on a blank sheet wants graphite instead.
+   */
+  defaultColor?: string;
 }) {
+  /** Freehand strokes, the eraser and text. Painted, and painted over. */
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  /** Shapes and their selection handles, above the raster and taking the pointer. */
+  const shapeCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
 
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [tool, setTool] = useState<Tool>("pen");
-  const [color, setColor] = useState("#F43F5E");
+  const [color, setColor] = useState(defaultColor);
   const [strokeWidth, setStrokeWidth] = useState(6);
 
-  // Bitmap snapshots rather than a list of shapes: undo has to restore what
-  // the eraser removed too, which a replayable shape list can't express.
-  const [undoStack, setUndoStack] = useState<string[]>([]);
-  const [redoStack, setRedoStack] = useState<string[]>([]);
+  /**
+   * Shapes stay as objects so they can be picked up and resized later; only
+   * the freehand half is flattened into a bitmap as it is drawn.
+   */
+  const [shapes, setShapes] = useState<Shape[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Where a shape drag began, plus the canvas as it looked then — every
-  // pointermove repaints the preview from that snapshot.
+  /**
+   * A snapshot is both halves together, because one action can change either —
+   * and undoing an eraser stroke has to restore pixels a replayable list can't
+   * express, while undoing a move has to restore a shape's position.
+   */
+  const [undoStack, setUndoStack] = useState<Snapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<Snapshot[]>([]);
+
+  // Where a drag began, plus the canvas as it looked then — every pointermove
+  // repaints the freehand preview from that snapshot.
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const dragBase = useRef<ImageData | null>(null);
+  /** What the current pointer drag is doing, once it has been decided on pointerdown. */
+  const gesture = useRef<Gesture | null>(null);
 
   const [textAt, setTextAt] = useState<{ x: number; y: number } | null>(null);
   const [textValue, setTextValue] = useState("");
 
+  const selected = shapes.find((shape) => shape.id === selectedId) ?? null;
+
+  /**
+   * The image actually drawn on, which is not always the one passed in.
+   *
+   * A stored result is a url on the asset host, and that host serves no CORS
+   * headers — so loading it with `crossOrigin` set (which the canvas needs, or
+   * exporting throws on a tainted canvas) simply fails, and the whole surface
+   * never renders. Fetching it through the app's own backend instead returns
+   * the same image as a data URI: no CORS to satisfy, and nothing to taint.
+   */
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [loadError, setLoadError] = useState<{ src: string; message: string } | null>(null);
+
+  // Both are tagged with the src they describe and compared here rather than
+  // cleared when `src` changes. Deriving means a new image can never show the
+  // previous one's dimensions for a frame on its way in.
+  const ready = loaded?.src === src ? loaded : null;
+  const source = ready?.source ?? null;
+  const errorMessage = loadError?.src === src ? loadError.message : "";
+  const size = ready ? { width: ready.width, height: ready.height } : null;
+
   useEffect(() => {
-    const image = new window.Image();
-    image.crossOrigin = "anonymous";
-    image.onload = () => {
-      imageRef.current = image;
-      setSize({ width: image.naturalWidth, height: image.naturalHeight });
+    let cancelled = false;
+
+    /** Resolves `usable`, then measures it — the size is what gates rendering. */
+    const open = (usable: string, crossOrigin: boolean) =>
+      new Promise<void>((resolve, reject) => {
+        const image = new window.Image();
+        if (crossOrigin) image.crossOrigin = "anonymous";
+        image.onload = () => {
+          if (cancelled) return resolve();
+          imageRef.current = image;
+          const surface = surfaceSize(image.naturalWidth, image.naturalHeight);
+          setLoaded({ src, source: usable, ...surface });
+          resolve();
+        };
+        image.onerror = () => reject(new Error("could not load the image"));
+        image.src = usable;
+      });
+
+    const failed = (message: string) => {
+      if (!cancelled) setLoadError({ src, message });
     };
-    image.src = src;
+
+    (async () => {
+      if (src.startsWith("data:")) {
+        return open(src, false).catch(() => failed("Could not load this image"));
+      }
+
+      try {
+        await open(await urlToDataUrl(src), false);
+      } catch {
+        // The proxy is the reliable path, not the only one: a direct load still
+        // works wherever the host does send CORS headers.
+        try {
+          await open(src, true);
+        } catch {
+          failed("Could not load this image to draw on");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [src]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      // Never while typing into the text box, where Escape and Backspace mean
+      // something else entirely.
+      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+      if (typing) return;
+
+      if (event.key === "Escape") {
+        // One Escape drops the selection, the next closes — otherwise there is
+        // no way to deselect without clicking blank canvas.
+        if (selectedId) return setSelectedId(null);
+        return onClose();
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
+        event.preventDefault();
+        deleteSelected();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deleteSelected reads current state on each call; re-binding per render would churn the listener
+  }, [onClose, selectedId]);
+
+  /**
+   * Repaints the shape layer whenever anything it shows changes.
+   *
+   * Every shape is redrawn from scratch each time rather than patched, which
+   * is what keeps a move or a resize from leaving a trail of its old position
+   * behind — and it costs nothing at these counts.
+   */
+  useEffect(() => {
+    const canvas = shapeCanvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    shapes.forEach((shape) => drawShape(ctx, shape));
+
+    const active = shapes.find((shape) => shape.id === selectedId);
+    if (!active) return;
+
+    const scale = canvas.getBoundingClientRect().width > 0 ? canvas.width / canvas.getBoundingClientRect().width : 1;
+    const handleSize = HANDLE_SCREEN_SIZE * scale;
+
+    // A dashed outline around a box, so a shape mid-resize still reads as the
+    // thing being changed even when its own stroke is hairline-thin.
+    if (isBox(active)) {
+      ctx.save();
+      ctx.strokeStyle = "#60A5FA";
+      ctx.lineWidth = Math.max(1, scale);
+      ctx.setLineDash([6 * scale, 4 * scale]);
+      ctx.strokeRect(
+        Math.min(active.x1, active.x2),
+        Math.min(active.y1, active.y2),
+        Math.abs(active.x2 - active.x1),
+        Math.abs(active.y2 - active.y1)
+      );
+      ctx.restore();
+    }
+
+    handlesFor(active).forEach((handle) => {
+      ctx.save();
+      ctx.fillStyle = "#FFFFFF";
+      ctx.strokeStyle = "#60A5FA";
+      ctx.lineWidth = Math.max(1, 1.5 * scale);
+      ctx.beginPath();
+      ctx.rect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    });
+  }, [shapes, selectedId, ready]);
+
+  /**
+   * Changing a control while a shape is selected edits that shape.
+   *
+   * Applied where the change happens rather than in an effect on `color`: an
+   * effect would also fire when the *selection* changes, which would repaint
+   * whatever you just clicked on with the toolbar's current colour instead of
+   * showing you its own.
+   */
+  function restyleSelected(patch: Partial<Pick<Shape, "color" | "width">>) {
+    if (!selectedId) return;
+    pushHistory();
+    setShapes((current) => current.map((shape) => (shape.id === selectedId ? { ...shape, ...patch } : shape)));
+  }
+
+  function changeColor(next: string) {
+    setColor(next);
+    restyleSelected({ color: next });
+  }
+
+  function changeWidth(next: number) {
+    setStrokeWidth(next);
+    restyleSelected({ width: next });
+  }
 
   function context() {
     return canvasRef.current?.getContext("2d") ?? null;
   }
 
-  /** Call before mutating the canvas, so the change can be undone. */
-  function pushHistory() {
+  function snapshot(): Snapshot | null {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    setUndoStack((current) => [...current, canvas.toDataURL()].slice(-HISTORY_LIMIT));
+    if (!canvas) return null;
+    return { raster: canvas.toDataURL(), shapes };
+  }
+
+  /** Call before mutating either layer, so the change can be undone. */
+  function pushHistory() {
+    const taken = snapshot();
+    if (!taken) return;
+    setUndoStack((current) => [...current, taken].slice(-HISTORY_LIMIT));
     setRedoStack([]);
   }
 
-  function paint(dataUrl: string | null) {
+  function paint(raster: string | null) {
     const canvas = canvasRef.current;
     const ctx = context();
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!dataUrl) return;
-    const snapshot = new window.Image();
-    snapshot.onload = () => ctx.drawImage(snapshot, 0, 0);
-    snapshot.src = dataUrl;
+    if (!raster) return;
+    const image = new window.Image();
+    image.onload = () => ctx.drawImage(image, 0, 0);
+    image.src = raster;
+  }
+
+  function restore(step: Snapshot) {
+    paint(step.raster);
+    setShapes(step.shapes);
+    // The shape it pointed at may not exist in the restored state.
+    setSelectedId((current) => (step.shapes.some((shape) => shape.id === current) ? current : null));
   }
 
   function undo() {
-    const canvas = canvasRef.current;
-    if (!canvas || undoStack.length === 0) return;
-    const previous = undoStack[undoStack.length - 1];
-    setRedoStack((current) => [...current, canvas.toDataURL()]);
+    const taken = snapshot();
+    if (!taken || undoStack.length === 0) return;
+    setRedoStack((current) => [...current, taken]);
     setUndoStack((current) => current.slice(0, -1));
-    paint(previous);
+    restore(undoStack[undoStack.length - 1]);
   }
 
   function redo() {
-    const canvas = canvasRef.current;
-    if (!canvas || redoStack.length === 0) return;
-    const next = redoStack[redoStack.length - 1];
-    setUndoStack((current) => [...current, canvas.toDataURL()]);
+    const taken = snapshot();
+    if (!taken || redoStack.length === 0) return;
+    setUndoStack((current) => [...current, taken]);
     setRedoStack((current) => current.slice(0, -1));
-    paint(next);
+    restore(redoStack[redoStack.length - 1]);
   }
 
   function clearAll() {
-    if (undoStack.length === 0 && !hasMarks()) return;
+    if (undoStack.length === 0 && shapes.length === 0 && !hasMarks()) return;
     pushHistory();
     paint(null);
+    setShapes([]);
+    setSelectedId(null);
+  }
+
+  function deleteSelected() {
+    if (!selectedId) return;
+    pushHistory();
+    setShapes((current) => current.filter((shape) => shape.id !== selectedId));
+    setSelectedId(null);
   }
 
   function hasMarks() {
@@ -167,10 +352,28 @@ export function AnnotationOverlay({
     return false;
   }
 
-  /** Client coordinates → canvas pixels, since the canvas is displayed scaled. */
-  function toCanvas(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current!;
+  /** Canvas pixels per CSS pixel, so handles stay one size on screen at any zoom. */
+  function canvasScale() {
+    const canvas = shapeCanvasRef.current;
+    if (!canvas) return 1;
     const rect = canvas.getBoundingClientRect();
+    return rect.width > 0 ? canvas.width / rect.width : 1;
+  }
+
+  /**
+   * Client coordinates → canvas pixels, since the canvas is displayed scaled.
+   *
+   * Null when the canvas has gone: a pointer released or dragged off as the
+   * overlay closes still delivers its event, and an assertion here threw on
+   * the way out rather than simply ignoring it.
+   */
+  function toCanvas(event: ReactPointerEvent<HTMLCanvasElement>) {
+    const canvas = shapeCanvasRef.current;
+    if (!canvas) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+
     return {
       x: ((event.clientX - rect.left) / rect.width) * canvas.width,
       y: ((event.clientY - rect.top) / rect.height) * canvas.height,
@@ -186,12 +389,34 @@ export function AnnotationOverlay({
     ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
   }
 
+  /** The handle of the selected shape under `point`, if the pointer is on one. */
+  function handleAt(point: { x: number; y: number }): HandleId | null {
+    if (!selected) return null;
+    const grab = (HANDLE_SCREEN_SIZE * canvasScale()) / 2 + 2 * canvasScale();
+
+    const found = handlesFor(selected).find(
+      (handle: Handle) => Math.abs(handle.x - point.x) <= grab && Math.abs(handle.y - point.y) <= grab
+    );
+    return found?.id ?? null;
+  }
+
+  /** Topmost shape under `point` — last drawn wins, matching what is on top. */
+  function shapeAt(point: { x: number; y: number }) {
+    const tolerance = 6 * canvasScale();
+    for (let index = shapes.length - 1; index >= 0; index -= 1) {
+      if (hit(shapes[index], point, tolerance)) return shapes[index];
+    }
+    return null;
+  }
+
   function handlePointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
+    const surface = shapeCanvasRef.current;
     const canvas = canvasRef.current;
     const ctx = context();
-    if (!canvas || !ctx) return;
+    if (!surface || !canvas || !ctx) return;
 
     const point = toCanvas(event);
+    if (!point) return;
 
     if (tool === "text") {
       setTextAt(point);
@@ -199,83 +424,108 @@ export function AnnotationOverlay({
       return;
     }
 
-    canvas.setPointerCapture(event.pointerId);
+    surface.setPointerCapture(event.pointerId);
+
+    // ── select: resize the selected shape, move whatever is under the pointer,
+    //    or clear the selection when nothing is.
+    if (tool === "select") {
+      const grabbed = handleAt(point);
+      if (grabbed && selected) {
+        pushHistory();
+        gesture.current = { mode: "resize", id: selected.id, handle: grabbed };
+        return;
+      }
+
+      const target = shapeAt(point);
+      setSelectedId(target?.id ?? null);
+      if (target) {
+        pushHistory();
+        gesture.current = { mode: "move", id: target.id, from: point, origin: target };
+      }
+      return;
+    }
+
     pushHistory();
+
+    // ── a new shape starts selected, so it can be adjusted straight away.
+    if (isShapeTool(tool)) {
+      const created: Shape = {
+        id: crypto.randomUUID(),
+        kind: tool,
+        x1: point.x,
+        y1: point.y,
+        x2: point.x,
+        y2: point.y,
+        color,
+        width: strokeWidth,
+      };
+      setShapes((current) => [...current, created]);
+      setSelectedId(created.id);
+      gesture.current = { mode: "create", id: created.id };
+      return;
+    }
+
+    // ── freehand and eraser, straight onto the raster layer.
+    gesture.current = { mode: "freehand" };
     dragStart.current = point;
     dragBase.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    if (tool === "pen" || tool === "eraser") {
-      applyStroke(ctx);
-      ctx.beginPath();
-      ctx.moveTo(point.x, point.y);
-      // A tap with no drag should still leave a dot.
-      ctx.lineTo(point.x + 0.01, point.y);
-      ctx.stroke();
-    }
+    applyStroke(ctx);
+    ctx.beginPath();
+    ctx.moveTo(point.x, point.y);
+    // A tap with no drag should still leave a dot.
+    ctx.lineTo(point.x + 0.01, point.y);
+    ctx.stroke();
   }
 
   function handlePointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const ctx = context();
-    const start = dragStart.current;
-    if (!ctx || !start) return;
+    const active = gesture.current;
+    if (!active) return;
 
     const point = toCanvas(event);
+    if (!point) return;
 
-    if (tool === "pen" || tool === "eraser") {
+    if (active.mode === "freehand") {
+      const ctx = context();
+      if (!ctx) return;
       ctx.lineTo(point.x, point.y);
       ctx.stroke();
       return;
     }
 
-    if (dragBase.current) ctx.putImageData(dragBase.current, 0, 0);
-    applyStroke(ctx);
-    drawShape(ctx, start, point);
+    if (active.mode === "create" || active.mode === "resize") {
+      const handle: HandleId = active.mode === "create" ? "se" : active.handle;
+      setShapes((current) =>
+        current.map((shape) => (shape.id === active.id ? resized(shape, handle, point) : shape))
+      );
+      return;
+    }
+
+    const dx = point.x - active.from.x;
+    const dy = point.y - active.from.y;
+    setShapes((current) => current.map((shape) => (shape.id === active.id ? moved(active.origin, dx, dy) : shape)));
   }
 
   function handlePointerUp() {
+    const active = gesture.current;
     const ctx = context();
     if (ctx) ctx.globalCompositeOperation = "source-over";
+
+    // A click with a shape tool is not a shape — drop it rather than leaving a
+    // speck behind, and take its history entry with it.
+    if (active?.mode === "create") {
+      setShapes((current) => {
+        const created = current.find((shape) => shape.id === active.id);
+        if (!created || !isTooSmall(created)) return current;
+        setUndoStack((stack) => stack.slice(0, -1));
+        setSelectedId(null);
+        return current.filter((shape) => shape.id !== active.id);
+      });
+    }
+
+    gesture.current = null;
     dragStart.current = null;
     dragBase.current = null;
-  }
-
-  function drawShape(ctx: CanvasRenderingContext2D, from: { x: number; y: number }, to: { x: number; y: number }) {
-    ctx.beginPath();
-
-    if (tool === "rect") {
-      ctx.rect(from.x, from.y, to.x - from.x, to.y - from.y);
-      ctx.stroke();
-      return;
-    }
-
-    if (tool === "circle") {
-      ctx.ellipse(
-        (from.x + to.x) / 2,
-        (from.y + to.y) / 2,
-        Math.abs(to.x - from.x) / 2,
-        Math.abs(to.y - from.y) / 2,
-        0,
-        0,
-        Math.PI * 2
-      );
-      ctx.stroke();
-      return;
-    }
-
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-
-    if (tool === "arrow") {
-      const head = Math.max(strokeWidth * 3, 14);
-      const angle = Math.atan2(to.y - from.y, to.x - from.x);
-      ctx.beginPath();
-      ctx.moveTo(to.x, to.y);
-      ctx.lineTo(to.x - head * Math.cos(angle - Math.PI / 6), to.y - head * Math.sin(angle - Math.PI / 6));
-      ctx.moveTo(to.x, to.y);
-      ctx.lineTo(to.x - head * Math.cos(angle + Math.PI / 6), to.y - head * Math.sin(angle + Math.PI / 6));
-      ctx.stroke();
-    }
   }
 
   function commitText() {
@@ -292,7 +542,7 @@ export function AnnotationOverlay({
     setTextValue("");
   }
 
-  /** Flattens the photo and the marks into one image for the next request. */
+  /** Flattens the photo, the freehand marks and the shapes into one image. */
   function attach() {
     const canvas = canvasRef.current;
     const image = imageRef.current;
@@ -304,8 +554,13 @@ export function AnnotationOverlay({
     const ctx = merged.getContext("2d");
     if (!ctx) return;
 
-    ctx.drawImage(image, 0, 0);
+    // Scaled to the surface, which may be smaller than the original.
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     ctx.drawImage(canvas, 0, 0);
+    // Re-rendered rather than copied off the shape canvas, which is carrying
+    // selection handles that must not end up in the image.
+    shapes.forEach((shape) => drawShape(ctx, shape));
+
     onAttach(merged.toDataURL("image/jpeg", 0.92));
   }
 
@@ -318,20 +573,40 @@ export function AnnotationOverlay({
         fullscreen ? "fixed inset-0 z-50 bg-black/85 p-6" : "absolute inset-0 z-20"
       )}
     >
+      {/* Until the image is measured there is nothing to draw on. Say so,
+          rather than leaving a toolbar floating over an empty surface. */}
+      {!size && (
+        <p className="rounded-lg border border-white/10 bg-black/70 px-3 py-2 text-[12px] text-white/70">
+          {errorMessage || "Loading image…"}
+        </p>
+      )}
+
       {size && (
         <div className="relative max-h-full max-w-full" style={{ aspectRatio: `${size.width} / ${size.height}` }}>
           {/* eslint-disable-next-line @next/next/no-img-element -- the canvas must sit on an element whose box exactly matches the bitmap. */}
-          <img src={src} alt="" className="pointer-events-none h-full w-full select-none object-fill" />
+          <img src={source ?? src} alt="" className="pointer-events-none h-full w-full select-none object-fill" />
 
+          {/* Freehand marks sit under the shapes, and take no pointer events of
+              their own — the shape layer above is the single input surface. */}
           <canvas
             ref={canvasRef}
+            width={size.width}
+            height={size.height}
+            className="pointer-events-none absolute inset-0 h-full w-full"
+          />
+
+          <canvas
+            ref={shapeCanvasRef}
             width={size.width}
             height={size.height}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
-            className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
+            className={cn(
+              "absolute inset-0 h-full w-full touch-none",
+              tool === "select" ? "cursor-default" : "cursor-crosshair"
+            )}
           />
 
           {textAt && (
@@ -355,102 +630,23 @@ export function AnnotationOverlay({
         </div>
       )}
 
-      {/* Takes the top-right slot the stage's own controls vacate while drawing. */}
-      <div className="absolute right-3 top-3 flex max-w-[92%] flex-wrap items-center justify-end gap-1.5 rounded-2xl border border-white/10 bg-black px-2 py-1.5">
-        <div className="flex items-center gap-0.5">
-          {TOOLS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              title={label}
-              onClick={() => setTool(id)}
-              className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors",
-                tool === id ? "bg-gold/30 text-gold" : "text-white/80 hover:bg-white/15"
-              )}
-            >
-              <Icon size={14} />
-            </button>
-          ))}
-        </div>
-
-        <span className="mx-0.5 h-5 w-px bg-white/15" />
-
-        <label title="Colour" className="relative h-6 w-6 shrink-0 overflow-hidden rounded-full border border-white/25">
-          <span className="block h-full w-full" style={{ background: color }} />
-          <input
-            type="color"
-            value={color}
-            onChange={(event) => setColor(event.target.value)}
-            className="absolute inset-0 cursor-pointer opacity-0"
-          />
-        </label>
-
-        {/* One slider for both: the eraser needs a size as much as the pen does. */}
-        <label className="flex items-center gap-1.5 px-1" title={tool === "eraser" ? "Eraser size" : "Stroke size"}>
-          <span
-            className="shrink-0 rounded-full bg-white"
-            style={{ width: Math.min(strokeWidth, 14), height: Math.min(strokeWidth, 14) }}
-          />
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={widthToSlider(strokeWidth)}
-            onChange={(event) => setStrokeWidth(sliderToWidth(Number(event.target.value)))}
-            className="h-1 w-20 cursor-pointer accent-gold"
-          />
-        </label>
-
-        <span className="mx-0.5 h-5 w-px bg-white/15" />
-
-        <ToolbarAction label="Undo" onClick={undo} disabled={undoStack.length === 0}>
-          <Undo2 size={14} />
-        </ToolbarAction>
-        <ToolbarAction label="Redo" onClick={redo} disabled={redoStack.length === 0}>
-          <Redo2 size={14} />
-        </ToolbarAction>
-        <ToolbarAction label="Clear all" onClick={clearAll}>
-          <Trash2 size={14} />
-        </ToolbarAction>
-
-        <span className="mx-0.5 h-5 w-px bg-white/15" />
-
-        <button
-          type="button"
-          onClick={attach}
-          className="flex h-7 items-center gap-1 rounded-full bg-gold/20 px-2.5 text-[11px] font-medium text-gold transition-colors hover:bg-gold/30"
-        >
-          <Check size={13} /> Attach
-        </button>
-        <ToolbarAction label="Close" onClick={onClose}>
-          <X size={14} />
-        </ToolbarAction>
-      </div>
+      <DrawingToolbar
+        tool={tool}
+        onToolChange={setTool}
+        color={color}
+        onColorChange={changeColor}
+        strokeWidth={strokeWidth}
+        onWidthChange={changeWidth}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={undoStack.length > 0}
+        canRedo={redoStack.length > 0}
+        onDelete={selected ? deleteSelected : clearAll}
+        deleteLabel={selected ? 'Delete shape' : 'Clear all'}
+        onConfirm={attach}
+        confirmLabel={attachLabel}
+        onClose={onClose}
+      />
     </div>
-  );
-}
-
-function ToolbarAction({
-  label,
-  onClick,
-  disabled,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      onClick={onClick}
-      disabled={disabled}
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 disabled:opacity-30 disabled:hover:bg-transparent"
-    >
-      {children}
-    </button>
   );
 }

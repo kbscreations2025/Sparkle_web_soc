@@ -1,6 +1,7 @@
 "use client";
 
 import { ChatMessages } from "./ChatMessages";
+import { ErrorBanner } from "./ToolChrome";
 import { ChatInputBar } from "./ChatInputBar";
 import { GenerationStage } from "./GenerationStage";
 import { StudioSplitLayout } from "./StudioSplitLayout";
@@ -65,9 +66,7 @@ export function GenerationResults<TModel extends string>({
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <ToolHeader onReset={reset} resetLabel={resetLabel} />
-      {error && (
-        <p className="shrink-0 border-b border-error/20 bg-error/[0.08] px-5 py-2 text-xs text-error">{error}</p>
-      )}
+      <ErrorBanner message={error} />
 
       <StudioSplitLayout
         chatRail={

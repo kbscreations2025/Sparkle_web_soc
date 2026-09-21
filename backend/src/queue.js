@@ -2,10 +2,12 @@ const { Queue, QueueEvents } = require("bullmq");
 const config = require("./config");
 const { createRedisConnection, throttledLogger } = require("./redis");
 const { emitToUser } = require("./socket");
+const { LANE_IDS, laneFor, laneConfig } = require("./jobs/lanes");
 const Job = require("./models/job");
 
-let queue;
-let queueEvents;
+/** One producer per lane, built on first use. See jobs/lanes.js. */
+const queues = new Map();
+const queueEventStreams = new Map();
 
 /**
  * How long a request is willing to wait to hand work to Redis.
@@ -27,20 +29,34 @@ function withTimeout(promise, ms, message) {
   ]);
 }
 
-/** The producer handle. Lazily built so requiring this file never opens a socket. */
-function getQueue() {
-  if (!queue) {
-    // failFast: this connection is used from inside HTTP handlers, which must
-    // answer "the queue is down" rather than hang waiting for it to come back.
-    queue = new Queue(config.queue.name, { connection: createRedisConnection("queue", { failFast: true }) });
+/**
+ * The producer handle for one lane. Lazily built so requiring this file never
+ * opens a socket, and so a deployment that never runs a video job never opens
+ * a connection for that lane.
+ */
+function getQueue(laneId = "default") {
+  const existing = queues.get(laneId);
+  if (existing) return existing;
 
-    // Not optional: BullMQ re-emits connection failures on the Queue itself,
-    // and an unhandled 'error' on an EventEmitter takes the process down —
-    // so an unreachable Redis would crash the API rather than degrade it.
-    const logQueueError = throttledLogger("queue");
-    queue.on("error", (err) => logQueueError(err.message));
-  }
+  // failFast: this connection is used from inside HTTP handlers, which must
+  // answer "the queue is down" rather than hang waiting for it to come back.
+  const queue = new Queue(laneConfig(laneId).name, {
+    connection: createRedisConnection(`queue:${laneId}`, { failFast: true }),
+  });
+
+  // Not optional: BullMQ re-emits connection failures on the Queue itself,
+  // and an unhandled 'error' on an EventEmitter takes the process down —
+  // so an unreachable Redis would crash the API rather than degrade it.
+  const logQueueError = throttledLogger(`queue:${laneId}`);
+  queue.on("error", (err) => logQueueError(err.message));
+
+  queues.set(laneId, queue);
   return queue;
+}
+
+/** The lane a job of this type runs on — what a canceller needs to find it. */
+function getQueueForType(type) {
+  return getQueue(laneFor(type));
 }
 
 /**
@@ -99,7 +115,7 @@ async function enqueueJob({ tenantId, userId, userName, type, tool, request = {}
 
   try {
     await withTimeout(
-      getQueue().add(
+      getQueueForType(type).add(
       type,
       { jobId: String(job._id), ...payload },
       {
@@ -146,9 +162,19 @@ async function enqueueJob({ tenantId, userId, userName, type, tool, request = {}
  * for the client (`toPublicJob`) beats three near-identical ones.
  */
 function startQueueEventsBridge() {
-  if (queueEvents) return queueEvents;
+  // Every lane, not just the default one: a video job's progress reaches the
+  // browser the same way an image job's does, and a lane nobody is listening
+  // to would leave its page watching a bar that never moves.
+  return LANE_IDS.map(startLaneEventsBridge);
+}
 
-  queueEvents = new QueueEvents(config.queue.name, { connection: createRedisConnection("events") });
+function startLaneEventsBridge(laneId) {
+  const existing = queueEventStreams.get(laneId);
+  if (existing) return existing;
+
+  const queueEvents = new QueueEvents(laneConfig(laneId).name, {
+    connection: createRedisConnection(`events:${laneId}`),
+  });
 
   /**
    * `live` is the payload the worker attached to its progress tick, when
@@ -189,16 +215,24 @@ function startQueueEventsBridge() {
   queueEvents.on("progress", ({ jobId, data }) => push(jobId, data));
   queueEvents.on("completed", ({ jobId }) => push(jobId));
   queueEvents.on("failed", ({ jobId }) => push(jobId));
-  const logEventsError = throttledLogger("queue");
+  const logEventsError = throttledLogger(`queue:${laneId}`);
   queueEvents.on("error", (err) => logEventsError(`events stream error: ${err.message}`));
 
+  queueEventStreams.set(laneId, queueEvents);
   return queueEvents;
 }
 
 async function closeQueue() {
-  await Promise.all([queue?.close(), queueEvents?.close()].filter(Boolean));
-  queue = undefined;
-  queueEvents = undefined;
+  await Promise.all([...queues.values(), ...queueEventStreams.values()].map((handle) => handle.close()));
+  queues.clear();
+  queueEventStreams.clear();
 }
 
-module.exports = { getQueue, enqueueJob, toPublicJob, startQueueEventsBridge, closeQueue };
+module.exports = {
+  getQueue,
+  getQueueForType,
+  enqueueJob,
+  toPublicJob,
+  startQueueEventsBridge,
+  closeQueue,
+};

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ErrorBanner } from "@/components/studio/ToolChrome";
 import { useSearchParams } from "next/navigation";
 import { ImagePlus, Upload } from "lucide-react";
 import { ChatMessages } from "@/components/studio/ChatMessages";
@@ -24,6 +25,7 @@ import { compressImage, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
+import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const CHAT_TO_EDIT_PERMISSION = "tool.chat_to_edit.run";
 
@@ -117,13 +119,7 @@ export default function ChatToEditPage() {
   }, []);
 
   if (!can(user, CHAT_TO_EDIT_PERMISSION)) {
-    return (
-      <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-muted">
-          Chat to Edit isn&apos;t enabled for your account. Ask an admin to grant you access.
-        </p>
-      </div>
-    );
+    return <ToolAccessNotice tool="Chat to Edit" />;
   }
 
   const displayImage = selectedView ?? currentImage ?? pendingImage;
@@ -242,9 +238,7 @@ export default function ChatToEditPage() {
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <ToolHeader onReset={started ? resetAll : undefined} resetLabel="New chat" />
 
-      {error && (
-        <p className="shrink-0 border-b border-error/20 bg-error/[0.08] px-5 py-2 text-xs text-error">{error}</p>
-      )}
+      <ErrorBanner message={error} />
 
       <StudioSplitLayout
         chatRail={

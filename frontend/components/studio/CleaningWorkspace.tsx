@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ErrorBanner } from "./ToolChrome";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Loader2, PenLine, Sparkles, Wand2 } from "lucide-react";
@@ -21,6 +22,7 @@ import { useAttachments } from "@/lib/useAttachments";
 import { useJobs } from "@/lib/jobs-context";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
+import { ToolAccessNotice } from "./ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
 const CLEANING_PERMISSION = "tool.cleaning.run";
@@ -251,13 +253,7 @@ export function CleaningWorkspace<TModel extends string>({
   }, [queueJobs]);
 
   if (!can(user, CLEANING_PERMISSION)) {
-    return (
-      <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-muted">
-          Image Cleaning isn&apos;t enabled for your account. Ask an admin to grant you access.
-        </p>
-      </div>
-    );
+    return <ToolAccessNotice tool="Image Cleaning" />;
   }
 
   function updateJob(id: string, patch: Partial<Job>) {
@@ -439,9 +435,7 @@ export function CleaningWorkspace<TModel extends string>({
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <ToolHeader onReset={showResults ? startOver : undefined} />
 
-      {error && (
-        <p className="shrink-0 border-b border-error/20 bg-error/[0.08] px-5 py-2 text-xs text-error">{error}</p>
-      )}
+      <ErrorBanner message={error} />
 
       {!showResults ? (
         <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
@@ -586,10 +580,9 @@ export function CleaningWorkspace<TModel extends string>({
               {annotating && annotating.target === "stage" && selected && (
                 <AnnotationOverlay
                   src={annotating.src}
-                  onAttach={(marked) => {
-                    setAnnotatedPhoto(marked);
-                    setAnnotating(null);
-                  }}
+                  // The shared writer handles the stage target now, so this no
+                  // longer needs its own copy of "put it in the photo slot".
+                  onAttach={attach.saveAnnotation}
                   onClose={() => setAnnotating(null)}
                 />
               )}

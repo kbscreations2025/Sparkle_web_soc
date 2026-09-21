@@ -1,7 +1,7 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const { requireAuth } = require("../middleware/auth");
-const { getQueue, toPublicJob } = require("../queue");
+const { getQueueForType, toPublicJob } = require("../queue");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const Job = require("../models/job");
 
@@ -91,7 +91,10 @@ router.delete("/:id", async (req, res) => {
   // Redis first: once it is gone from the queue no worker can pick it up, so
   // the document can't end up saying "cancelled" while a worker runs it anyway.
   try {
-    const queued = await getQueue().getJob(String(job._id));
+    // Looked up on the lane this type runs on — a video job is not in the
+    // default queue, and asking the wrong one finds nothing and would mark
+    // it cancelled while a worker carried on running it.
+    const queued = await getQueueForType(job.type).getJob(String(job._id));
     await queued?.remove();
   } catch (err) {
     console.error(`[jobs] could not remove ${job._id} from the queue:`, err.message);

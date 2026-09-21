@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const { GENERATION_TOOLS, GENERATION_STATUSES, ASSET_ROLES } = require("../generations");
+const { GENERATION_TOOLS, GENERATION_STATUSES, ASSET_ROLES, ASSET_TYPES } = require("../generations");
 
 /**
  * A denormalised copy of an Asset, embedded so a history thread renders from
@@ -18,6 +18,13 @@ const assetSnapshotSchema = new mongoose.Schema(
      */
     thumbnailUrl: { type: String, default: null },
     role: { type: String, enum: ASSET_ROLES, required: true },
+    /**
+     * Carried on the snapshot so History can decide between an `<img>` and a
+     * `<video>` without joining back to the Asset row. Defaults to "image":
+     * every row written before Image to Video existed is one.
+     */
+    type: { type: String, enum: ASSET_TYPES, default: "image" },
+    durationMs: { type: Number, default: null },
     width: { type: Number, default: null },
     height: { type: Number, default: null },
   },

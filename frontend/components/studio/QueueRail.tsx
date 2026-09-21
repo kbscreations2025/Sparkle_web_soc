@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -15,6 +15,7 @@ import { type QueuedJob } from "@/lib/api";
 import { describeJob, useNow } from "@/lib/job-progress";
 import { useCancelJob, useJobs, useQueueList } from "@/lib/jobs-context";
 import { conversationHref, TOOL_LABELS } from "@/lib/nav";
+import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 import { JobProgressBar } from "./JobProgressBar";
 
@@ -67,23 +68,8 @@ export function QueueRail() {
    * queue dropdown dismisses. Escape closes it too, which is what anything
    * temporarily covering the page is expected to do.
    */
-  useEffect(() => {
-    if (!expanded) return;
-
-    function onPointerDown(event: MouseEvent) {
-      if (!railRef.current?.contains(event.target as Node)) setExpanded(false);
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setExpanded(false);
-    }
-
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [expanded]);
+  const collapse = useCallback(() => setExpanded(false), []);
+  useDismissable(railRef, expanded, collapse);
 
   // Ticks only while something is in flight. Settled rows are handed 0 rather
   // than this, so a second passing doesn't re-render a list of finished work

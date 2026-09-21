@@ -37,6 +37,14 @@ module.exports = {
     // way the generations collection is shared and told apart by `tool`.
     name: process.env.QUEUE_NAME || "sparkle-jobs",
     /**
+     * Video runs on its own queue, and it is the one exception to "one queue
+     * for every tool" above. A Veo clip takes minutes rather than tens of
+     * seconds, so on the shared queue three of them fill every worker slot
+     * and each image generation queued behind them waits out the lot. A
+     * second lane bounds that: video waits on video, and nothing else does.
+     */
+    videoName: process.env.VIDEO_QUEUE_NAME || "sparkle-video-jobs",
+    /**
      * How many jobs one worker runs at once. These jobs are I/O-bound — they
      * spend almost all their time awaiting an AI provider — so this is really
      * "how hard are we willing to hit the provider at once", not a CPU budget.
@@ -44,6 +52,13 @@ module.exports = {
      * provider starts answering 429s.
      */
     concurrency: Number(process.env.WORKER_CONCURRENCY || 3),
+    /**
+     * Lower than the image lane on purpose. A video job is almost entirely
+     * waiting, so this is not a CPU budget either — but Veo is the scarcest
+     * and most expensive quota a tenant has, and running several at once is
+     * the fastest way to have all of them answered with 429s.
+     */
+    videoConcurrency: Number(process.env.VIDEO_WORKER_CONCURRENCY || 1),
     /**
      * How many times a job is retried before it is marked failed for good.
      * This is the outer loop: each attempt already retries transient errors on
@@ -57,6 +72,14 @@ module.exports = {
      * 150s (gemini.js/openai.js), plus R2 uploads afterwards.
      */
     lockDurationMs: Number(process.env.JOB_LOCK_DURATION_MS || 300_000),
+    /**
+     * The same rule as `lockDurationMs`, against a much slower job: Veo is
+     * polled for up to ten minutes (see gemini.js), and the upload of a
+     * multi-megabyte clip follows that. Set below it and a healthy video
+     * generation is handed to a second worker and produced — and billed —
+     * twice.
+     */
+    videoLockDurationMs: Number(process.env.VIDEO_JOB_LOCK_DURATION_MS || 900_000),
     /**
      * In development the worker runs inside the API process, so `npm run dev`
      * is still one command. In production it is a separate service (Render

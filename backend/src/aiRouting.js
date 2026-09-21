@@ -56,6 +56,13 @@ function classifyProviderError(err, provider = "gemini") {
   if (err instanceof NoProviderError) {
     return { message: err.message, code: err.code, noProvider: true };
   }
+  // Already in the user's language, and about this application rather than
+  // the provider — a content-filter refusal or a video that ran long. Reading
+  // it through the provider's classifier would replace a specific,
+  // actionable sentence with "something went wrong talking to the model".
+  if (err?.expose && err.message) {
+    return { message: err.message, code: err.code ? String(err.code) : null, noProvider: false };
+  }
   const { message, code } = (PROVIDER_MODULES[provider] || PROVIDER_MODULES.gemini).classifyError(err);
   return { message, code: code === undefined ? null : String(code), noProvider: false };
 }
@@ -91,7 +98,7 @@ function sendGenerationError(res, err, routeName, provider = "gemini") {
  * @throws {NoProviderError} if the tenant has no enabled key for `provider`.
  * @returns {{ output: { base64, mimeType, text }, providerId: ObjectId }}
  */
-async function routeProviderCall({ tenant, provider, modelId, prompt, images }) {
+async function routeProviderOperation({ tenant, provider, call }) {
   const mod = PROVIDER_MODULES[provider];
   const candidates = tenant.routableProviders(provider);
   if (candidates.length === 0) {
@@ -108,7 +115,7 @@ async function routeProviderCall({ tenant, provider, modelId, prompt, images }) 
       const apiKey = decryptSecret(withCredential.credential, { provider });
 
       try {
-        const result = await mod.generateImage({ apiKey, modelId, prompt, images });
+        const result = await call({ apiKey, mod });
         tenant.recordProviderSuccess(entry._id);
         usedEntry = entry;
         return result;
@@ -131,6 +138,50 @@ async function routeProviderCall({ tenant, provider, modelId, prompt, images }) 
   return { output, providerId: usedEntry._id };
 }
 
+/**
+ * An image out. The original shape of this function, now one of three
+ * operations over the same failover policy.
+ */
+async function routeProviderCall({ tenant, provider, modelId, prompt, images }) {
+  return routeProviderOperation({
+    tenant,
+    provider,
+    call: ({ apiKey, mod }) => mod.generateImage({ apiKey, modelId, prompt, images }),
+  });
+}
+
+/**
+ * Text out — Image to Text, and the writing halves of Marketing Kit.
+ *
+ * Gemini-only: nothing else this app talks to is wired for text yet, and
+ * silently running a text job on a provider that can't do it would fail
+ * deep inside the worker rather than here.
+ *
+ * `output` is `{ text, finishReason, blocked, truncated }` rather than image
+ * bytes — see `gemini.generateText`.
+ */
+async function routeTextCall({ tenant, modelId, prompt, images, parts, ...options }) {
+  return routeProviderOperation({
+    tenant,
+    provider: "gemini",
+    call: ({ apiKey, mod }) => mod.generateText({ apiKey, modelId, prompt, images, parts, ...options }),
+  });
+}
+
+/**
+ * A video out. Shares the tenant's Gemini keys and their failover with every
+ * other call, which matters more here than elsewhere: a Veo run is minutes
+ * long, so a key that turns out to be rate-limited should cost a retry on
+ * the next key rather than the whole job.
+ */
+async function routeVideoCall({ tenant, modelId, prompt, image, config, onPoll }) {
+  return routeProviderOperation({
+    tenant,
+    provider: "gemini",
+    call: ({ apiKey, mod }) => mod.generateVideo({ apiKey, modelId, prompt, image, config, onPoll }),
+  });
+}
+
 /** Back-compat shorthand for the pre-multi-provider call sites. */
 async function routeGeminiCall({ tenant, modelId, prompt, images }) {
   return routeProviderCall({ tenant, provider: "gemini", modelId, prompt, images });
@@ -139,6 +190,9 @@ async function routeGeminiCall({ tenant, modelId, prompt, images }) {
 module.exports = {
   routeGeminiCall,
   routeProviderCall,
+  routeProviderOperation,
+  routeTextCall,
+  routeVideoCall,
   resolveProviderModel,
   loadTenantOrThrow,
   sendGenerationError,

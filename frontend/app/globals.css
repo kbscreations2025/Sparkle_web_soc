@@ -178,6 +178,15 @@ button, a { transition-property: color, background-color, border-color, opacity,
   }
 }
 
+/* ── Bottom drawer (the model builder) ── */
+@keyframes drawerUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.animate-drawer-up {
+  animation: drawerUp 0.22s ease-out;
+}
+
 /* ── Gold shine text animation (the "Sparkle" wordmark on the login page) ── */
 @keyframes goldShine {
   0%   { background-position: -250% center; }
@@ -199,4 +208,37 @@ button, a { transition-property: color, background-color, border-color, opacity,
   background-clip: text;
   -webkit-text-fill-color: transparent;
   animation: goldShine 4s linear infinite;
+}
+
+/* ══════════════════════════════════════════════════════════
+   PRINTING — the Marketing Kit "Download PDF" path
+   ══════════════════════════════════════════════════════════
+   Not a screenshot: the Affinity deck is already laid out at the real 16:9
+   slide ratio, so printing it gives vector text at whatever resolution the
+   user picks. All this has to do is get the app's chrome out of the way and
+   put the page on white.                                                   */
+@media print {
+  /* Navigation, rails and toolbars are the application, not the document. */
+  aside,
+  nav,
+  [data-app-chrome] {
+    display: none !important;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  /* The deck scrolls inside a pane on screen; on paper it must be allowed to
+     run to its full height instead of being clipped to one viewport. */
+  #affinity-print-area {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  /* One slide per page, as the deck presents them. */
+  #affinity-print-area > div > div {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }

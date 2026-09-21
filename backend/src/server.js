@@ -10,6 +10,10 @@ const cleaningRoutes = require("./routes/cleaning");
 const chatToEditRoutes = require("./routes/chatToEdit");
 const textToImageRoutes = require("./routes/textToImage");
 const sketchToolRoutes = require("./routes/sketchTools");
+const lifestyleRoutes = require("./routes/lifestyle");
+const imageToTextRoutes = require("./routes/imageToText");
+const imageToVideoRoutes = require("./routes/imageToVideo");
+const marketingKitRoutes = require("./routes/marketingKit");
 const lexiconRoutes = require("./routes/lexicon");
 const historyRoutes = require("./routes/history");
 const jobRoutes = require("./routes/jobs");
@@ -40,6 +44,12 @@ app.use("/api/chat-to-edit", chatToEditRoutes);
 app.use("/api/text-to-image", textToImageRoutes);
 // One router for the three sketch tools — each owns a path under it.
 app.use("/api", sketchToolRoutes);
+app.use("/api/lifestyle", lifestyleRoutes);
+app.use("/api/image-to-text", imageToTextRoutes);
+app.use("/api/image-to-video", imageToVideoRoutes);
+// One router for Marketing Kit's three surfaces — Brand Story, Affinity and
+// Campaign Kit — plus the saved kits they write.
+app.use("/api/marketing-kit", marketingKitRoutes);
 app.use("/api/lexicon", lexiconRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/jobs", jobRoutes);

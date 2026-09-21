@@ -49,6 +49,24 @@ function buildAssetKey({ tenantId, userId, conversationId, generationId, role, a
 }
 
 /**
+ * The key for something that isn't part of a generation — a saved Lifestyle
+ * model, a Marketing Kit upload.
+ *
+ * A separate scheme because `buildAssetKey`'s path is built out of a
+ * conversation and a generation, and these belong to neither: they are
+ * library objects that outlive any single run and are reused across many.
+ * Partitioned by tenant and month for the same reason, so a bucket listing
+ * stays browsable by hand.
+ */
+function buildLibraryKey({ tenantId, userId, collection, id, extension, variant }) {
+  const now = new Date();
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const name = variant ? `${id}_${variant}` : String(id);
+  return `${PREFIX}tenants/${tenantId}/library/${collection}/${yyyy}/${mm}/${userId}/${name}.${extension}`;
+}
+
+/**
  * The key of a derivative sitting beside an original — `<id>.jpg` becomes
  * `<id>_thumb.webp`. Derived from the original's key rather than rebuilt from
  * its parts, because the date segment is stamped at upload time and a
@@ -103,4 +121,12 @@ function publicUrlFor(key) {
   return `${config.r2.publicUrl.replace(/\/$/, "")}/${key}`;
 }
 
-module.exports = { buildAssetKey, variantKeyFor, uploadObject, getObject, deleteObject, publicUrlFor };
+module.exports = {
+  buildAssetKey,
+  buildLibraryKey,
+  variantKeyFor,
+  uploadObject,
+  getObject,
+  deleteObject,
+  publicUrlFor,
+};

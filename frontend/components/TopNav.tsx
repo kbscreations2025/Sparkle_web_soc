@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -11,6 +11,7 @@ import { NavBar, NavLogo } from "@/components/nav/NavBar";
 import { Breadcrumbs } from "@/components/nav/Breadcrumbs";
 import { AccountMenu } from "@/components/nav/AccountMenu";
 import { QueueIndicator } from "@/components/studio/QueueIndicator";
+import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 
 /**
@@ -33,23 +34,8 @@ export function TopNav() {
   const toolbar = usePageToolbarValue();
   const actions = usePageActionsValue();
 
-  useEffect(() => {
-    if (!drawerOpen) return;
-
-    function onPointerDown(event: MouseEvent) {
-      if (!drawerRef.current?.contains(event.target as Node)) setDrawerOpen(false);
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setDrawerOpen(false);
-    }
-
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [drawerOpen]);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  useDismissable(drawerRef, drawerOpen, closeDrawer);
 
   return (
     // Unpinned: the sidebar owns the full height beside this, so a header

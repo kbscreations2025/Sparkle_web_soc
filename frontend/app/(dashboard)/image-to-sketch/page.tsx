@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import { Maximize2, PenLine, Upload, X } from "lucide-react";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
+import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { OptionChips } from "@/components/studio/OptionChips";
@@ -26,6 +27,7 @@ import { compressImage, makeThumbnail } from "@/lib/image";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
+import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.image_to_sketch.run";
@@ -57,13 +59,7 @@ export default function ImageToSketchPage() {
   });
 
   if (!can(user, PERMISSION)) {
-    return (
-      <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-muted">
-          Image to Sketch isn&apos;t enabled for your account. Ask an admin to grant you access.
-        </p>
-      </div>
-    );
+    return <ToolAccessNotice tool="Image to Sketch" />;
   }
 
   async function accept(file: File | undefined) {
@@ -102,11 +98,7 @@ export default function ImageToSketchPage() {
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-      {workspace.error && (
-        <p className="shrink-0 border-b border-error/20 bg-error/[0.08] px-5 py-2 text-xs text-error">
-          {workspace.error}
-        </p>
-      )}
+      <ErrorBanner message={workspace.error} />
 
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
         <div className="mx-auto max-w-3xl space-y-6">
@@ -178,15 +170,9 @@ export default function ImageToSketchPage() {
             <InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} />
           </div>
 
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={!photo}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-gold/30 bg-gold/15 px-4 py-3 text-xs font-semibold text-gold transition-colors hover:bg-gold/25 disabled:opacity-50"
-          >
-            <PenLine size={14} />
+          <RunButton onClick={handleGenerate} disabled={!photo} icon={<PenLine size={14} />}>
             {count > 1 ? `Sketch ${count} versions` : "Sketch this photo"}
-          </button>
+          </RunButton>
         </div>
       </div>
 

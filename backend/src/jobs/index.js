@@ -7,9 +7,17 @@
 require("./cleaning");
 require("./textToImage");
 require("./sketchTools");
+require("./lifestyle");
+require("./imageToText");
+require("./imageToVideo");
+require("./marketingKit");
 
 module.exports = {
   CLEANING_JOB: require("./cleaning").CLEANING_JOB,
   TEXT_TO_IMAGE_JOB: require("./textToImage").TEXT_TO_IMAGE_JOB,
   ...require("./sketchTools"),
+  ...require("./lifestyle"),
+  ...require("./imageToText"),
+  ...require("./imageToVideo"),
+  ...require("./marketingKit"),
 };

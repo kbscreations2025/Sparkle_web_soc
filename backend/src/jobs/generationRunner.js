@@ -36,7 +36,18 @@ function clampCount(count, fallback = DEFAULT_IMAGE_COUNT) {
 /**
  * @param tool              A key from GENERATION_TOOLS, for history and audit.
  * @param buildPrompt       `({ data, count }) => string` for an initial run.
- * @param buildRefinePrompt `({ instruction, referenceCount }) => string` for a follow-up.
+ *                          Every variation is sent the same words.
+ * @param buildShots        `({ data, count }) => string[]` instead, when the
+ *                          variations are not the same request repeated —
+ *                          Campaign Kit's four shots are four different
+ *                          prompts, and a count of N identical ones is just
+ *                          the common case of this. Wins over `buildPrompt`.
+ * @param buildRefinePrompt `({ instruction, referenceCount, data }) => string`
+ *                          for a follow-up. `data` is there for a tool whose
+ *                          references aren't all alike: Lifestyle re-attaches
+ *                          the original jewellery photos as ground truth
+ *                          alongside any style reference, and the prompt has
+ *                          to say which is which.
  *
  * `data` is the BullMQ payload. Images arrive already parsed as
  * `{ mimeType, base64 }` — the route does that, so the worker never re-parses
@@ -45,18 +56,36 @@ function clampCount(count, fallback = DEFAULT_IMAGE_COUNT) {
  *   · `refineImage`   the image a follow-up edits
  *   · `references`    extra images attached to a follow-up, inspiration only
  */
-async function runGenerationJob({ job, data, setProgress, withProgress, tool, buildPrompt, buildRefinePrompt }) {
+async function runGenerationJob({
+  job,
+  data,
+  setProgress,
+  withProgress,
+  tool,
+  buildPrompt,
+  buildShots,
+  buildRefinePrompt,
+  /** Extra per-tool knobs to record on the generation, beside `quality`. */
+  params,
+  /**
+   * `({ saved, delivered, data, dbUser }) => object` — for a tool that keeps
+   * a document of its own beside the generation (Campaign Kit's deck).
+   * Runs after the images are stored, so it can point at them rather than
+   * holding a second copy. Returns fields merged into the job result.
+   */
+  persist,
+}) {
   const dbUser = await User.findById(job.userId);
   if (!dbUser) throw new Error("the user who queued this job no longer exists");
 
   const { provider, model, quality, modelLabel } = resolveProviderModel(data.requestedModel);
   const tenant = await loadTenantOrThrow(dbUser);
 
-  const common = { tenant, user: dbUser, tool, model, modelLabel, quality, provider };
+  const common = { tenant, user: dbUser, tool, model, modelLabel, quality, provider, params };
 
   if (data.isRefinement) {
     const { refineImage, references = [], instruction, displayPrompt } = data;
-    const prompt = buildRefinePrompt({ instruction, referenceCount: references.length });
+    const prompt = buildRefinePrompt({ instruction, referenceCount: references.length, data });
 
     const { output, providerId } = await withProgress({ from: 20, to: 85, phase: "generating" }, async ({ stepDone }) => {
       const result = await routeProviderCall({
@@ -93,22 +122,41 @@ async function runGenerationJob({ job, data, setProgress, withProgress, tool, bu
     return toResult(saved, { model, modelLabel, provider });
   }
 
-  const count = clampCount(data.count, data.defaultCount);
+  const requestedCount = clampCount(data.count, data.defaultCount);
   const sourceImages = data.sourceImages ?? [];
-  const prompt = buildPrompt({ data, count });
+
+  /*
+   * A tool that varies its prompt per shot decides how many there are; for
+   * everything else it is the count the user asked for, repeated.
+   *
+   * A shot may be a bare prompt string, or `{ prompt, images }` when it
+   * needs a different set of pictures from the others — Campaign Kit's
+   * studio shots must not receive the model photo, or a hand appears in a
+   * "jewelry only" frame.
+   */
+  const shots = (
+    buildShots
+      ? buildShots({ data, count: requestedCount })
+      : Array.from({ length: requestedCount }, () => buildPrompt({ data, count: requestedCount }))
+  ).map((shot) => (typeof shot === "string" ? { prompt: shot, images: sourceImages } : { images: sourceImages, ...shot }));
+  const count = shots.length;
+
+  // The prompt recorded in History. With one set of words it is simply them;
+  // with several it is all of them, since no single one explains the run.
+  const prompt = count === 1 ? shots[0].prompt : shots.map((shot) => shot.prompt).join("\n\n─────\n\n");
 
   // One slice of the bar per variation, and each one reports the moment it
   // lands: the user sees the first image while the rest are still running,
   // and the percentage moves on facts rather than on a clock alone.
   const settled = await withProgress({ from: 20, to: 85, phase: "generating", steps: count }, ({ stepDone }) =>
     Promise.allSettled(
-      Array.from({ length: count }, async () => {
+      shots.map(async (shot) => {
         const result = await routeProviderCall({
           tenant,
           provider,
           modelId: model,
-          prompt,
-          images: sourceImages.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
+          prompt: shot.prompt,
+          images: shot.images.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
         });
 
         // Best-effort, and awaited only so the bar and the preview move
@@ -119,6 +167,20 @@ async function runGenerationJob({ job, data, setProgress, withProgress, tool, bu
       })
     )
   );
+
+  /*
+   * Which shot each delivered image came from, in order.
+   *
+   * `settled` is index-aligned with `shots` — `Promise.allSettled` keeps
+   * order — but filtering the failures out loses that alignment, and a tool
+   * whose shots differ from one another (Campaign Kit) needs to know which
+   * label belongs to which picture. Zipped here before the filter, so both
+   * this and `successes` stay in the same order as the outputs recorded
+   * below.
+   */
+  const delivered = shots
+    .map((shot, index) => (settled[index].status === "fulfilled" ? shot : null))
+    .filter(Boolean);
 
   const successes = settled.filter((entry) => entry.status === "fulfilled").map((entry) => entry.value);
   if (successes.length === 0) {
@@ -136,17 +198,28 @@ async function runGenerationJob({ job, data, setProgress, withProgress, tool, bu
     parentGenerationId: null,
     prompt,
     userPrompt: data.userPrompt ?? null,
-    // What the run was given, if anything — the sketch, the photo, the reference.
-    inputImages: sourceImages.map((image) => ({ image, role: "uploaded" })),
+    // What the run was given, if anything — the sketch, the photo, the
+    // reference. `sourceRoles` lets a tool that sends a mixed set say which
+    // is which: Lifestyle's first image is the model and the rest are the
+    // pieces, and recording all of them as "uploaded" would lose that.
+    inputImages: sourceImages.map((image, index) => ({ image, role: data.sourceRoles?.[index] || "uploaded" })),
     outputImages: successes.map((entry) => ({ image: entry.output, role: "generated" })),
     // One provider serves a whole run; the first success stands in for all of them.
     providerId: successes[0].providerId,
   });
 
+  /*
+   * A tool that keeps a document of its own writes it here, once the
+   * generation exists and its outputs are stored — so the document can
+   * point at both. `saved.outputs` is in the same order as `delivered`.
+   */
+  const extra = (await persist?.({ saved, delivered, data, dbUser, tenant })) ?? {};
+
   return {
     ...toResult(saved, { model, modelLabel, provider }),
     requestedCount: count,
     deliveredCount: successes.length,
+    ...extra,
   };
 }
 

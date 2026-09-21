@@ -2,6 +2,7 @@ const { Worker, UnrecoverableError } = require("bullmq");
 const config = require("./config");
 const { createRedisConnection, closeRedisConnections, throttledLogger } = require("./redis");
 const { getJobHandler } = require("./jobs/registry");
+const { LANE_IDS, laneConfig } = require("./jobs/lanes");
 const { estimateDurationMs } = require("./jobs/estimate");
 const { classifyProviderError } = require("./aiRouting");
 const { logAudit } = require("./auditLog");
@@ -30,6 +31,38 @@ const PERSIST_EVERY_MS = 5000;
 function rampedPercent(from, to, elapsedMs, estimatedMs) {
   const fraction = estimatedMs > 0 ? elapsedMs / estimatedMs : 0;
   return from + (to - from) * (1 - Math.exp(-1.6 * fraction));
+}
+
+/**
+ * Ceiling for a job's stored result.
+ *
+ * A result travels three times over — written to Mongo, carried through
+ * Redis, pushed down a socket — so it is meant to be ids and urls. The
+ * text-out tools broke that assumption by design: Image to Text's answer is
+ * the deliverable, and Affinity's is a whole parsed deck.
+ *
+ * 32KB is comfortably above any real answer (a dense reconstruction prompt
+ * is 2–4KB) and well under the point where any of the three hops notices.
+ */
+const MAX_RESULT_BYTES = 32 * 1024;
+
+/**
+ * Keeps an oversized result from being stored and broadcast.
+ *
+ * Nothing is lost that isn't recoverable: every one of these tools writes
+ * its real output to Mongo first — a generation's `response.text`, a kit
+ * document — so the client can fetch the whole thing by the ids that
+ * remain. What is dropped is the convenience copy.
+ */
+function withinResultBudget(result, jobId) {
+  if (!result) return result;
+
+  const size = Buffer.byteLength(JSON.stringify(result), "utf8");
+  if (size <= MAX_RESULT_BYTES) return result;
+
+  console.warn(`[worker] job ${jobId} returned ${size} bytes — dropping the inline copy, ids kept`);
+  const { text, result: inner, kit, ...rest } = result;
+  return { ...rest, truncated: true };
 }
 
 /**
@@ -171,7 +204,7 @@ async function processJob(bullJob) {
     const result = await handler({ job, data: bullJob.data, setProgress, withProgress });
 
     job.status = "completed";
-    job.result = result;
+    job.result = withinResultBudget(result, jobId);
     job.progress = 100;
     job.phase = "done";
     job.finishedAt = new Date();
@@ -182,7 +215,11 @@ async function processJob(bullJob) {
     return result;
   } catch (err) {
     const attemptsAllowed = bullJob.opts.attempts || 1;
-    const willRetry = !(err instanceof UnrecoverableError) && bullJob.attemptsMade + 1 < attemptsAllowed;
+    // `noRetry` is set by failures that are settled rather than transient — a
+    // content filter refusing an image answers the same way every time, so a
+    // retry only makes the user wait twice as long for the same sentence.
+    const willRetry =
+      !(err instanceof UnrecoverableError) && !err?.noRetry && bullJob.attemptsMade + 1 < attemptsAllowed;
     const { message, code } = classifyProviderError(err, job.request?.provider);
 
     // Back to `queued` between attempts so the queue panel keeps showing it as
@@ -210,7 +247,10 @@ async function processJob(bullJob) {
 
     console.error(`[worker] job ${jobId} (${job.type}) failed:`, err.message);
     // Rethrown so BullMQ decides retry vs. dead — this function must not
-    // swallow the failure or the job would be recorded as successful.
+    // swallow the failure or the job would be recorded as successful. A
+    // settled failure is rethrown as Unrecoverable so BullMQ's own attempt
+    // counter agrees with the document we just wrote.
+    if (err?.noRetry && !(err instanceof UnrecoverableError)) throw new UnrecoverableError(message);
     throw err;
   }
 }
@@ -221,25 +261,38 @@ async function processJob(bullJob) {
  * friendlier than making `npm run dev` mean two terminals.
  */
 function startWorker() {
-  const worker = new Worker(config.queue.name, processJob, {
-    connection: createRedisConnection("worker"),
-    concurrency: config.queue.concurrency,
+  // One consumer per lane (see jobs/lanes.js). They share this process and
+  // this handler — the lanes exist to keep slow work from occupying the
+  // slots fast work needs, not to run different code.
+  const workers = LANE_IDS.map(startLaneWorker);
+
+  return {
+    /** Closes every lane, so callers can keep treating this as one worker. */
+    close: () => Promise.all(workers.map((worker) => worker.close())),
+    workers,
+  };
+}
+
+function startLaneWorker(laneId) {
+  const lane = laneConfig(laneId);
+
+  const worker = new Worker(lane.name, processJob, {
+    connection: createRedisConnection(`worker:${laneId}`),
+    concurrency: lane.concurrency,
     // Must outlast the slowest honest run. Too low and BullMQ concludes a
     // worker died mid-generation and hands the same job to another one, so a
     // slow provider turns into duplicate images and double billing.
-    lockDuration: config.queue.lockDurationMs,
+    lockDuration: lane.lockDuration,
   });
 
   worker.on("failed", (bullJob, err) => {
-    console.error(`[worker] ${bullJob?.id ?? "unknown"} failed:`, err.message);
+    console.error(`[worker:${laneId}] ${bullJob?.id ?? "unknown"} failed:`, err.message);
   });
   // Throttled: a worker whose Redis is unreachable re-emits this on every
   // reconnect attempt, which is a flood rather than information.
-  const logWorkerError = throttledLogger("worker");
+  const logWorkerError = throttledLogger(`worker:${laneId}`);
   worker.on("error", (err) => logWorkerError(err.message));
-  worker.on("ready", () =>
-    console.log(`[worker] consuming "${config.queue.name}" (concurrency ${config.queue.concurrency})`)
-  );
+  worker.on("ready", () => console.log(`[worker] consuming "${lane.name}" (concurrency ${lane.concurrency})`));
 
   return worker;
 }

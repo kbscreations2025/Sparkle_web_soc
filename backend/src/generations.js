@@ -52,11 +52,18 @@ const ASSET_STATUSES = ["uploading", "ready", "failed", "deleted"];
  * quietly destroy output quality. `thumbnailUrl` is only ever for display.
  */
 function toPublicAsset(snapshot) {
+  const type = snapshot.type || "image";
   return {
     assetId: String(snapshot.assetId),
     url: snapshot.url,
-    thumbnailUrl: snapshot.thumbnailUrl || snapshot.url,
+    // A video's poster, not a smaller copy of itself — and unlike an image,
+    // falling back to `url` here would hand the client an mp4 to render in
+    // an `<img>`. Null is the honest answer when there is no poster.
+    thumbnailUrl: snapshot.thumbnailUrl || (type === "video" ? null : snapshot.url),
     role: snapshot.role,
+    /** "image" or "video" — what the client should render this as. */
+    type,
+    durationMs: snapshot.durationMs ?? null,
     width: snapshot.width ?? null,
     height: snapshot.height ?? null,
   };

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
 import { Download, Pencil, X, ZoomIn, ZoomOut } from "lucide-react";
 import { downloadImage } from "@/lib/image";
+import { useEscapeKey } from "@/lib/useEscapeKey";
 import { useImageZoom } from "@/lib/useImageZoom";
 
 /** Full-screen "just look at it" preview. Closes on backdrop click or Escape. */
@@ -24,14 +24,7 @@ export function Lightbox({
   const zoom = useImageZoom({ min: 0.25, max: 8, resetKey: src });
   const { scale, dragRef, frameRef } = zoom;
 
-  useEffect(() => {
-    if (!src) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [src, onClose]);
+  useEscapeKey(onClose, Boolean(src));
 
   if (!src) return null;
 

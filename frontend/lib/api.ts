@@ -412,12 +412,23 @@ export type QueuedJob = {
     count?: number;
   };
   result: {
-    generationId: string;
-    conversationId: string;
+    generationId: string | null;
+    conversationId: string | null;
     /** Where the finished image is stored. Render this; fetch bytes only to edit further. */
     outputUrl: string | null;
-    /** Text to Image only — every variation this run delivered, `outputUrl` repeated as the first entry. */
+    /** Every variation this run delivered, `outputUrl` repeated as the first entry. */
     outputUrls?: string[];
+    /** "video" when the url points at a clip, so a page renders a player rather than an `<img>`. */
+    outputType?: "image" | "video";
+    durationSeconds?: number;
+    /** What a text-out tool produced — Image to Text, and Brand Story. */
+    text?: string;
+    /** Affinity's parsed catalog copy. */
+    result?: { collectionName: string; tagline: string; items: AffinityItem[] };
+    /** The saved document a Marketing Kit run wrote, so the page can open it. */
+    kitId?: string | null;
+    /** The model a Lifestyle model-generation run saved to the library. */
+    lifestyleModel?: LifestyleModel;
     model?: string;
     modelLabel?: string;
   } | null;
@@ -472,26 +483,6 @@ export function cleanImage(body: {
   customPrompt?: string;
   /** Set to keep a retry in the same thread as the run it follows. */
   conversationId?: string | null;
-  /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
-  preview?: string | null;
-}) {
-  return apiRequest<QueuedResult>("/api/cleaning", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-/** A follow-up on a result already produced — "make the gold warmer". Also queued. */
-export function refineImage(body: {
-  /** The image being refined, as a data URI. */
-  refineImage: string;
-  instruction: string;
-  /** A `CLEANING_MODELS` or `GPT_CLEANING_MODELS` id — the backend resolves which provider it belongs to. */
-  model: string;
-  /** Visual inspiration only — never copied into the result wholesale. */
-  referenceImages?: string[];
-  conversationId?: string | null;
-  parentGenerationId?: string | null;
   /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
   preview?: string | null;
 }) {
@@ -558,41 +549,42 @@ export function textToImage(body: {
 }
 
 /** A follow-up on one generated image — also queued, exactly like `refineImage`. */
-export function refineTextToImage(body: {
-  refineImage: string;
-  instruction: string;
-  displayPrompt?: string;
-  model: SparkleModelId;
-  referenceImages?: string[];
-  conversationId?: string | null;
-  parentGenerationId?: string | null;
-}) {
-  return apiRequest<QueuedResult>("/api/text-to-image", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
 // ── sketch tools ─────────────────────────────────────────────────────────────
 
 /**
- * The follow-up turn every generate-then-refine tool shares. Only the endpoint
- * differs, so `refineOn` builds the call for whichever tool is asking.
+ * The follow-up turn every generate-then-refine tool shares — "make the gold
+ * warmer" against a result already produced.
+ *
+ * Only the endpoint differs, so `refineOn` builds the call for whichever tool
+ * is asking. Text to Image and Image Cleaning each used to carry their own
+ * byte-identical copy of this.
+ *
+ * Generic over the model id because the tools don't agree on one: the Sparkle
+ * tools accept a `SparkleModelId`, while cleaning also routes GPT models and
+ * lets the backend work out which provider an id belongs to.
  */
-export type RefineBody = {
+export type RefineBody<TModel extends string = SparkleModelId> = {
   refineImage: string;
   instruction: string;
   displayPrompt?: string;
   referenceImages?: string[];
-  model: SparkleModelId;
+  model: TModel;
   conversationId?: string | null;
   parentGenerationId?: string | null;
+  /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
+  preview?: string | null;
 };
 
-export function refineOn(path: string) {
-  return (body: RefineBody) =>
+export function refineOn<TModel extends string = SparkleModelId>(path: string) {
+  return (body: RefineBody<TModel>) =>
     apiRequest<QueuedResult>(path, { method: "POST", body: JSON.stringify(body) });
 }
+
+/** A follow-up on a Text to Image result. */
+export const refineTextToImage = refineOn("/api/text-to-image");
+
+/** A follow-up on a cleaned image. Accepts the GPT model ids too. */
+export const refineImage = refineOn<string>("/api/cleaning");
 
 /** A written brief drawn as a sketch, optionally starting from a reference photo. */
 export function textToSketch(body: {
@@ -628,6 +620,365 @@ export function imageToSketch(body: {
   preview?: string | null;
 }) {
   return apiRequest<QueuedResult>("/api/image-to-sketch", { method: "POST", body: JSON.stringify(body) });
+}
+
+// ── lifestyle ────────────────────────────────────────────────────────────────
+
+/** A saved model photo — the person jewellery gets placed onto. */
+export type LifestyleModel = {
+  id: string;
+  name: string;
+  attrs: Record<string, string>;
+  notes: string | null;
+  imageUrl: string;
+  thumbnailUrl: string;
+  /** Shared with the whole organization. Only a super admin can set this. */
+  isPublic: boolean;
+  userName: string;
+  createdAt: string;
+};
+
+/**
+ * The mannequins that ship with the app, for someone who hasn't made a model
+ * of their own. The images are served from `public/`, but a run refers to
+ * one by number — the backend reads its own copy off disk rather than
+ * trusting the browser for what "preset 4" is.
+ *
+ * The numbers are not positions and are deliberately not renumbered when
+ * the list changes: they are what a run records, so renumbering would make
+ * an old generation's stored request point at a different person.
+ */
+export const LIFESTYLE_PRESETS = [
+  { number: 4, src: "/lifestyle-presets/model_4.jpg" },
+  { number: 5, src: "/lifestyle-presets/model_5.jpg" },
+] as const;
+
+export function listLifestyleModels() {
+  return apiRequest<{ models?: LifestyleModel[] }>("/api/lifestyle/models");
+}
+
+/** Saves a photo the user picked, with no generation behind it. */
+export function saveLifestyleModel(body: { name?: string; imageDataUri: string }) {
+  return apiRequest<{ model?: LifestyleModel }>("/api/lifestyle/models", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateLifestyleModel(id: string, patch: { name?: string; isPublic?: boolean }) {
+  return apiRequest<{ model?: LifestyleModel }>(`/api/lifestyle/models/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteLifestyleModel(id: string) {
+  return apiRequest<{ model?: LifestyleModel }>(`/api/lifestyle/models/${id}`, { method: "DELETE" });
+}
+
+/** Generates a new model from the builder's attributes. Queued — it's a model call. */
+export function generateLifestyleModel(body: {
+  attrs: Record<string, string>;
+  notes?: string | null;
+  name?: string;
+  model: SparkleModelId;
+}) {
+  return apiRequest<QueuedResult>("/api/lifestyle/model", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * Places jewellery onto a model.
+ *
+ * Exactly one of `modelNumber` (a preset), `modelId` (one from the library)
+ * or `modelImage` (a fresh upload) names who wears it.
+ */
+export function lifestyle(body: {
+  modelNumber?: number;
+  modelId?: string;
+  modelImage?: string;
+  /** Every piece to place, as data URIs. More than one is worn as a set. */
+  jewelryImages: string[];
+  placement: string;
+  poseInstruction?: string;
+  shotType?: string;
+  sceneInstruction?: string;
+  description?: string;
+  model: SparkleModelId;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/lifestyle", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * A follow-up on a lifestyle shot.
+ *
+ * `jewelryImages` is not the same as `referenceImages`: the originals are
+ * re-sent on every turn as the ground truth for the design, so a stone lost
+ * on an earlier turn is corrected rather than inherited.
+ */
+export function refineLifestyle(body: RefineBody & { jewelryImages?: string[] }) {
+  return apiRequest<QueuedResult>("/api/lifestyle", { method: "POST", body: JSON.stringify(body) });
+}
+
+// ── image to text ────────────────────────────────────────────────────────────
+
+/** Reads one photograph back as the prompt that would recreate it. */
+export function imageToText(body: { image: string; preview?: string | null }) {
+  return apiRequest<QueuedResult>("/api/image-to-text", { method: "POST", body: JSON.stringify(body) });
+}
+
+// ── image to video ───────────────────────────────────────────────────────────
+
+export const VIDEO_MODELS = [
+  { id: "veo-3.1-generate-preview", label: "Veo 3.1 Standard", quality: "Best", description: "Highest fidelity · richest motion & detail" },
+  { id: "veo-3.1-fast-generate-preview", label: "Veo 3.1 Fast", quality: "Fast", description: "Faster turnaround · strong quality" },
+  { id: "veo-3.1-lite-generate-preview", label: "Veo 3.1 Lite", quality: "Budget", description: "Lightweight & economical" },
+] as const;
+
+export type VideoModelId = (typeof VIDEO_MODELS)[number]["id"];
+export const DEFAULT_VIDEO_MODEL: VideoModelId = "veo-3.1-fast-generate-preview";
+
+/**
+ * Verified live against this account: durations outside 4–8s were rejected
+ * as "out of bound" at the time this was tested, so longer values are
+ * offered but may still be refused depending on model and tier.
+ */
+export const VIDEO_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+export const DEFAULT_VIDEO_DURATION = 8;
+
+/** `w`/`h` draw the shape on the chip, as everywhere else a ratio is picked. */
+export const VIDEO_ASPECTS = [
+  { id: "16:9", label: "16:9", w: 18, h: 10 },
+  { id: "9:16", label: "9:16", w: 9, h: 16 },
+] as const;
+
+export const VIDEO_RESOLUTIONS = [
+  { id: "720p", label: "720p" },
+  { id: "1080p", label: "1080p" },
+] as const;
+
+/**
+ * Camera and mood presets. These mirror `backend/src/prompts/video.js` —
+ * the ids are the contract, and the backend holds the wording each one
+ * actually sends. A preset here that the backend doesn't know falls back to
+ * the first one rather than failing the run.
+ */
+export const VIDEO_CAMERA_STYLES = [
+  { id: "orbit", label: "Slow 360° Orbit", description: "An elegant, slow 360° rotation — every angle revealed, the whole piece always in view." },
+  { id: "push-in", label: "Push-In Reveal", description: "Starts on the full piece, then eases in slightly closer." },
+  { id: "pan", label: "Elegant Pan", description: "The camera glides smoothly side to side across the piece." },
+  { id: "static", label: "Static Hero Hold", description: "The camera stays still; only light and reflections move." },
+  { id: "tilt", label: "Gentle Tilt Reveal", description: "Tilts smoothly from the top to the bottom of the piece." },
+  { id: "macro", label: "Macro Sparkle", description: "The only close-up — the lens drifts across the gemstones." },
+  { id: "tabletop", label: "Tabletop Reveal", description: "An overhead camera descends slowly from directly above." },
+] as const;
+
+export const VIDEO_MOOD_STYLES = [
+  { id: "studio", label: "Luxury Studio", description: "Soft, even light on a clean white/grey backdrop." },
+  { id: "golden", label: "Golden Hour", description: "Warm, low-angle light on a honey-toned backdrop." },
+  { id: "dark", label: "Dark Velvet", description: "Moody rim light on a deep black backdrop." },
+  { id: "editorial", label: "Bright Editorial", description: "Crisp light from above on a light backdrop." },
+  { id: "lifestyle", label: "Soft Lifestyle", description: "Soft natural window light, warm blurred background." },
+  { id: "plain-black", label: "Plain Black", description: "Pure solid black — nothing but the piece in frame." },
+  { id: "plain-white", label: "Plain White", description: "Pure seamless white, clean e-commerce look." },
+] as const;
+
+/** Animates one still. Minutes rather than seconds — it runs on its own queue lane. */
+export function imageToVideo(body: {
+  image: string;
+  description?: string;
+  model: VideoModelId;
+  camera: string;
+  mood: string;
+  aspectRatio: string;
+  resolution: string;
+  durationSeconds: number;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/image-to-video", { method: "POST", body: JSON.stringify(body) });
+}
+
+// ── marketing kit ────────────────────────────────────────────────────────────
+
+export type MarketingKitKind = "brand_story" | "affinity" | "campaign";
+
+/** One entry in the saved-kits rail. Summaries only — a full kit is large. */
+export type MarketingKitSummary = {
+  id: string;
+  kind: MarketingKitKind;
+  title: string;
+  /**
+   * `failed` means the run produced something but storing it didn't — the
+   * row exists so the attempt is visible rather than vanishing, and `error`
+   * says why.
+   */
+  status: "draft" | "ready" | "failed";
+  error: string | null;
+  previewUrl: string | null;
+  pieceCount: number;
+  userName: string;
+  /** Absent outside a listing; only the owner may edit or delete a kit. */
+  isOwn?: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MarketingKitImage = {
+  id: string;
+  url: string;
+  /** The grid-sized copy. Falls back to `url` server-side, so never empty. */
+  thumbnailUrl: string;
+  role: "product" | "sheet" | "model";
+  width: number | null;
+  height: number | null;
+  fileName: string | null;
+  pdfName: string | null;
+  pdfPage: number | null;
+};
+
+export type AffinityItem = {
+  index: number;
+  category: string;
+  /** Empty for a New Ideation piece — one with no production sheet to verify against. */
+  title: string;
+  caption: string;
+  sourceCode: string | null;
+  size: "sm" | "md" | "lg";
+  width?: number;
+  height?: number;
+  notes?: { id: string; text: string; x: number; y: number }[];
+};
+
+export type MarketingKit = MarketingKitSummary & {
+  model: { provider: string; modelId: string; modelLabel: string | null };
+  generationId: string | null;
+  brandStory: {
+    images: MarketingKitImage[];
+    sheetImages: MarketingKitImage[];
+    analysis: string;
+    /** What the model first wrote. Never edited, so AI copy stays distinguishable. */
+    originalAnalysis: string;
+  } | null;
+  affinity: {
+    collectionName: string;
+    tagline: string;
+    coverSplit: number;
+    items: AffinityItem[];
+    originalItems: AffinityItem[];
+    pieces: {
+      index: number;
+      productImage: MarketingKitImage | null;
+      sheetImages: MarketingKitImage[];
+      sheetExcelCount: number;
+      designerInitial: string;
+      hasProductionSheet: boolean;
+    }[];
+  } | null;
+  campaign: {
+    modelImage: MarketingKitImage | null;
+    sourceImages: MarketingKitImage[];
+    shots: CampaignShot[];
+    /** As generated. Never edited, so AI output stays distinguishable. */
+    originalShots: CampaignShot[];
+    options: Record<string, unknown>;
+  } | null;
+};
+
+/** One of a Campaign Kit's four shots. Points at an Asset, not its own copy. */
+export type CampaignShot = {
+  id: "lifestyleWarm" | "lifestyleDramatic" | "studioClean" | "studioLuxury";
+  label: string;
+  assetId: string | null;
+  url: string;
+  thumbnailUrl: string | null;
+  /** The only editable field — the rest is what the run produced. */
+  caption: string;
+};
+
+/** Several photos of one piece, read as a design narrative. */
+export function brandStory(body: { images: string[]; sheetImages?: string[]; preview?: string | null }) {
+  return apiRequest<QueuedResult>("/api/marketing-kit/brand-story", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * Several pieces turned into catalog copy.
+ *
+ * Workbooks are parsed to text in the browser — `sheetExcelText` is that
+ * text. Keeping the parser client-side is what stops the backend carrying a
+ * spreadsheet library for one tool.
+ */
+export function affinity(body: {
+  items: { image: string; sheetImages?: string[]; sheetExcelText?: string[] }[];
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/marketing-kit/affinity", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Four shots in one run — two of the piece worn, two of it alone. */
+export function campaignKit(body: {
+  modelNumber?: number;
+  modelId?: string;
+  modelImage?: string;
+  jewelryImages: string[];
+  description?: string;
+  /** Up to two picks each — one per shot in the pair. */
+  boxStyles?: string[];
+  poses?: string[];
+  studioProps?: string[];
+  aspect: string;
+  model: SparkleModelId;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/marketing-kit/campaign", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Retouching one shot of a kit. `shotLabel` tells the backend whether a person is in it. */
+export const refineCampaignKit = (body: RefineBody & { shotLabel?: string }) =>
+  apiRequest<QueuedResult>("/api/marketing-kit/campaign", { method: "POST", body: JSON.stringify(body) });
+
+export function listMarketingKits(
+  params: { kind?: MarketingKitKind; cursor?: string; limit?: number; scope?: "own" | "team" } = {}
+) {
+  const query = new URLSearchParams();
+  if (params.kind) query.set("kind", params.kind);
+  if (params.cursor) query.set("cursor", params.cursor);
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.scope) query.set("scope", params.scope);
+  const qs = query.toString();
+  return apiRequest<{ kits: MarketingKitSummary[]; nextCursor: string | null }>(
+    `/api/marketing-kit/kits${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function fetchMarketingKit(id: string) {
+  return apiRequest<{ kit?: MarketingKit }>(`/api/marketing-kit/kits/${id}`);
+}
+
+/**
+ * Applies an edit to a saved kit. Only the fields a person may change —
+ * the uploads and the `original*` fields are deliberately not updatable.
+ */
+export function updateMarketingKit(
+  id: string,
+  changes: {
+    title?: string;
+    analysis?: string;
+    collectionName?: string;
+    tagline?: string;
+    coverSplit?: number;
+    items?: AffinityItem[];
+    /** Captions only — a shot's id, label and url are not the client's to change. */
+    shots?: { id: string; caption: string }[];
+  }
+) {
+  return apiRequest<{ kit?: MarketingKit }>(`/api/marketing-kit/kits/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+}
+
+export function deleteMarketingKit(id: string) {
+  return apiRequest<{ deleted?: boolean }>(`/api/marketing-kit/kits/${id}`, { method: "DELETE" });
 }
 
 // ── spelling ─────────────────────────────────────────────────────────────────
@@ -667,8 +1018,16 @@ export type HistoryOutput = {
   assetId: string;
   /** Full-size original. What a download, a lightbox, or resuming the conversation must use. */
   url: string;
-  /** Small copy for grid tiles. Already falls back to `url` server-side, so it is never empty. */
-  thumbnailUrl: string;
+  /**
+   * Small copy for grid tiles. Falls back to `url` server-side for an image,
+   * so it is never empty for one — but it is null for a video with no poster
+   * frame, because a browser cannot render an mp4 in an `<img>` and falling
+   * back there would give a broken tile rather than a heavy one.
+   */
+  thumbnailUrl: string | null;
+  /** What to render this as. "image" on every row written before video existed. */
+  type: "image" | "video";
+  durationMs: number | null;
   width: number | null;
   height: number | null;
 };
@@ -684,6 +1043,14 @@ export type HistoryItem = {
   userName: string;
   createdAt: string;
   outputs: HistoryOutput[];
+  /** What a text-out tool produced. Null for every tool that makes pictures. */
+  text?: string | null;
+  /**
+   * The Marketing Kit this run wrote, where it wrote one — so History can
+   * open the deck rather than show the model's raw JSON, which is what an
+   * Affinity run's stored text actually is.
+   */
+  kitId?: string | null;
 };
 
 export type ConversationAsset = { url: string; thumbnailUrl: string; role: string };

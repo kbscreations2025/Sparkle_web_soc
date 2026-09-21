@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import { ImagePlus, Pencil, Wand2, X } from "lucide-react";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
-import { SpellCheckedTextarea } from "@/components/studio/SpellCheckedTextarea";
+import { PromptCard } from "@/components/studio/PromptCard";
+import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { OptionChips } from "@/components/studio/OptionChips";
@@ -31,6 +32,7 @@ import { compressImage } from "@/lib/image";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
+import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const PERMISSION = "tool.text_to_sketch.run";
 const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
@@ -64,13 +66,7 @@ export default function TextToSketchPage() {
   const finalDescription = [builder.text, prompt.trim()].filter(Boolean).join(", ");
 
   if (!can(user, PERMISSION)) {
-    return (
-      <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-muted">
-          Text to Sketch isn&apos;t enabled for your account. Ask an admin to grant you access.
-        </p>
-      </div>
-    );
+    return <ToolAccessNotice tool="Text to Sketch" />;
   }
 
   async function pickReference(file: File) {
@@ -114,11 +110,7 @@ export default function TextToSketchPage() {
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-      {workspace.error && (
-        <p className="shrink-0 border-b border-error/20 bg-error/[0.08] px-5 py-2 text-xs text-error">
-          {workspace.error}
-        </p>
-      )}
+      <ErrorBanner message={workspace.error} />
 
       <div className="flex flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
         <JewelryBuilder builder={builder} subtitle="Select to build the design brief" onClear={() => setPrompt("")} />
@@ -181,35 +173,19 @@ export default function TextToSketchPage() {
           <JewelrySelectionChips builder={builder} />
 
           <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wider text-cream">Description</p>
-              <span className="text-[10px] text-faint">{prompt.length}/3000</span>
-            </div>
+            <PromptCard
+              label="Description"
+              value={prompt}
+              onChange={setPrompt}
+              rows={4}
+              placeholder="Pick options in the Jewelry Builder, or type freely…"
+              footerStart={<ImageCountSelector count={count} onChange={setCount} options={TEXT_COUNT_OPTIONS} />}
+              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} />}
+            />
 
-            <div className="rounded-xl border border-white/[0.08] bg-surface-raised transition-colors focus-within:border-gold/30">
-              <SpellCheckedTextarea
-                value={prompt}
-                onChange={setPrompt}
-                rows={4}
-                maxLength={3000}
-                placeholder="Pick options in the Jewelry Builder, or type freely…"
-              />
-
-              <div className="flex items-center justify-between gap-2 rounded-b-xl border-t border-white/[0.06] bg-surface-raised/60 px-3 py-2.5">
-                <ImageCountSelector count={count} onChange={setCount} options={TEXT_COUNT_OPTIONS} />
-
-                <InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} />
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleGenerate}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-gold/30 bg-gold/15 px-4 py-3 text-xs font-semibold text-gold transition-colors hover:bg-gold/25"
-            >
-              <Wand2 size={14} />
+            <RunButton onClick={handleGenerate} icon={<Wand2 size={14} />}>
               {count > 1 ? `Sketch ${count} designs` : "Sketch design"}
-            </button>
+            </RunButton>
           </div>
         </div>
       </div>

@@ -36,7 +36,19 @@ const AUDIT_ACTIONS = [
   "job.cancelled",
 ];
 
-const TARGET_TYPES = ["tenant", "user", "aiProvider", "generation", "session", "job"];
+const TARGET_TYPES = [
+  "tenant",
+  "user",
+  "aiProvider",
+  "generation",
+  "session",
+  "job",
+  // A generated Lifestyle model. Not a "generation": it produces a reusable
+  // input rather than a result, so it writes no Generation row — and this
+  // is the only record that the paid call happened.
+  "lifestyleModel",
+  "marketingKit",
+];
 
 /**
  * One append-only row per tracked action, across every area of the app — not

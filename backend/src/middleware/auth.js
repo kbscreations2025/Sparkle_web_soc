@@ -55,6 +55,26 @@ function requirePermission(required) {
   };
 }
 
+/**
+ * Any one of these is enough.
+ *
+ * For a resource two tools share rather than one owning it — the saved model
+ * library belongs to Lifestyle and Marketing Kit equally, and someone
+ * granted only the second must still be able to pick a model.
+ */
+function requireAnyPermission(required) {
+  return function checkAnyPermission(req, res, next) {
+    if (req.isSuperAdmin) return next();
+    if (required.some((grant) => hasPermission(req.dbUser, grant))) return next();
+
+    return res.status(403).json({
+      status: "error",
+      message: `missing permission: one of ${required.join(", ")}`,
+      code: "forbidden",
+    });
+  };
+}
+
 // The console's gate. Only a central super_admin may create organizations or
 // change anyone's permissions.
 function requireSuperAdmin(req, res, next) {
@@ -62,4 +82,4 @@ function requireSuperAdmin(req, res, next) {
   return res.status(403).json({ status: "error", message: "super admin only", code: "forbidden" });
 }
 
-module.exports = { requireAuth, requirePermission, requireSuperAdmin };
+module.exports = { requireAuth, requirePermission, requireAnyPermission, requireSuperAdmin };

@@ -2,27 +2,12 @@ const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri } = require("../generationService");
-const { enqueueJob, toPublicJob } = require("../queue");
+const { queueGeneration, parseImages } = require("./queueGeneration");
 const { CLEANING_JOB } = require("../jobs/cleaning");
-const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 
 const router = express.Router();
 
 router.use(requireAuth, requirePermission("tool.cleaning.run"));
-
-/**
- * Ceiling for the queue thumbnail stored on the job. A 96px JPEG lands around
- * 3–6KB; 32KB leaves room for an odd encoder without letting a client store a
- * real image in a field that is returned with every job listing. Oversized
- * previews are dropped, not rejected — a missing thumbnail is a cosmetic loss
- * and no reason to refuse the generation itself.
- */
-const MAX_PREVIEW_BYTES = 32 * 1024;
-
-function safePreview(preview) {
-  if (typeof preview !== "string" || !preview.startsWith("data:image/")) return null;
-  return Buffer.byteLength(preview, "utf8") <= MAX_PREVIEW_BYTES ? preview : null;
-}
 
 /**
  * Accepts a cleaning run and hands it to the queue.
@@ -69,67 +54,41 @@ router.post("/", async (req, res) => {
   // Invalid entries are dropped rather than rejecting the whole request —
   // references are inspiration, not required inputs, so one bad one
   // shouldn't sink an otherwise-good refinement.
-  const parsedReferences = Array.isArray(referenceImages) ? referenceImages.map(parseDataUri).filter(Boolean) : [];
+  const parsedReferences = parseImages(referenceImages);
 
   // Resolved here as well as in the handler: the handler needs it to run, and
   // this copy is what the queue panel shows while the job is still waiting.
   const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel);
 
-  try {
-    const job = await enqueueJob({
-      tenantId: dbUser.tenantId,
-      userId: dbUser._id,
-      userName: dbUser.name || dbUser.email,
-      type: CLEANING_JOB,
-      tool: "cleaning",
-      preview: safePreview(preview),
-      // Display/audit description of the run. No image bytes.
-      request: {
-        provider,
-        model,
-        modelLabel,
-        quality,
-        isRefinement,
-        instruction: isRefinement ? instruction : null,
-        customPrompt: customPrompt?.trim() || null,
-        referenceCount: parsedReferences.length,
-        conversationId: conversationId || null,
-      },
-      // What the handler actually needs, images included.
-      payload: {
-        image: parsed,
-        references: parsedReferences,
-        requestedModel,
-        isRefinement,
-        instruction,
-        customPrompt,
-        conversationId,
-        parentGenerationId,
-      },
-    });
-
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
-      tenantId: dbUser.tenantId,
-      action: "job.queued",
-      status: "success",
-      targetType: "job",
-      targetId: String(job._id),
-      message: `queued a cleaning ${isRefinement ? "refinement" : "run"} on ${modelLabel}`,
-      metadata: { tool: "cleaning", jobType: CLEANING_JOB, provider, model, isRefinement },
-    });
-
-    // 202: taken, not done. The body carries the job rather than a result.
-    res.status(202).json({ status: "queued", job: toPublicJob(job) });
-  } catch (err) {
-    console.error("cleaning: could not queue the job:", err.message);
-    res.status(503).json({
-      status: "error",
-      message: "The job queue is unavailable right now. Please try again shortly.",
-      code: "queue_unavailable",
-    });
-  }
+  return queueGeneration(req, res, {
+    type: CLEANING_JOB,
+    tool: "cleaning",
+    preview,
+    // Display/audit description of the run. No image bytes.
+    request: {
+      provider,
+      model,
+      modelLabel,
+      quality,
+      isRefinement,
+      instruction: isRefinement ? instruction : null,
+      customPrompt: customPrompt?.trim() || null,
+      referenceCount: parsedReferences.length,
+      conversationId: conversationId || null,
+    },
+    // What the handler actually needs, images included.
+    payload: {
+      image: parsed,
+      references: parsedReferences,
+      requestedModel,
+      isRefinement,
+      instruction,
+      customPrompt,
+      conversationId,
+      parentGenerationId,
+    },
+    message: `queued a cleaning ${isRefinement ? "refinement" : "run"} on ${modelLabel}`,
+  });
 });
 
 module.exports = router;

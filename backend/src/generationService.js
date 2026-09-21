@@ -10,8 +10,22 @@ const { toPublicAsset } = require("./generations");
 const { emitToUser } = require("./socket");
 const { logAudit } = require("./auditLog");
 
+const EXTENSION_BY_MIME = {
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
+};
+
 function extensionFor(mimeType) {
-  return mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
+  return EXTENSION_BY_MIME[mimeType] || "jpg";
+}
+
+/** Which of ASSET_TYPES this mime belongs to. */
+function assetTypeFor(mimeType) {
+  return String(mimeType || "").startsWith("video/") ? "video" : "image";
 }
 
 /**
@@ -41,7 +55,24 @@ async function recordGeneration({
   userPrompt,
   /** `[{ image: { mimeType, base64 }, role }]` — role from ASSET_ROLES. */
   inputImages,
+  /**
+   * Same shape, and not necessarily images: a `video/*` mime is written as a
+   * video asset (see `createAsset`). May be empty for a tool whose output is
+   * text — Image to Text and the writing halves of Marketing Kit record the
+   * run and its inputs, with the answer in `outputText`.
+   */
   outputImages,
+  /** What a text-out tool produced. Stored on `response.text`. */
+  outputText = null,
+  /**
+   * Extra per-tool knobs to record alongside `quality` — placement and pose
+   * for Lifestyle, duration and resolution for a video. Free-form because
+   * every tool has its own, and pinning them down would mean a schema change
+   * per tool.
+   */
+  params,
+  /** Milliseconds of video, where the output is one. */
+  durationMs = null,
   providerId,
   /** Which AI provider actually served this run — "gemini" by default, since every call site predates multi-provider routing except the ones that now pass it explicitly. */
   provider,
@@ -69,8 +100,20 @@ async function recordGeneration({
   const inputAssets = await Promise.all(
     inputImages.map(({ image, role }) => createAsset({ ...commonAssetFields, role, kind: "input", image }))
   );
+
+  /**
+   * A video can't be decoded by sharp, so its tile is rendered from the still
+   * it was animated from — the first input image, which for Image to Video is
+   * the uploaded photo. Without this a video result is a blank tile in
+   * History, since every reader falls back to `url` and a browser will not
+   * render an mp4 as an `<img>`.
+   */
+  const posterSource = inputAssets[0]?.buffer ?? null;
+
   const outputAssets = await Promise.all(
-    outputImages.map(({ image, role }) => createAsset({ ...commonAssetFields, role, kind: "output", image }))
+    outputImages.map(({ image, role }) =>
+      createAsset({ ...commonAssetFields, role, kind: "output", image, posterSource, durationMs })
+    )
   );
 
   await Generation.create({
@@ -89,20 +132,22 @@ async function recordGeneration({
     request: {
       userPrompt,
       finalPrompt: prompt,
-      params: { quality },
+      params: { quality, ...params },
       inputAssetIds: inputAssets.map((entry) => entry.asset._id),
       inputAssets: inputAssets.map((entry) => entry.snapshot),
     },
     response: {
       outputAssetIds: outputAssets.map((entry) => entry.asset._id),
       outputAssets: outputAssets.map((entry) => entry.snapshot),
+      text: outputText,
       completedAt: new Date(),
     },
   });
 
   // The first output stands in for the whole run in the conversation list —
-  // a run with several outputs still only needs one thumbnail there.
-  const preview = outputAssets[0]?.snapshot;
+  // a run with several outputs still only needs one thumbnail there. A
+  // text-out tool has none, so its thread is captioned by what went in.
+  const preview = outputAssets[0]?.snapshot ?? inputAssets[0]?.snapshot;
   conversation.previewUrl = preview ? preview.thumbnailUrl || preview.url : conversation.previewUrl;
   conversation.lastGenerationAt = new Date();
   await conversation.save();
@@ -123,6 +168,7 @@ async function recordGeneration({
     // Same shaper the REST route uses, so a result that arrives live and one
     // that arrives on the next fetch are indistinguishable to the client.
     outputs: outputAssets.map((entry) => toPublicAsset(entry.snapshot)),
+    text: outputText,
   });
 
   logAudit({
@@ -160,9 +206,31 @@ async function recordGeneration({
   };
 }
 
-async function createAsset({ tenant, user, tool, conversationId, generationId, role, kind, image, model, quality }) {
+/**
+ * Uploads one asset's bytes and writes its row.
+ *
+ * `image` is `{ mimeType, base64 }` and may be a video — the mime decides,
+ * and everything that differs follows from it: a video gets no decoded
+ * dimensions and no thumbnail of its own, so `posterSource` (the still it was
+ * animated from) stands in for one.
+ */
+async function createAsset({
+  tenant,
+  user,
+  tool,
+  conversationId,
+  generationId,
+  role,
+  kind,
+  image,
+  model,
+  quality,
+  posterSource = null,
+  durationMs = null,
+}) {
   const buffer = Buffer.from(image.base64, "base64");
   const extension = extensionFor(image.mimeType);
+  const type = assetTypeFor(image.mimeType);
   const assetId = new mongoose.Types.ObjectId();
 
   const key = buildAssetKey({
@@ -182,8 +250,12 @@ async function createAsset({ tenant, user, tool, conversationId, generationId, r
   // thumbnail and nothing else. Every reader falls back to the original.
   let thumbnail = null;
   let dimensions = { width: null, height: null };
+  // A video is not decodable here, so its tile comes from the still it was
+  // made from. Nothing to resize at all when neither is available.
+  const thumbnailSource = type === "video" ? posterSource : buffer;
   try {
-    const thumb = await createThumbnail(buffer);
+    if (!thumbnailSource) throw new Error("no thumbnail source for this asset");
+    const thumb = await createThumbnail(thumbnailSource);
     const thumbKey = variantKeyFor(key, "thumb", THUMB_EXTENSION);
     await uploadObject(thumbKey, thumb.buffer, thumb.mimeType);
     thumbnail = {
@@ -208,7 +280,8 @@ async function createAsset({ tenant, user, tool, conversationId, generationId, r
     tool,
     kind,
     role,
-    type: "image",
+    type,
+    durationMs,
     modelLabel: model,
     quality,
     s3Bucket: config.r2.bucket,
@@ -224,23 +297,63 @@ async function createAsset({ tenant, user, tool, conversationId, generationId, r
   const url = publicUrlFor(key);
   return {
     asset,
+    // Kept for the caller, not stored: a video's poster is rendered from the
+    // input still, which has already been decoded here.
+    buffer,
     snapshot: {
       assetId: asset._id,
       url,
       thumbnailUrl: thumbnail ? publicUrlFor(thumbnail.s3Key) : null,
       role,
+      type,
+      durationMs,
       width: dimensions.width,
       height: dimensions.height,
     },
   };
 }
 
-/** Parses a `data:<mime>;base64,<data>` URI. Returns null if it isn't one. */
-const DATA_URI_PATTERN = /^data:(image\/[a-zA-Z0-9.+-]+);base64,/;
+/**
+ * Parses a `data:<mime>;base64,<data>` URI. Returns null if it isn't one.
+ *
+ * Accepts video as well as image because a refinement can be asked to work
+ * from a stored result of either kind, and a route that silently dropped a
+ * video would report "no image supplied" for something the user can see on
+ * screen.
+ */
+const DATA_URI_PATTERN = /^data:((?:image|video)\/[a-zA-Z0-9.+-]+);base64,/;
 function parseDataUri(dataUri) {
   const match = DATA_URI_PATTERN.exec(dataUri || "");
   if (!match) return null;
   return { mimeType: match[1], base64: dataUri.slice(match[0].length) };
 }
 
-module.exports = { recordGeneration, parseDataUri };
+/**
+ * Fetches a stored asset back as `{ mimeType, base64 }`.
+ *
+ * Needed wherever a run's input is something already saved rather than
+ * something just uploaded — a Lifestyle custom model, or a result being
+ * refined from History. Kept here beside `parseDataUri` so a route can
+ * accept a data URI or a url and end up with the same thing either way.
+ */
+async function fetchAsInlineImage(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`could not fetch ${url} (${response.status})`);
+  const mimeType = response.headers.get("content-type") || "image/jpeg";
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { mimeType, base64: buffer.toString("base64") };
+}
+
+/**
+ * Whatever the client sent for one image — a data URI or the url of
+ * something already stored — as `{ mimeType, base64 }`, or null if it is
+ * neither.
+ */
+async function resolveInlineImage(value) {
+  if (typeof value !== "string" || !value) return null;
+  if (value.startsWith("data:")) return parseDataUri(value);
+  if (/^https?:\/\//.test(value)) return fetchAsInlineImage(value);
+  return null;
+}
+
+module.exports = { recordGeneration, parseDataUri, fetchAsInlineImage, resolveInlineImage };

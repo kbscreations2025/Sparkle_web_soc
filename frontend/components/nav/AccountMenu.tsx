@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { LogOut, Loader2, Sun, Moon } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
+import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 
 /**
@@ -39,23 +40,8 @@ export function AccountMenu({ avatarClassName }: { avatarClassName?: string } = 
 
   useEffect(() => cancelClose, []);
 
-  useEffect(() => {
-    if (!open) return;
-
-    function onPointerDown(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  const closeNow = useCallback(() => setOpen(false), []);
+  useDismissable(menuRef, open, closeNow);
 
   return (
     <div className="relative" ref={menuRef} onMouseEnter={openMenu} onMouseLeave={closeSoon}>

@@ -5,6 +5,7 @@ import { Eraser, Hand, Sparkles, Sun, SwatchBook, Wand2, type LucideIcon } from 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
+import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
 const CLEANING_PERMISSION = "tool.cleaning.run";
@@ -80,13 +81,7 @@ export default function CleaningPage() {
   // in would skip that. Not a security boundary — whatever these cards
   // eventually call must check the grant server-side too.
   if (!can(user, CLEANING_PERMISSION)) {
-    return (
-      <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-muted">
-          Image Cleaning isn&apos;t enabled for your account. Ask an admin to grant you access.
-        </p>
-      </div>
-    );
+    return <ToolAccessNotice tool="Image Cleaning" />;
   }
 
   return (

@@ -47,6 +47,7 @@ export const TOOLS: Tool[] = [
     icon: Leaf,
     description: "Consistent character across all renders",
     image: "/dashboard/lyfestyle.png",
+    href: "/life-style",
     permission: "tool.life_style.run",
   },
   {
@@ -55,6 +56,7 @@ export const TOOLS: Tool[] = [
     icon: Film,
     description: "Animate stills into cinematic loops",
     image: "/dashboard/video.png",
+    href: "/image-to-video",
     permission: "tool.image_to_video.run",
   },
   {
@@ -90,6 +92,7 @@ export const TOOLS: Tool[] = [
     icon: ScanText,
     description: "Upload an image, AI describes it",
     image: "/dashboard/image3.jpg",
+    href: "/image-to-text",
     permission: "tool.image_to_text.run",
   },
   {
@@ -107,6 +110,7 @@ export const TOOLS: Tool[] = [
     icon: Newspaper,
     description: "PDF + images, descriptions, specs & captions",
     image: "/dashboard/marketkit.png",
+    href: "/marketing-kit",
     permission: "tool.marketing_kit.run",
   },
   {
@@ -145,6 +149,52 @@ export function useNavItems() {
 export const TOOL_LABELS: Record<string, string> = Object.fromEntries(TOOLS.map((tool) => [tool.id, tool.label]));
 
 /**
+ * One fixed colour per tool, so the same tool always reads the same colour
+ * at a glance — a hash would look "random enough" but could coincidentally
+ * collide two tools onto near-identical hues.
+ *
+ * Stored as bare HSL components so one entry can serve the text, the fill
+ * and the border at different alphas (see `toolBadgeStyle`).
+ */
+const TOOL_COLORS: Record<string, string> = {
+  cleaning: "142 45% 55%",
+  life_style: "95 40% 55%",
+  image_to_video: "265 55% 65%",
+  text_to_image: "205 65% 60%",
+  text_to_sketch: "35 65% 58%",
+  sketch_to_image: "175 50% 50%",
+  image_to_text: "225 55% 65%",
+  image_to_sketch: "350 55% 62%",
+  marketing_kit: "20 70% 58%",
+  chat_to_edit: "285 50% 62%",
+};
+
+const FALLBACK_TOOL_COLOR = "0 0% 60%";
+
+/**
+ * The inline style for a tool's badge, wherever one is drawn.
+ *
+ * Lives here rather than beside the History grid because it is not the
+ * grid's: the badge appears on a tile and again in the lightbox that tile
+ * opens, and those are two components in two files. With the colour defined
+ * in only one of them the other fell back to the theme's default text
+ * colour, so the same run was a blue chip in the grid and an unstyled one a
+ * click later.
+ *
+ * Deliberately inline rather than Tailwind classes: the hue is data, and a
+ * class per tool would have to be enumerated somewhere the compiler can see
+ * it — which is how a new tool would silently get no colour at all.
+ */
+export function toolBadgeStyle(tool: string) {
+  const hsl = TOOL_COLORS[tool] || FALLBACK_TOOL_COLOR;
+  return {
+    color: `hsl(${hsl})`,
+    background: `hsl(${hsl} / 0.14)`,
+    border: `1px solid hsl(${hsl} / 0.28)`,
+  };
+}
+
+/**
  * Where a tool's *workspace* lives — distinct from `href`, which for Image
  * Cleaning points at its mode picker rather than a page that can open a
  * conversation. A tool missing here has no resumable workspace yet.
@@ -156,6 +206,13 @@ export const TOOL_WORKSPACE_PATHS: Record<string, string> = {
   text_to_sketch: "/text-to-sketch",
   sketch_to_image: "/sketch-to-image",
   image_to_sketch: "/image-to-sketch",
+  life_style: "/life-style",
+  image_to_text: "/image-to-text",
+  image_to_video: "/image-to-video",
+  // Marketing Kit's landing page, not one of its three surfaces: which of
+  // them a run belongs to is recorded on the kit, not on the conversation,
+  // so the picker is the honest place to send someone back to.
+  marketing_kit: "/marketing-kit",
 };
 
 /**

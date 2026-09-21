@@ -9,6 +9,51 @@ const { GoogleGenAI } = require("@google/genai");
 const GEMINI_MODELS = ["gemini-3-pro-image", "gemini-3.1-flash-image", "gemini-2.5-flash-image"];
 const DEFAULT_GEMINI_MODEL = GEMINI_MODELS[0];
 
+/**
+ * The text-out models. Separate from the image list because they are picked
+ * by the tool rather than by the user — Image to Text and the writing halves
+ * of Marketing Kit each name the one they need, and no picker offers a
+ * choice — so there is nothing here to resolve a user's request against.
+ */
+const GEMINI_TEXT_MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"];
+const DEFAULT_TEXT_MODEL = GEMINI_TEXT_MODELS[0];
+
+/**
+ * Veo, for Image to Video. Verified live against the account this app runs
+ * on: `gemini-omni-flash-preview` 404s on `predictLongRunning` through the
+ * Gemini Developer API, so it is deliberately absent rather than offered and
+ * always failing.
+ */
+const GEMINI_VIDEO_MODELS = [
+  "veo-3.1-generate-preview",
+  "veo-3.1-fast-generate-preview",
+  "veo-3.1-lite-generate-preview",
+];
+const DEFAULT_VIDEO_MODEL = "veo-3.1-fast-generate-preview";
+
+const GEMINI_VIDEO_MODEL_LABELS = {
+  "veo-3.1-generate-preview": "Veo 3.1 Standard",
+  "veo-3.1-fast-generate-preview": "Veo 3.1 Fast",
+  "veo-3.1-lite-generate-preview": "Veo 3.1 Lite",
+};
+
+function resolveVideoModel(requestedModel) {
+  return GEMINI_VIDEO_MODELS.includes(requestedModel) ? requestedModel : DEFAULT_VIDEO_MODEL;
+}
+
+function videoLabelFor(modelId) {
+  return GEMINI_VIDEO_MODEL_LABELS[modelId] || modelId;
+}
+
+/**
+ * `finishReason` values that mean the model was stopped by a safety or policy
+ * filter rather than finishing its answer. Checked on text responses, where —
+ * unlike an image response — a stopped run still returns a well-formed
+ * candidate with no usable content, and would otherwise read as "the model
+ * returned nothing" with no explanation.
+ */
+const BLOCKED_FINISH_REASONS = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"]);
+
 /** The "Sparkle" label the frontend shows for each model id — see frontend/lib/api.ts's CLEANING_MODELS. Kept in step by hand since one lives in each language. */
 const GEMINI_MODEL_LABELS = {
   "gemini-3-pro-image": "Sparkle 3 Pro Image",
@@ -205,13 +250,173 @@ async function generateImage({ apiKey, modelId, prompt, images }) {
   };
 }
 
+/**
+ * One call to a text-out Gemini model. Same argument shape as
+ * `generateImage` — images first, prompt last — so the two are
+ * interchangeable from the router's point of view.
+ *
+ * `responseSchema` turns on Gemini's structured-output mode. Without it the
+ * API only promises *valid* JSON, not the *right* JSON: Affinity's view maps
+ * over `result.items`, and a well-formed object with no `items` array would
+ * crash it mid-render. With it the shape is a contract with the API rather
+ * than a request in the prompt.
+ *
+ * `thinkingBudget` is not optional tuning. On Gemini 2.5 the model's internal
+ * reasoning tokens are billed against `maxOutputTokens`, unlike OpenAI's
+ * `max_tokens` — so an unbounded budget lets a model spend the whole
+ * allowance thinking and emit no answer at all. Every caller bounds it.
+ *
+ * @returns {{ text: string, finishReason: string|null, blocked: boolean, truncated: boolean }}
+ */
+async function generateText({
+  apiKey,
+  modelId,
+  prompt,
+  images = [],
+  parts: extraParts,
+  systemInstruction,
+  responseSchema,
+  thinkingBudget = 1024,
+  maxOutputTokens = 4096,
+  temperature,
+}) {
+  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 150_000 } });
+
+  // `parts` lets a caller interleave its own labelled text and images —
+  // Affinity sends "ITEM 1 PHOTO:", the photo, "ITEM 1 SHEET:", the sheet,
+  // and the labelling is what keeps eight pieces from blurring together.
+  const parts = extraParts ?? [
+    ...images.map(({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } })),
+    { text: prompt },
+  ];
+
+  const response = await withRetry(() =>
+    ai.models.generateContent({
+      model: modelId,
+      contents: [{ role: "user", parts }],
+      config: {
+        ...(systemInstruction ? { systemInstruction } : {}),
+        ...(responseSchema ? { responseMimeType: "application/json", responseSchema } : {}),
+        ...(temperature !== undefined ? { temperature } : {}),
+        thinkingConfig: { thinkingBudget },
+        maxOutputTokens,
+      },
+    })
+  );
+
+  const candidate = response.candidates?.[0];
+  const finishReason = candidate?.finishReason ?? null;
+  const blocked = Boolean(response.promptFeedback?.blockReason) || BLOCKED_FINISH_REASONS.has(finishReason ?? "");
+
+  // Joined, not `[0]`: Gemini can split a long answer across several text
+  // parts, and taking the first would silently truncate the narrative.
+  const text = (candidate?.content?.parts ?? [])
+    .map((part) => part.text ?? "")
+    .join("")
+    .trim();
+
+  return { text, finishReason, blocked, truncated: finishReason === "MAX_TOKENS" };
+}
+
+/** How often a video operation is polled, and for how long before giving up. */
+const VIDEO_POLL_INTERVAL_MS = 5000;
+/**
+ * ~10 minutes. The Next route this replaces capped out at ~290s because a
+ * serverless function had to answer within 300s; a queue worker has no such
+ * ceiling, so the limit here is "when is it fair to call this hung" rather
+ * than "when does the platform kill us".
+ */
+const VIDEO_MAX_POLLS = 120;
+
+class VideoTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.code = "video_timeout";
+    // Written for the user, and not worth retrying: another attempt is
+    // another ten minutes of waiting for the same verdict, on the most
+    // expensive call this app makes.
+    this.expose = true;
+    this.noRetry = true;
+  }
+}
+
+/**
+ * Kicks off a Veo generation and polls the long-running operation to
+ * completion.
+ *
+ * Returns the same `{ base64, mimeType }` shape as `generateImage`, so
+ * everything downstream — the router, the asset writer, the job result —
+ * handles a video exactly as it handles an image.
+ *
+ * `onPoll` reports each completed poll, which is the only signal this call
+ * produces: a Veo run is several minutes of silence otherwise, and the
+ * progress bar would have nothing but the clock to go on.
+ */
+async function generateVideo({ apiKey, modelId, prompt, image, config, onPoll }) {
+  // No client timeout: the submit call returns an operation handle in
+  // seconds, and every long wait after it is our own polling loop, which
+  // has its own deadline below.
+  const ai = new GoogleGenAI({ apiKey });
+
+  let operation = await withRetry(() =>
+    ai.models.generateVideos({ model: modelId, prompt, ...(image ? { image } : {}), config })
+  );
+
+  for (let poll = 0; !operation.done && poll < VIDEO_MAX_POLLS; poll++) {
+    await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_INTERVAL_MS));
+    operation = await ai.operations.getVideosOperation({ operation });
+    // Best-effort: a progress push that throws must not lose the video.
+    try {
+      await onPoll?.(poll + 1, VIDEO_MAX_POLLS);
+    } catch (err) {
+      console.error("[gemini] video poll progress failed:", err.message);
+    }
+  }
+
+  if (!operation.done) {
+    throw new VideoTimeoutError("The video is taking longer than expected. Try a shorter duration or a faster model.");
+  }
+  if (operation.error) {
+    throw new Error(operation.error.message || "Video generation failed");
+  }
+
+  const video = operation.response?.generatedVideos?.[0]?.video;
+  if (!video) throw new Error("No video was returned by the model");
+
+  const mimeType = video.mimeType || "video/mp4";
+
+  // The Gemini Developer API hands back the bytes directly.
+  if (video.videoBytes) return { base64: video.videoBytes, mimeType, text: null };
+
+  // Vertex AI hands back a GCS reference instead, which has to be fetched.
+  // Downloaded to memory rather than to a temp file (as the Next route did):
+  // the bytes are about to be re-encoded and uploaded anyway, and a worker
+  // that crashes mid-job would otherwise leave the file behind.
+  if (video.uri) {
+    const downloaded = await ai.files.download({ file: video });
+    const buffer = Buffer.isBuffer(downloaded) ? downloaded : Buffer.from(await new Response(downloaded).arrayBuffer());
+    return { base64: buffer.toString("base64"), mimeType, text: null };
+  }
+
+  throw new Error("No video data in the model's response");
+}
+
 module.exports = {
   GEMINI_MODELS,
   DEFAULT_GEMINI_MODEL,
+  GEMINI_TEXT_MODELS,
+  DEFAULT_TEXT_MODEL,
+  GEMINI_VIDEO_MODELS,
+  DEFAULT_VIDEO_MODEL,
   qualityFor,
   resolveModel,
+  resolveVideoModel,
   labelFor,
+  videoLabelFor,
   classifyError,
   withKeyFailover,
   generateImage,
+  generateText,
+  generateVideo,
+  VideoTimeoutError,
 };

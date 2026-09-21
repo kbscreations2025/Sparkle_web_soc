@@ -94,10 +94,15 @@ export function useAttachments({
   const saveAnnotation = useCallback(
     (marked: string) => {
       const target = annotating?.target;
-      if (target === "photo") {
+      // "stage" and "photo" land in the same slot. Marking up the result on the
+      // stage means "edit this version", which is exactly what the photo slot
+      // carries into the next turn — and leaving `stage` unhandled meant Attach
+      // silently threw the drawing away everywhere except Image Cleaning, which
+      // had its own handler.
+      if (target === "photo" || target === "stage") {
         if (onSavePhoto) onSavePhoto(marked);
         else setAnnotatedPhoto(marked);
-      } else if (target && target !== "stage") {
+      } else if (target) {
         setReferenceImages((current) => current.map((src, i) => (i === target.ref ? marked : src)));
       }
       setAnnotating(null);

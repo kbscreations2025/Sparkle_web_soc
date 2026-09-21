@@ -48,6 +48,13 @@ const assetSchema = new mongoose.Schema(
     height: { type: Number, default: null },
 
     /**
+     * How long the clip runs, for a video. Taken from what the run asked for
+     * rather than measured — reading it out of the container would mean
+     * carrying a demuxer for a number the request already knows.
+     */
+    durationMs: { type: Number, default: null },
+
+    /**
      * A small WebP copy of the same picture, written beside the original at
      * upload time. A grid of 24 tiles pulling full-size results is tens of
      * megabytes; the same grid on thumbnails is under one.
@@ -55,6 +62,11 @@ const assetSchema = new mongoose.Schema(
      * Null means there isn't one — a row written before this existed, or a
      * resize that failed. Every reader falls back to the original, so a null
      * here costs bandwidth and nothing else.
+     *
+     * On a video this is the poster frame, rendered from the still the clip
+     * was animated from rather than decoded out of the container. There the
+     * fallback is not merely expensive but wrong — a browser will not render
+     * an mp4 in an `<img>` — so a video without one shows as a blank tile.
      */
     thumbnail: {
       type: new mongoose.Schema(

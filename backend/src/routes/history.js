@@ -232,6 +232,18 @@ function toHistoryItem(generation, dbUser) {
     userName: generation.userName,
     createdAt: generation.createdAt,
     outputs: (generation.response?.outputAssets || []).map(toPublicAsset),
+    // What a text-out tool produced. Null for every tool that makes pictures,
+    // so a tile renders images when it has them and the answer when it
+    // doesn't — one shape either way.
+    text: generation.response?.text || null,
+    /**
+     * The document this run wrote, where it wrote one — a Marketing Kit.
+     *
+     * Exposed so History can open the deck rather than show the raw answer:
+     * an Affinity run's stored text is the model's JSON, which is the right
+     * thing to keep and the wrong thing to read.
+     */
+    kitId: generation.request?.params?.kitId || null,
   };
 }
 
