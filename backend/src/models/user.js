@@ -1,4 +1,7 @@
 const mongoose = require("mongoose");
+// Safe to require from a model: grants.js is pure data and pure functions,
+// and requires nothing back.
+const { normalizeGrants } = require("../grants");
 
 const USER_STATUSES = ["invited", "active", "suspended", "removed"];
 const SCOPE_KINDS = ["own", "organization", "selected"];
@@ -148,6 +151,35 @@ userSchema.pre(WRITE_QUERIES, function guardDataScopeUpdate() {
 // normalized value.
 userSchema.pre("validate", function normalizeDataScope() {
   if (this.dataScope && this.dataScope.kind !== "selected") this.dataScope.userIds = [];
+});
+
+/**
+ * INVARIANT: permissions, dataScope and role are mutually consistent on every
+ * saved user — everyone holds the baseline grants, `result.read.others`
+ * agrees with the data scope, and a "user" role holds no organization-wide
+ * grants.
+ *
+ * Here rather than at each write site, for the same reason as the two hooks
+ * above: the routes were composing these three rules by hand, and the member
+ * create path had already forgotten one of them — leaving a plain member
+ * holding organization-wide grants that the console hides and the server
+ * still honours. A hook cannot be forgotten.
+ *
+ * Runs pre-validate so the enum validators below see the normalized list.
+ */
+userSchema.pre("validate", function normalizePermissions() {
+  const next = normalizeGrants({
+    role: this.role,
+    permissions: this.permissions,
+    scopeKind: this.dataScope?.kind,
+  });
+
+  // Assigned only when it differs, so an unrelated save (a lastLoginAt
+  // touch) does not mark permissions modified and bump permissionVersion —
+  // which would log every active user out on their next request.
+  if (next.length !== this.permissions.length || next.some((grant) => !this.permissions.includes(grant))) {
+    this.permissions = next;
+  }
 });
 
 // linkOnLogin runs on EVERY authenticated request, not just at login — it's

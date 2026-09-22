@@ -19,6 +19,8 @@ const lexiconRoutes = require("./routes/lexicon");
 const historyRoutes = require("./routes/history");
 const jobRoutes = require("./routes/jobs");
 const auditLogRoutes = require("./routes/auditLog");
+const creditRoutes = require("./routes/credits");
+const orgMemberRoutes = require("./routes/orgMembers");
 const { initSocket } = require("./socket");
 const { startQueueEventsBridge, closeQueue } = require("./queue");
 const { closeRedisConnections, isRedisReady } = require("./redis");
@@ -59,6 +61,8 @@ app.use("/api/lexicon", lexiconRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/jobs", jobRoutes);
 app.use("/api/audit-log", auditLogRoutes);
+app.use("/api/credits", creditRoutes);
+app.use("/api/org/members", orgMemberRoutes);
 
 /**
  * Last stop for anything a route didn't handle itself.

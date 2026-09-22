@@ -100,7 +100,17 @@ function toPublicJob(job) {
  * counts). `payload` is what the handler actually needs — including image
  * bytes, which is why it goes to Redis and not into the document.
  */
-async function enqueueJob({ tenantId, userId, userName, type, tool, request = {}, payload = {}, preview = null }) {
+async function enqueueJob({
+  tenantId,
+  userId,
+  userName,
+  type,
+  tool,
+  request = {},
+  payload = {},
+  preview = null,
+  credits = null,
+}) {
   const job = await Job.create({
     tenantId,
     userId,
@@ -110,6 +120,10 @@ async function enqueueJob({ tenantId, userId, userName, type, tool, request = {}
     status: "queued",
     request,
     preview,
+    // Stored on the document, not only in the Redis payload: the payload is
+    // dropped when the job settles, and the reaper needs to find an orphaned
+    // hold long after that.
+    credits,
     maxAttempts: config.queue.attempts,
   });
 

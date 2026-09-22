@@ -14,6 +14,17 @@ function toSessionUser({ central, dbUser, isSuperAdmin, profile = {} }) {
     name: dbUser?.name || central.name || profile.name,
     email: dbUser?.email || central.email || profile.email,
     isSuperAdmin,
+    /*
+     * The local platform-staff flag, distinct from the central super admin
+     * above: one is a role in the login service, the other a bypass on our
+     * own user row (see permissions.js). Exposed because both are allowed to
+     * administer credits, and the menu has to know whether to offer the link.
+     *
+     * Safe to send: it is already a bypass the server enforces on every
+     * request. Reading it in the client decides what to render, never what
+     * to allow.
+     */
+    isPlatformAdmin: Boolean(dbUser?.isPlatformAdmin),
     // A super admin not yet provisioned into any organization still needs a label.
     role: dbUser?.role || (isSuperAdmin ? "super_admin" : "user"),
     permissions: dbUser?.permissions || [],

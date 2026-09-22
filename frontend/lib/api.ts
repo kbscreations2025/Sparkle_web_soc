@@ -10,6 +10,8 @@ export type ApiUser = {
   permissions?: string[];
   /** The one field the central login contributes: it picks which shell renders. */
   isSuperAdmin?: boolean;
+  /** Platform staff, a separate flag from the central super admin above. */
+  isPlatformAdmin?: boolean;
   permissionVersion?: number;
   tenantId?: string | null;
 };
@@ -109,6 +111,8 @@ export type Organization = {
   memberCount: number;
   /** How many members carry the admin label. */
   adminCount: number;
+  /** The pool plus every member's balance, with what runs in flight have frozen. */
+  credits: { balance: number; reserved: number; available: number; pool: number };
   createdAt?: string;
 };
 
@@ -135,10 +139,21 @@ export type Member = {
   authUserId?: string | null;
   /** Open connections right now, from the socket layer. 0 means idle. */
   liveSessions: number;
+  /** What this person can spend. 0 available means they cannot generate at all. */
+  credits: { balance: number; reserved: number; available: number };
 };
 
 /** One assignable permission, as the backend defines it. */
-export type GrantOption = { grant: string; label: string; hint?: string };
+export type GrantOption = {
+  grant: string;
+  label: string;
+  hint?: string;
+  /**
+   * A real grant that is not offered as a checkbox — it is derived from
+   * something else. `result.read.others` follows the data scope.
+   */
+  hidden?: boolean;
+};
 export type GrantGroup = { id: string; label: string; grants: GrantOption[] };
 
 export function getGrantCatalogue() {
@@ -1383,6 +1398,136 @@ export function fetchHistory(params: { tool?: string; before?: string; limit?: n
   return apiRequest<{ items: HistoryItem[]; nextCursor: string | null; canReadTeam: boolean }>(
     `/api/history${qs ? `?${qs}` : ""}`
   );
+}
+
+/** Permanently removes one generation (and its images) from history. */
+// ── credits ─────────────────────────────────────────────────────────────────
+
+export type CreditBalance = {
+  /** Owned, including what is frozen. */
+  balance: number;
+  /** Frozen by runs in flight. */
+  reserved: number;
+  /** Spendable right now — the figure a run is checked against. */
+  available: number;
+};
+
+export type CreditEntry = {
+  id: string;
+  kind: "grant" | "revoke" | "transfer_in" | "transfer_out" | "hold" | "settle" | "refund" | "adjust";
+  amount: number;
+  held: number;
+  tool: string | null;
+  modelId: string | null;
+  quality: string | null;
+  unit: string | null;
+  unitPrice: number | null;
+  units: number | null;
+  jobId: string | null;
+  actorName: string | null;
+  reason: string | null;
+  createdAt: string;
+  holder?: string;
+};
+
+export type CreditTenantSummary = {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  pool: { id: string | null; balance: number; reserved: number; available: number } | null;
+  totalBalance: number;
+  totalReserved: number;
+  memberCount: number;
+};
+
+export type CreditMember = {
+  userId: string;
+  name: string;
+  email: string;
+  status: string;
+  role: string;
+  /** True for the signed-in reader, whose row is sorted to the top. */
+  isSelf?: boolean;
+  balance: number;
+  reserved: number;
+  available: number;
+  lifetimeSpent: number;
+};
+
+/** The signed-in person's own balance. Needs no permission beyond being logged in. */
+export function fetchMyCredits() {
+  return apiRequest<{ credits: CreditBalance }>("/api/credits/me");
+}
+
+/**
+ * The signed-in admin's own organization — pool, members, and whether they
+ * may share credits out. Takes no id: an admin sees their own organization
+ * and there is no way to ask for another.
+ */
+export function fetchMyOrgCredits() {
+  return apiRequest<{
+    tenant: { id: string; name: string; slug: string; status: string };
+    pool: { id: string | null; balance: number; reserved: number; available: number };
+    canManage: boolean;
+    members: CreditMember[];
+  }>("/api/credits/my");
+}
+
+/**
+ * An org admin's own colleagues, plus the grant catalogue and the subset of
+ * it this admin may hand out — they can only pass on what they hold.
+ */
+export function fetchOrgMembers() {
+  return apiRequest<{
+    groups: GrantGroup[];
+    assignableGrants: string[];
+    selfId: string;
+    members: Member[];
+  }>("/api/org/members");
+}
+
+/** Updates one colleague. Refused server-side for your own row, or for a grant you lack. */
+export function updateOrgMember(id: string, patch: Parameters<typeof updateMember>[1]) {
+  return apiRequest<{ member: Member }>(`/api/org/members/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Moves credits from the organization pool to one of its members. */
+export function distributeCredits(body: { userId: string; amount: number; reason?: string }) {
+  return apiRequest("/api/credits/distribute", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Pulls a member's unspent credits back into the pool. */
+export function reclaimCredits(body: { userId: string; amount: number; reason?: string }) {
+  return apiRequest("/api/credits/reclaim", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function fetchCreditTenants() {
+  return apiRequest<{ tenants: CreditTenantSummary[] }>("/api/credits/tenants");
+}
+
+export function fetchCreditTenant(id: string) {
+  return apiRequest<{
+    tenant: { id: string; name: string; slug: string; status: string };
+    pool: { id: string | null; balance: number; reserved: number; available: number };
+    members: CreditMember[];
+  }>(`/api/credits/tenants/${id}`);
+}
+
+export function fetchCreditLedger(tenantId: string, limit = 100) {
+  return apiRequest<{ entries: CreditEntry[] }>(`/api/credits/tenants/${tenantId}/ledger?limit=${limit}`);
+}
+
+/** `userId: null` grants to the organization pool instead of a person. */
+export function grantCredits(body: { tenantId: string; userId?: string | null; amount: number; reason?: string }) {
+  return apiRequest("/api/credits/grant", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function revokeCredits(body: { tenantId: string; userId?: string | null; amount: number; reason?: string }) {
+  return apiRequest("/api/credits/revoke", { method: "POST", body: JSON.stringify(body) });
 }
 
 /** Permanently removes one generation (and its images) from history. */

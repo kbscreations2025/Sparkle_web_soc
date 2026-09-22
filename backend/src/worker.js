@@ -6,6 +6,8 @@ const { LANE_IDS, laneConfig } = require("./jobs/lanes");
 const { estimateDurationMs } = require("./jobs/estimate");
 const { classifyProviderError } = require("./aiRouting");
 const { logAudit } = require("./auditLog");
+const credit = require("./services/credits");
+const { startCreditReaper } = require("./services/creditReaper");
 const Job = require("./models/job");
 
 // Registers every handler. Required for its side effect, before any job runs.
@@ -54,6 +56,46 @@ const MAX_RESULT_BYTES = 32 * 1024;
  * document — so the client can fetch the whole thing by the ids that
  * remain. What is dropped is the convenience copy.
  */
+/**
+ * Charges a finished run.
+ *
+ * `deliveredCount` comes from the batch runner and is the number of images
+ * that actually came back; a tool that produces one thing doesn't report it,
+ * and settles at the units it was quoted for.
+ *
+ * A failure here is logged and swallowed. The alternative — rethrowing — would
+ * turn a successful generation into a failed job, so the user loses images
+ * they made because the billing write had a bad moment. The hold is left
+ * open instead, which the reaper closes.
+ */
+async function settleCredits(job, credits, result) {
+  if (!credits?.held) return;
+
+  try {
+    await credit.settleRun({
+      credits,
+      jobId: job._id,
+      generationId: result?.generationId || null,
+      deliveredUnits: result?.deliveredCount,
+    });
+    job.credits.settled = true;
+  } catch (err) {
+    console.error(`[worker] could not settle credits for ${job._id}:`, err.message);
+  }
+}
+
+/** Releases a hold on a run that is over for good. Same swallow-and-log reasoning. */
+async function refundCredits(job, credits, reason) {
+  if (!credits?.held) return;
+
+  try {
+    await credit.refundRun({ credits, jobId: job._id, reason });
+    job.credits.settled = true;
+  } catch (err) {
+    console.error(`[worker] could not refund credits for ${job._id}:`, err.message);
+  }
+}
+
 function withinResultBudget(result, jobId) {
   if (!result) return result;
 
@@ -203,6 +245,20 @@ async function processJob(bullJob) {
     const handler = getJobHandler(job.type);
     const result = await handler({ job, data: bullJob.data, setProgress, withProgress });
 
+    /*
+     * Charged for what it delivered, not what it quoted.
+     *
+     * `deliveredCount` is the batch runner's count of images that actually
+     * came back — four asked for and two returned charges for two, and the
+     * rest of the hold goes back. A run with no count of its own settles at
+     * the units it was quoted for.
+     *
+     * Before the document is marked completed, deliberately: if settling
+     * throws, the job stays in a state the reaper will revisit rather than
+     * looking finished with its credits still frozen.
+     */
+    await settleCredits(job, bullJob.data?.credits, result);
+
     job.status = "completed";
     job.result = withinResultBudget(result, jobId);
     job.progress = 100;
@@ -227,6 +283,19 @@ async function processJob(bullJob) {
     job.status = willRetry ? "queued" : "failed";
     job.error = { message, code };
     if (!willRetry) job.finishedAt = new Date();
+
+    /*
+     * Refunded only when the run is over for good.
+     *
+     * A job between attempts keeps its hold: releasing it now and taking it
+     * again on the next attempt would mean a user at their limit is locked
+     * out of a retry by their own failed run — and the retry would be
+     * refused for a job they already paid for.
+     */
+    if (!willRetry) {
+      await refundCredits(job, bullJob.data?.credits, message);
+    }
+
     await job.save();
 
     if (!willRetry) {
@@ -266,9 +335,16 @@ function startWorker() {
   // slots fast work needs, not to run different code.
   const workers = LANE_IDS.map(startLaneWorker);
 
+  // Runs here rather than in the API process: a crashed worker is what
+  // leaves credits frozen, and this is the process that comes back up.
+  const reaper = startCreditReaper();
+
   return {
     /** Closes every lane, so callers can keep treating this as one worker. */
-    close: () => Promise.all(workers.map((worker) => worker.close())),
+    close: () => {
+      reaper.stop();
+      return Promise.all(workers.map((worker) => worker.close()));
+    },
     workers,
   };
 }

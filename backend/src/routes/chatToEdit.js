@@ -5,6 +5,7 @@ const { resolveModel, qualityFor, labelFor } = require("../gemini");
 const { routeGeminiCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
 const { recordGeneration, parseDataUri } = require("../generationService");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const credit = require("../services/credits");
 
 const router = express.Router();
 
@@ -57,16 +58,71 @@ router.post("/", async (req, res) => {
 
     const prompt = buildChatEditPrompt(instruction.trim(), parsedReferences.length);
 
-    const { output, providerId } = await routeGeminiCall({
-      tenant,
+    /*
+     * Charged like every other tool.
+     *
+     * This is the one generation route that answers synchronously and never
+     * goes through queueGeneration, which is where the credit hold lives —
+     * so it was producing images for free while the same Gemini models cost
+     * credits through Image Cleaning. Held here, then settled or released
+     * around the provider call.
+     */
+    const priced = await credit.quote({
+      tenantId: dbUser.tenantId,
+      tool: "chat_to_edit",
       modelId: model,
-      prompt,
       quality,
-      images: [
-        { mimeType: parsedBase.mimeType, base64: parsedBase.base64 },
-        ...parsedReferences.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),
-      ],
+      count: 1,
     });
+
+    let held = null;
+    if (priced) {
+      try {
+        held = await credit.holdForRun({
+          tenantId: dbUser.tenantId,
+          userId: dbUser._id,
+          userName: dbUser.name || dbUser.email,
+          tool: "chat_to_edit",
+          priced,
+          jobHint: `sync-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        });
+        held = { ...held, tenantId: dbUser.tenantId, userId: dbUser._id, tool: "chat_to_edit" };
+      } catch (err) {
+        if (err.code === "insufficient_credits") {
+          return res.status(402).json({
+            status: "error",
+            message: `This edit costs ${err.required} credits and you have ${err.available}.`,
+            code: "insufficient_credits",
+            required: err.required,
+            available: err.available,
+          });
+        }
+        throw err;
+      }
+    }
+
+    let output;
+    let providerId;
+    try {
+      ({ output, providerId } = await routeGeminiCall({
+        tenant,
+        modelId: model,
+        prompt,
+        quality,
+        images: [
+          { mimeType: parsedBase.mimeType, base64: parsedBase.base64 },
+          ...parsedReferences.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),
+        ],
+      }));
+    } catch (err) {
+      // Nothing was produced, so nothing is owed.
+      if (held?.held) {
+        await credit
+          .refundRun({ credits: held, jobId: null, reason: "chat-to-edit failed" })
+          .catch((e) => console.error("chat-to-edit: could not release the hold:", e.message));
+      }
+      throw err;
+    }
 
     let conversationId = null;
     let generationId = null;
@@ -97,6 +153,15 @@ router.post("/", async (req, res) => {
       generationId = saved.generationId;
     } catch (err) {
       console.error("chat-to-edit: could not record generation history:", err);
+    }
+
+    // One image, delivered. Settled after the call rather than before, so a
+    // provider failure costs nothing — and outside the history try/catch,
+    // because the image exists whether or not the record was written.
+    if (held?.held) {
+      await credit
+        .settleRun({ credits: held, jobId: null, generationId, deliveredUnits: 1 })
+        .catch((err) => console.error("chat-to-edit: could not settle credits:", err.message));
     }
 
     res.json({

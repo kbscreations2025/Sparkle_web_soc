@@ -19,5 +19,15 @@ export function can(user: ApiUser | null, required: string | undefined): boolean
   if (!required) return true; // an item with no permission is open to everyone
   if (!user) return false;
   if (user.isSuperAdmin) return true;
+  /*
+   * The same blanket bypass the backend applies (`hasPermission` in
+   * permissions.js). Without it the mirror this file promises was broken:
+   * a platform admin with no explicit grant was refused the Credits link in
+   * the menu while the page itself rendered fine, because one call site had
+   * been patched with `|| user.isPlatformAdmin` and the other had not.
+   *
+   * One bypass here means no call site has to remember that prefix.
+   */
+  if (user.isPlatformAdmin) return true;
   return (user.permissions ?? []).some((grant) => grantMatches(grant, required));
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Monitor, Shield, SlidersHorizontal, Trash2, Loader2 } from "lucide-react";
+import { Minus, Monitor, Plus, Shield, SlidersHorizontal, Trash2, Loader2 } from "lucide-react";
 import type { GrantGroup, Member, DataScope, updateMember } from "@/lib/api";
 import { Modal } from "@/components/admin/Modal";
 import { NESTED_CELL as CELL, HEAD_ROW, NESTED_TABLE_FRAME } from "@/components/admin/table";
@@ -45,11 +45,32 @@ export function MemberRows({
   groups,
   onPatch,
   onRemove,
+  onGrantCredits,
+  onReclaimCredits,
+  assignableGrants,
+  selfId,
+  canRemove = true,
 }: {
   members: Member[];
   groups: GrantGroup[];
   onPatch: (id: string, patch: Parameters<typeof updateMember>[1]) => Promise<void>;
   onRemove: (member: Member) => Promise<void>;
+  /** Opens the grant dialog for this person. Optional so other callers need not offer it. */
+  onGrantCredits?: (member: Member) => void;
+  /** Takes credits back off this person. Omitted where the caller cannot. */
+  onReclaimCredits?: (member: Member) => void;
+  /**
+   * The grants this viewer may hand out. Undefined means every grant —
+   * the super admin console. An organization admin gets the subset they
+   * hold themselves, and the rest render disabled with a reason, because a
+   * checkbox that saves and then reverts is worse than one that says why
+   * it cannot be ticked.
+   */
+  assignableGrants?: string[];
+  /** The viewer's own id: their row is read-only, since nobody edits their own permissions. */
+  selfId?: string;
+  /** False on the organization page — removing people stays with the console. */
+  canRemove?: boolean;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -59,15 +80,16 @@ export function MemberRows({
 
   return (
     <div className={NESTED_TABLE_FRAME}>
-      <table className="w-full min-w-[820px] border-collapse">
+      <table className="w-full border-collapse">
         <thead>
           <tr className={HEAD_ROW}>
-            <th className={cn(CELL, "w-10")}>#</th>
+            <th className={cn(CELL, "hidden w-10 sm:table-cell")}>#</th>
             <th className={CELL}>Name</th>
-            <th className={CELL}>Role</th>
+            <th className={cn(CELL, "hidden md:table-cell")}>Role</th>
             <th className={CELL}>Status</th>
-            <th className={CELL}>Last login</th>
-            <th className={CELL}>Active</th>
+            <th className={cn(CELL, "hidden lg:table-cell")}>Last login</th>
+            <th className={cn(CELL, "hidden lg:table-cell")}>Active</th>
+            <th className={cn(CELL, "text-center")}>Credits</th>
             <th className={cn(CELL, "text-right")}>Actions</th>
           </tr>
         </thead>
@@ -83,6 +105,11 @@ export function MemberRows({
               onToggle={() => setOpenId(openId === member.id ? null : member.id)}
               onPatch={(patch) => onPatch(member.id, patch)}
               onRemove={() => onRemove(member)}
+              onGrantCredits={onGrantCredits}
+              onReclaimCredits={onReclaimCredits}
+              assignableGrants={assignableGrants}
+              readOnly={Boolean(selfId) && String(member.id) === String(selfId)}
+              canRemove={canRemove}
             />
           ))}
         </tbody>
@@ -100,6 +127,11 @@ function MemberRow({
   onToggle,
   onPatch,
   onRemove,
+  onGrantCredits,
+  onReclaimCredits,
+  assignableGrants,
+  readOnly = false,
+  canRemove = true,
 }: {
   member: Member;
   index: number;
@@ -109,6 +141,12 @@ function MemberRow({
   onToggle: () => void;
   onPatch: (patch: Parameters<typeof updateMember>[1]) => Promise<void>;
   onRemove: () => Promise<void>;
+  onGrantCredits?: (member: Member) => void;
+  onReclaimCredits?: (member: Member) => void;
+  assignableGrants?: string[];
+  /** This is the viewer's own row: shown, but not editable. */
+  readOnly?: boolean;
+  canRemove?: boolean;
 }) {
   const [removing, setRemoving] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -129,6 +167,20 @@ function MemberRow({
 
   const granted = useMemo(() => new Set(pending ?? member.permissions), [pending, member.permissions]);
   const scope = member.dataScope?.kind ?? "own";
+
+  /**
+   * Whether the organization-wide section is offered.
+   *
+   * The only place `role` decides what is *shown*, and it still decides
+   * nothing about what is *allowed* — permissions.js remains the sole
+   * authority, and says so. It covers the organization's credits, audit log
+   * and people; the data scope is deliberately not in that set, because
+   * being pointed at a colleague's results is not an admin power.
+   *
+   * The server backs this up by stripping those grants when a role drops to
+   * "user", so hiding them never hides something still in force.
+   */
+  const isAdmin = member.role === "admin";
 
   async function flushGrants() {
     if (saving.current) return;
@@ -212,24 +264,34 @@ function MemberRow({
   return (
     <>
       <tr className="border-t border-white/5 align-middle">
-        <td className={cn(CELL, "text-faint")}>{index}</td>
+        <td className={cn(CELL, "hidden text-faint sm:table-cell")}>{index}</td>
 
         <td className={CELL}>
           <div className="flex items-center gap-1.5">
             {/* Marks the admin label at a glance, as in the roster design. */}
             {member.role === "admin" && <Shield size={12} className="shrink-0 text-gold/70" />}
             <div className="min-w-0">
-              <p className="truncate font-medium text-cream">{member.name || member.email}</p>
+              <p className="truncate font-medium text-cream">
+                {member.name || member.email}
+                {/* The reader's own row, which the server sorts to the top.
+                    Without the label the ordering reads as a bug. */}
+                {readOnly && (
+                  <span className="ml-1.5 rounded bg-gold/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-gold">
+                    You
+                  </span>
+                )}
+              </p>
               <p className="truncate text-[11px] text-gold/60">{member.email}</p>
             </div>
           </div>
         </td>
 
-        <td className={CELL}>
+        <td className={cn(CELL, "hidden md:table-cell")}>
           {/* Editable inline: role is only a label, so this changes nothing about access. */}
           <select
             value={member.role}
             onChange={(event) => onPatch({ role: event.target.value })}
+            disabled={readOnly}
             aria-label={`Role label for ${member.email}`}
             className="rounded border border-white/10 bg-white/[0.06] px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cream outline-none focus:border-gold/40"
           >
@@ -245,6 +307,7 @@ function MemberRow({
           <select
             value={member.status}
             onChange={(event) => onPatch({ status: event.target.value })}
+            disabled={readOnly}
             aria-label={`Account status for ${member.email}`}
             className={cn(
               "rounded border px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide outline-none",
@@ -259,9 +322,9 @@ function MemberRow({
           </select>
         </td>
 
-        <td className={cn(CELL, "whitespace-nowrap text-muted")}>{formatLastLogin(member.lastLoginAt)}</td>
+        <td className={cn(CELL, "hidden whitespace-nowrap text-muted lg:table-cell")}>{formatLastLogin(member.lastLoginAt)}</td>
 
-        <td className={CELL}>
+        <td className={cn(CELL, "hidden lg:table-cell")}>
           {/* Live socket connections right now — open tabs and devices. */}
           <span
             className="relative inline-flex"
@@ -278,6 +341,46 @@ function MemberRow({
               </span>
             )}
           </span>
+        </td>
+
+        {/* What this person can spend, and a + to top them up.
+            `available` rather than `balance`: credits frozen by a run
+            already going cannot pay for the next one, so it is the figure
+            that decides whether their next click works. Zero is called out
+            because charging is enforced — they cannot generate at all. */}
+        <td className={cn(CELL, "text-center")}>
+          {/* Read as a stepper: take away on the left, the figure, add on
+              the right. Both controls on one side made the pair read as two
+              unrelated buttons that happened to sit next to a number. */}
+          <div className="inline-flex items-center gap-1.5">
+            {onReclaimCredits && (
+              <button
+                onClick={() => onReclaimCredits(member)}
+                title={`Take credits back from ${member.name || member.email}`}
+                className="rounded-full border border-white/15 p-0.5 text-muted transition-colors hover:border-error/40 hover:text-error"
+              >
+                <Minus size={11} />
+              </button>
+            )}
+            <span
+              title={
+                `${member.credits.balance.toLocaleString()} held · ` +
+                `${member.credits.reserved.toLocaleString()} frozen by runs in progress`
+              }
+              className={cn("tabular-nums", member.credits.available === 0 ? "text-error" : "text-cream")}
+            >
+              {member.credits.available.toLocaleString()}
+            </span>
+            {onGrantCredits && (
+              <button
+                onClick={() => onGrantCredits(member)}
+                title={`Give credits to ${member.name || member.email}`}
+                className="rounded-full border border-gold/30 p-0.5 text-gold/80 transition-colors hover:bg-gold/10 hover:text-gold"
+              >
+                <Plus size={11} />
+              </button>
+            )}
+          </div>
         </td>
 
         <td className={cn(CELL, "text-right")}>
@@ -313,13 +416,15 @@ function MemberRow({
                 </button>
               </span>
             ) : (
-              <button
-                onClick={() => setConfirming(true)}
-                title="Remove from this organization"
-                className="rounded border border-error/20 p-1.5 text-error/70 transition-colors hover:bg-error/10 hover:text-error"
-              >
-                <Trash2 size={13} />
-              </button>
+              canRemove && (
+                <button
+                  onClick={() => setConfirming(true)}
+                  title="Remove from this organization"
+                  className="rounded border border-error/20 p-1.5 text-error/70 transition-colors hover:bg-error/10 hover:text-error"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )
             )}
           </div>
         </td>
@@ -344,9 +449,38 @@ function MemberRow({
             </div>
 
             <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
+              {/* Only the organization-wide section is withheld — its
+                  credits, its audit trail, its people. How far someone sees
+                  into colleagues' work is the data scope below, and any
+                  member can be given one. */}
+              {!isAdmin && (
+                <p className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-faint">
+                  Change the role to <span className="text-cream">admin</span> to also offer the organization-wide
+                  permissions — its credits, its audit log and managing colleagues.
+                </p>
+              )}
+
               {groups.map((group) => {
-                const allGrant = group.grants.find(({ grant }) => grant === ALL_TOOLS_GRANT);
-                const rest = allGrant ? group.grants.filter(({ grant }) => grant !== ALL_TOOLS_GRANT) : group.grants;
+                /*
+                 * Organization-level permissions are for admins only.
+                 * Hidden rather than disabled: an unticked box a member is
+                 * not eligible for reads as something you forgot to grant,
+                 * where an absent section reads as not applicable.
+                 */
+                if (group.id === "organization" && !isAdmin) return null;
+
+                /*
+                 * Grants the backend marks as not-a-choice are not offered:
+                 * `result.read.own` is the baseline everybody gets, and
+                 * `result.read.others` follows the data scope. Between them
+                 * that empties the Results group, and the check below drops
+                 * the heading with it rather than leaving an empty section.
+                 */
+                const offered = group.grants.filter((entry) => !entry.hidden);
+                if (offered.length === 0) return null;
+
+                const allGrant = offered.find(({ grant }) => grant === ALL_TOOLS_GRANT);
+                const rest = allGrant ? offered.filter(({ grant }) => grant !== ALL_TOOLS_GRANT) : offered;
                 const restGrantKeys = rest.map(({ grant }) => grant);
                 // Ticked once every listed permission is — so unticking it clears them all.
                 const allRestGranted = restGrantKeys.length > 0 && restGrantKeys.every((grant) => granted.has(grant));
@@ -362,6 +496,14 @@ function MemberRow({
                           <input
                             type="checkbox"
                             checked={allRestGranted}
+                            // Off when any of the group is not this viewer's
+                            // to give — "select all" must not be a way round
+                            // the individual checks.
+                            disabled={
+                              readOnly ||
+                              (Boolean(assignableGrants) &&
+                                !restGrantKeys.every((grant) => assignableGrants!.includes(grant)))
+                            }
                             onChange={() => toggleAllGrants(restGrantKeys, !allRestGranted)}
                             className="accent-gold"
                           />
@@ -370,29 +512,51 @@ function MemberRow({
                       )}
                     </div>
                     <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">
-                      {rest.map(({ grant, label, hint }) => (
-                        <label
-                          key={grant}
-                          title={hint}
-                          className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.04]"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={granted.has(grant)}
-                            onChange={() => toggleGrant(grant)}
-                            className="mt-0.5 accent-gold"
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-[12px] text-cream">{label}</span>
-                            {hint && <span className="block text-[10px] text-faint">{hint}</span>}
-                          </span>
-                        </label>
-                      ))}
+                      {rest.map(({ grant, label, hint }) => {
+                        // Lockable for two different reasons, and the title
+                        // says which: it is your own row, or it is a
+                        // permission you do not hold and so cannot pass on.
+                        const notYours = Boolean(assignableGrants) && !assignableGrants!.includes(grant);
+                        const locked = readOnly || notYours;
+
+                        return (
+                          <label
+                            key={grant}
+                            title={
+                              readOnly
+                                ? "You cannot change your own permissions"
+                                : notYours
+                                  ? "You do not have this permission yourself, so you cannot give it"
+                                  : hint
+                            }
+                            className={cn(
+                              "flex items-start gap-2 rounded-lg px-2 py-1.5 transition-colors",
+                              locked ? "cursor-not-allowed opacity-45" : "cursor-pointer hover:bg-white/[0.04]"
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={granted.has(grant)}
+                              disabled={locked}
+                              onChange={() => toggleGrant(grant)}
+                              className="mt-0.5 accent-gold"
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-[12px] text-cream">{label}</span>
+                              {hint && <span className="block text-[10px] text-faint">{hint}</span>}
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 );
               })}
 
+              {/* Offered to every member, admin or not: being pointed at a
+                  colleague's work is not an admin power. This is now the
+                  only control over it — the grant it implies is derived
+                  from whatever is picked here. */}
               <div className="space-y-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Users access</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -418,14 +582,6 @@ function MemberRow({
                   ))}
                 </div>
                 <p className="text-[10px] text-faint">{SCOPE_HELP[scope]}</p>
-
-                {/* Reaching other people's history needs the grant as well as
-                    the scope — the scope alone widens nothing. */}
-                {scope !== "own" && !granted.has("result.read.others") && (
-                  <p className="text-[10px] text-gold/80">
-                    This scope has no effect until “See other people&apos;s results” is ticked above.
-                  </p>
-                )}
 
                 {scope === "selected" && (
                   <div className="flex flex-wrap gap-1.5 pt-1">

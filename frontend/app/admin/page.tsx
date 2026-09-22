@@ -13,6 +13,7 @@ import {
   deleteMember,
   getGrantCatalogue,
   listAppUsers,
+  grantCredits,
   type Organization,
   type Member,
   type GrantGroup,
@@ -47,6 +48,20 @@ export default function ConsolePage() {
   const [centralError, setCentralError] = useState("");
   const [centralLoading, setCentralLoading] = useState(false);
   const [addingTo, setAddingTo] = useState<string | null>(null);
+
+  /**
+   * Who a grant is about to go to — an organization's pool when `userId` is
+   * null, otherwise one person. Held here rather than in each row so the
+   * dialog is mounted once and the amount cannot be typed into the wrong
+   * row's box.
+   */
+  const [grantTarget, setGrantTarget] = useState<{
+    orgId: string;
+    orgName: string;
+    userId: string | null;
+    holder: string;
+  } | null>(null);
+  const [granting, setGranting] = useState(false);
 
   const [newName, setNewName] = useState("");
   const [showNew, setShowNew] = useState(false);
@@ -89,6 +104,35 @@ export default function ConsolePage() {
       apply(await listOrganizations());
     } catch {
       setError("Could not reach the server");
+    }
+  }
+
+  /**
+   * Issues the grant, then refreshes both views it changed: the organization
+   * row's total and — when the grant went to a person and their roster is on
+   * screen — that member's own balance.
+   */
+  async function submitGrant(amount: number) {
+    if (!grantTarget) return;
+    setGranting(true);
+    setError("");
+    try {
+      const res = await grantCredits({
+        tenantId: grantTarget.orgId,
+        userId: grantTarget.userId,
+        amount,
+      });
+      if (res.status !== "success") {
+        setError(res.message || "Could not grant those credits");
+        return;
+      }
+      await reloadOrgs();
+      if (members[grantTarget.orgId]) await loadMembers(grantTarget.orgId);
+    } catch {
+      setError("Could not reach the server");
+    } finally {
+      setGranting(false);
+      setGrantTarget(null);
     }
   }
 
@@ -305,6 +349,7 @@ export default function ConsolePage() {
                   <th className={CELL}>Status</th>
                   <th className={cn(CELL, "text-center")}>Admins</th>
                   <th className={cn(CELL, "text-center")}>Users</th>
+                  <th className={cn(CELL, "text-center")}>Credits</th>
                   <th className={cn(CELL, "text-right")}>Actions</th>
                 </tr>
               </thead>
@@ -335,6 +380,34 @@ export default function ConsolePage() {
                         </td>
                         <td className={cn(CELL, "text-center tabular-nums text-cream")}>{org.adminCount}</td>
                         <td className={cn(CELL, "text-center tabular-nums text-cream")}>{org.memberCount}</td>
+                        {/* The whole organization's credit, with the frozen
+                            portion named on hover: a figure that looks low
+                            is often just work in progress. The + grants to
+                            the pool without leaving the page. */}
+                        <td className={cn(CELL, "text-center")} onClick={(event) => event.stopPropagation()}>
+                          <div className="inline-flex items-center gap-1.5">
+                            <span
+                              title={
+                                `${org.credits.balance.toLocaleString()} held in total · ` +
+                                `${org.credits.pool.toLocaleString()} in the organization pool · ` +
+                                `${org.credits.reserved.toLocaleString()} frozen by runs in progress`
+                              }
+                              className={cn(
+                                "tabular-nums",
+                                org.credits.balance === 0 ? "text-error" : "text-cream"
+                              )}
+                            >
+                              {org.credits.balance.toLocaleString()}
+                            </span>
+                            <button
+                              onClick={() => setGrantTarget({ orgId: org.id, orgName: org.name, userId: null, holder: `the ${org.name} pool` })}
+                              title={`Grant credits to the ${org.name} pool`}
+                              className="rounded-full border border-gold/30 p-0.5 text-gold/80 transition-colors hover:bg-gold/10 hover:text-gold"
+                            >
+                              <Plus size={11} />
+                            </button>
+                          </div>
+                        </td>
                         <td className={cn(CELL, "text-right")}>
                           {/* Row clicks expand, so every button here stops propagation. */}
                           <div
@@ -386,7 +459,7 @@ export default function ConsolePage() {
 
                       {isOpen && (
                         <tr className="border-t border-white/5">
-                          <td colSpan={7} className="bg-surface-deep/30 px-4 py-4">
+                          <td colSpan={8} className="bg-surface-deep/30 px-4 py-4">
                             <div className="space-y-3">
                               {loadingMembers && !members[org.id] ? (
                                 <p className="flex items-center gap-2 text-[12px] text-faint">
@@ -398,6 +471,14 @@ export default function ConsolePage() {
                                   groups={groups}
                                   onPatch={(id, patch) => handlePatchMember(org.id, id, patch)}
                                   onRemove={(member) => handleRemoveMember(org.id, member)}
+                                  onGrantCredits={(member) =>
+                                    setGrantTarget({
+                                      orgId: org.id,
+                                      orgName: org.name,
+                                      userId: member.id,
+                                      holder: member.name || member.email,
+                                    })
+                                  }
                                 />
                               )}
                             </div>
@@ -430,6 +511,118 @@ export default function ConsolePage() {
           </Modal>
         );
       })()}
+
+      {grantTarget && (
+        <Modal onClose={() => !granting && setGrantTarget(null)}>
+          <GrantPanel
+            holder={grantTarget.holder}
+            toPool={grantTarget.userId === null}
+            busy={granting}
+            onGrant={submitGrant}
+            onClose={() => setGrantTarget(null)}
+          />
+        </Modal>
+      )}
     </div>
+  );
+}
+
+/**
+ * The grant box.
+ *
+ * Presets rather than a bare number field: the amounts an admin actually
+ * reaches for are round, and 1,000 credits is $10 of provider spend — a
+ * figure that means nothing at a glance, so each preset says what it buys.
+ */
+function GrantPanel({
+  holder,
+  toPool,
+  busy,
+  onGrant,
+  onClose,
+}: {
+  holder: string;
+  toPool: boolean;
+  busy: boolean;
+  onGrant: (amount: number) => void;
+  onClose: () => void;
+}) {
+  const [amount, setAmount] = useState(5000);
+
+  const PRESETS = [
+    { value: 1000, hint: "~40 flash images" },
+    { value: 5000, hint: "~200 flash images" },
+    { value: 20000, hint: "~25 Veo clips" },
+  ];
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (amount > 0 && !busy) onGrant(amount);
+      }}
+      className="space-y-4 p-5"
+    >
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold text-cream">Grant credits</h2>
+        <p className="text-[11px] leading-relaxed text-muted">
+          To <span className="text-cream">{holder}</span>.{" "}
+          {toPool
+            ? "The pool is the organization's own balance — nothing spends from it yet, so this does not let anyone generate."
+            : "They can spend this immediately."}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {PRESETS.map((preset) => (
+          <button
+            key={preset.value}
+            type="button"
+            onClick={() => setAmount(preset.value)}
+            title={preset.hint}
+            className={cn(
+              "rounded-lg border px-2.5 py-1.5 text-[11px] font-medium tabular-nums transition-colors",
+              amount === preset.value
+                ? "border-gold/30 bg-gold/10 text-gold"
+                : "border-white/10 bg-white/[0.03] text-muted hover:border-white/20 hover:text-cream"
+            )}
+          >
+            {preset.value.toLocaleString()}
+          </button>
+        ))}
+      </div>
+
+      <label className="block space-y-1">
+        <span className="text-[10px] font-medium uppercase tracking-widest text-faint">Credits</span>
+        <input
+          type="number"
+          min={1}
+          step={100}
+          value={amount}
+          autoFocus
+          onChange={(event) => setAmount(Math.max(0, Math.round(Number(event.target.value) || 0)))}
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-right text-sm tabular-nums text-cream focus:border-gold/30 focus:outline-none"
+        />
+      </label>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className="min-h-8 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-cream transition-colors hover:border-white/20 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={busy || amount <= 0}
+          className="flex min-h-8 items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/10 px-3 py-1.5 text-xs font-medium text-gold transition-colors hover:bg-gold/15 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy && <Loader2 size={12} className="animate-spin" />}
+          Grant {amount > 0 ? amount.toLocaleString() : ""}
+        </button>
+      </div>
+    </form>
   );
 }

@@ -6,8 +6,10 @@ const { requireAuth, requireSuperAdmin } = require("../middleware/auth");
 const { liveSessionCounts, forceLogout } = require("../socket");
 const { GRANT_GROUPS, TOOL_KEYS, unknownGrants } = require("../grants");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const { handle, bad, notFound, isId, toMember, validateScope } = require("./_shared");
 const Tenant = require("../models/tenant");
 const User = require("../models/user");
+const credit = require("../services/credits");
 const { SCOPE_KINDS } = User;
 
 const router = express.Router();
@@ -16,24 +18,6 @@ const router = express.Router();
 // added later can accidentally be left open.
 router.use(requireAuth, requireSuperAdmin);
 
-/** Wraps an async handler so a rejection becomes a 500 instead of a hung request. */
-const handle = (fn) => (req, res, next) => {
-  fn(req, res, next).catch((err) => {
-    // 11000 is Mongo's duplicate-key error: a slug or an email already taken.
-    if (err.code === 11000) {
-      return res.status(409).json({ status: "error", message: "that already exists", code: "duplicate" });
-    }
-    if (err.name === "ValidationError") {
-      return res.status(400).json({ status: "error", message: err.message, code: "invalid" });
-    }
-    console.error("admin route failed:", err);
-    res.status(500).json({ status: "error", message: "something went wrong" });
-  });
-};
-
-const bad = (res, message) => res.status(400).json({ status: "error", message, code: "invalid" });
-const notFound = (res, what) => res.status(404).json({ status: "error", message: `${what} not found` });
-const isId = (value) => mongoose.Types.ObjectId.isValid(value);
 
 /**
  * Loads the organization named in the path and hangs it on `req.tenant`, for
@@ -54,7 +38,7 @@ router.use(
 );
 
 /** Shapes an organization for the console — never leaks provider credentials. */
-const toOrg = (tenant, { memberCount = 0, adminCount = 0 } = {}) => ({
+const toOrg = (tenant, { memberCount = 0, adminCount = 0, credits = null } = {}) => ({
   id: tenant._id,
   name: tenant.name,
   slug: tenant.slug,
@@ -63,25 +47,19 @@ const toOrg = (tenant, { memberCount = 0, adminCount = 0 } = {}) => ({
   // The table shows both: total people, and how many carry the admin label.
   memberCount,
   adminCount,
+  /**
+   * Everything the organization holds — its pool plus every member's own
+   * balance — with the frozen portion alongside it.
+   *
+   * One number would be misleading: an organization showing 200 when 800 is
+   * committed to runs already in flight looks broke when it isn't, and the
+   * difference is exactly what an admin is trying to judge before granting
+   * more.
+   */
+  credits: credits ?? { balance: 0, reserved: 0, available: 0, pool: 0 },
   createdAt: tenant.createdAt,
 });
 
-const toMember = (user, liveSessions = 0) => ({
-  id: user._id,
-  authUserId: user.authUserId,
-  name: user.name,
-  email: user.email,
-  role: user.role,
-  status: user.status,
-  permissions: user.permissions,
-  dataScope: user.dataScope,
-  permissionVersion: user.permissionVersion,
-  // Tells the admin whether this person has ever actually signed in.
-  linked: Boolean(user.authUserId),
-  lastLoginAt: user.lastLoginAt,
-  /** Open connections right now — 0 means they aren't using the app. */
-  liveSessions,
-});
 
 /** Counts members and admins per tenant in one pass, rather than a query each. */
 async function countsByTenant() {
@@ -179,14 +157,20 @@ router.get(
 router.get(
   "/organizations",
   handle(async (req, res) => {
-    const [tenants, counts] = await Promise.all([
+    const [tenants, counts, credits] = await Promise.all([
       Tenant.find({ deletedAt: null }).sort({ name: 1 }),
       countsByTenant(),
+      credit.totalsByTenant(),
     ]);
 
     res.json({
       status: "success",
-      organizations: tenants.map((tenant) => toOrg(tenant, counts.get(String(tenant._id)))),
+      organizations: tenants.map((tenant) =>
+        toOrg(tenant, {
+          ...counts.get(String(tenant._id)),
+          credits: credits.get(String(tenant._id)) ?? null,
+        })
+      ),
     });
   })
 );
@@ -304,7 +288,17 @@ router.get(
   "/organizations/:id/members",
   handle(async (req, res) => {
     const { tenant } = req;
-    const members = await User.find({ tenantId: tenant._id, deletedAt: null }).sort({ role: 1, email: 1 });
+
+    /*
+     * All three key off the tenant the middleware already loaded, so none
+     * waits on another — and the totals are narrowed to this organization
+     * rather than grouping every account on the platform to read one row.
+     */
+    const [members, balances, orgCredits] = await Promise.all([
+      User.find({ tenantId: tenant._id, deletedAt: null }).sort({ role: 1, email: 1 }),
+      credit.balancesByUser(tenant._id),
+      credit.totalsByTenant(tenant._id),
+    ]);
 
     // Admins first, then everyone else — matching how the console lists them.
     const live = liveSessionCounts(members.map((m) => m.authUserId));
@@ -312,49 +306,16 @@ router.get(
 
     res.json({
       status: "success",
-      organization: toOrg(tenant, { memberCount: members.length, adminCount }),
-      members: members.map((m) => toMember(m, live[m.authUserId] ?? 0)),
+      organization: toOrg(tenant, {
+        memberCount: members.length,
+        adminCount,
+        credits: orgCredits.get(String(tenant._id)) ?? null,
+      }),
+      members: members.map((m) => toMember(m, live[m.authUserId] ?? 0, balances.get(String(m._id)) ?? null)),
     });
   })
 );
 
-/**
- * Validates a dataScope from the console. "selected" is only meaningful with
- * ids, and those ids must be members of this same organization — otherwise a
- * scope could reach across tenants.
- */
-async function validateScope(scope, tenantId) {
-  if (!scope) return { value: undefined };
-  if (!SCOPE_KINDS.includes(scope.kind)) {
-    return { error: `dataScope.kind must be one of: ${SCOPE_KINDS.join(", ")}` };
-  }
-
-  const value = { kind: scope.kind };
-
-  if (scope.kind === "selected") {
-    const ids = (scope.userIds || []).filter(isId);
-    if (ids.length === 0) return { error: 'a "selected" scope needs at least one member' };
-
-    const found = await User.countDocuments({ _id: { $in: ids }, tenantId, deletedAt: null });
-    if (found !== ids.length) {
-      return { error: "a selected member does not belong to this organization" };
-    }
-    value.userIds = ids;
-  }
-
-  // Absent limiters mean "no limit", so only carry the ones actually set.
-  if (Array.isArray(scope.toolKeys) && scope.toolKeys.length) {
-    // A typo here would silently narrow this member's reach forever —
-    // resultReadFilter treats an unmatched toolKey as "no access".
-    const unknown = scope.toolKeys.filter((key) => !TOOL_KEYS.includes(key));
-    if (unknown.length) return { error: `unknown tool key(s): ${unknown.join(", ")}` };
-    value.toolKeys = scope.toolKeys;
-  }
-  if (scope.notBefore) value.notBefore = new Date(scope.notBefore);
-  if (typeof scope.canExport === "boolean") value.canExport = scope.canExport;
-
-  return { value };
-}
 
 router.post(
   "/organizations/:id/members",
@@ -382,6 +343,8 @@ router.post(
       status: "invited",
     });
 
+    // The baseline grants, the scope-derived ones and the role's limits are
+    // all applied by the User model's normalizePermissions hook on save.
     member.applyGrants({
       permissions,
       dataScope: scope.value ?? { kind: "own" },
@@ -441,8 +404,15 @@ router.patch(
     if (role !== undefined) member.role = role;
     if (status !== undefined) member.status = status;
 
-    // Routed through applyGrants so permissionVersion always moves with the
-    // grants and the dataScope keeps its "who granted this" trail.
+    /*
+     * Routed through applyGrants so permissionVersion always moves with the
+     * grants and the dataScope keeps its "who granted this" trail.
+     *
+     * The derived grants are not computed here: the model's
+     * normalizePermissions hook adds the baseline, syncs
+     * `result.read.others` to the scope, and strips organization-wide grants
+     * from a "user" — on every save, so a role change alone is enough.
+     */
     if (permissions !== undefined || scope.value) {
       member.applyGrants({
         ...(permissions !== undefined && { permissions }),

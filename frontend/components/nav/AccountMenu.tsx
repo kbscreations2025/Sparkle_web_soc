@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { LogOut, Loader2, ScrollText, Sun, Moon } from "lucide-react";
+import { Coins, LogOut, Loader2, ScrollText, Sun, Moon } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
 import { can } from "@/lib/permissions";
@@ -94,6 +94,22 @@ export function AccountMenu({ avatarClassName }: { avatarClassName?: string } = 
               >
                 <ScrollText size={13} className="shrink-0" />
                 Audit Log
+              </Link>
+            )}
+
+            {/* Directly below the Audit Log, and gated the same way: on the
+                grant alone. A super admin sees every organization here, an
+                admin granted `org.credits.read` sees only their own and what
+                each of their people holds, and nobody else sees the link. */}
+            {can(user, "org.credits.read") && (
+              <Link
+                href="/credits"
+                role="menuitem"
+                onClick={closeNow}
+                className="flex items-center gap-2 border-t border-white/5 px-2.5 py-2 text-[11px] text-muted transition-colors hover:bg-white/[0.07] hover:text-cream"
+              >
+                <Coins size={13} className="shrink-0" />
+                Credits
               </Link>
             )}
 

@@ -11,6 +11,7 @@ import { NavBar, NavLogo } from "@/components/nav/NavBar";
 import { Breadcrumbs } from "@/components/nav/Breadcrumbs";
 import { AccountMenu } from "@/components/nav/AccountMenu";
 import { QueueIndicator } from "@/components/studio/QueueIndicator";
+import { useCredits } from "@/lib/useCredits";
 import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ export function TopNav() {
   const drawerRef = useRef<HTMLDivElement>(null);
   // Only the tools this person was granted.
   const navItems = useNavItems();
+  const { credits } = useCredits();
   // Set by pages that need controls of their own here instead of the route
   // trail — e.g. History's filters, which replace it rather than sit beside it.
   const toolbar = usePageToolbarValue();
@@ -143,7 +145,25 @@ export function TopNav() {
               ₹
             </span>
           </span>
-          <span className="text-xs font-semibold tabular-nums leading-none text-gold-shine">100</span>
+          {/* The real balance, not a placeholder. It shows what is spendable
+              rather than what is owned: credits frozen by a run already in
+              flight cannot pay for the next one, so `available` is the
+              number that decides whether the next click works. */}
+          <span
+            title={
+              credits
+                ? `${credits.available.toLocaleString()} available${
+                    credits.reserved ? ` · ${credits.reserved.toLocaleString()} frozen by runs in progress` : ""
+                  }`
+                : "Loading your balance…"
+            }
+            className={cn(
+              "text-xs font-semibold tabular-nums leading-none",
+              credits && credits.available === 0 ? "text-error" : "text-gold-shine"
+            )}
+          >
+            {credits ? credits.available.toLocaleString() : "—"}
+          </span>
 
           <span aria-hidden className="w-px h-5 shrink-0 bg-gold/20" />
 
