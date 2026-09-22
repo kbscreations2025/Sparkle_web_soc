@@ -25,6 +25,7 @@ import {
   type VideoModelId,
 } from "@/lib/api";
 import { compressImage, downloadImage, downloadName, makeThumbnail } from "@/lib/image";
+import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 import { failureMessage, useSettledJob } from "@/lib/useSettledJob";
 import { useAuth } from "@/lib/auth-context";
@@ -52,6 +53,7 @@ const PERMISSION = "tool.image_to_video.run";
 export default function ImageToVideoPage() {
   const { user } = useAuth();
   const { jobs, track } = useJobs();
+  const creditGuard = useCreditGuard();
 
   /** Views of one piece, in upload order — the first is the primary view. */
   const [photos, setPhotos] = useState<string[]>([]);
@@ -156,6 +158,8 @@ export default function ImageToVideoPage() {
     if (res.status === "queued" && res.job) {
       setJobId(res.job.id);
       track(res.job);
+    } else if (creditGuard(res)) {
+      setStatus("idle");
     } else {
       setStatus("failed");
       setError(res.message || "Could not queue this clip");

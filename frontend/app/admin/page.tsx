@@ -22,6 +22,7 @@ import {
 import { MemberRows } from "@/components/admin/MemberRows";
 import { AddMemberPanel } from "@/components/admin/AddMemberPanel";
 import { Modal } from "@/components/admin/Modal";
+import { CreditLogs } from "@/components/admin/CreditLogs";
 import { CELL, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +43,8 @@ export default function ConsolePage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [members, setMembers] = useState<Record<string, Member[]>>({});
   const [loadingMembers, setLoadingMembers] = useState(false);
+  // Bumped after a grant, so the expanded org's logs re-read with the balances.
+  const [logsToken, setLogsToken] = useState(0);
 
   // The central pool, fetched once and reused by every add panel.
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
@@ -128,6 +131,7 @@ export default function ConsolePage() {
       }
       await reloadOrgs();
       if (members[grantTarget.orgId]) await loadMembers(grantTarget.orgId);
+      setLogsToken((value) => value + 1);
     } catch {
       setError("Could not reach the server");
     } finally {
@@ -481,6 +485,13 @@ export default function ConsolePage() {
                                   }
                                 />
                               )}
+
+                              {/* Where the credits went, and who moved them.
+                                  Here rather than on /credits because a central
+                                  super admin cannot leave /admin — the proxy
+                                  sends them straight back — so this expansion
+                                  is the only place they can see either log. */}
+                              <CreditLogs tenantId={org.id} reloadToken={logsToken} />
                             </div>
                           </td>
                         </tr>

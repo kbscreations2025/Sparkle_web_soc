@@ -8,6 +8,7 @@ import { JobProgressBar } from "@/components/studio/JobProgressBar";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import { imageToText } from "@/lib/api";
 import { compressImage, makeThumbnail } from "@/lib/image";
+import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 import { failureMessage, useSettledJob } from "@/lib/useSettledJob";
 import { useAuth } from "@/lib/auth-context";
@@ -29,6 +30,7 @@ const PERMISSION = "tool.image_to_text.run";
 export default function ImageToTextPage() {
   const { user } = useAuth();
   const { jobs, track } = useJobs();
+  const creditGuard = useCreditGuard();
 
   const [photo, setPhoto] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -102,6 +104,8 @@ export default function ImageToTextPage() {
     if (res.status === "queued" && res.job) {
       setJobId(res.job.id);
       track(res.job);
+    } else if (creditGuard(res)) {
+      setStatus("idle");
     } else {
       setStatus("failed");
       setError(res.message || "Could not queue this analysis");

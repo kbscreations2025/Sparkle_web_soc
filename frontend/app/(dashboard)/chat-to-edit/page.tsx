@@ -24,6 +24,7 @@ import {
 import { compressImage, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useAuth } from "@/lib/auth-context";
+import { useCreditGuard } from "@/lib/credit-guard";
 import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
@@ -67,6 +68,7 @@ export default function ChatToEditPage() {
     onError: setError,
   });
   const { referenceImages, annotatedPhoto, annotating, setAnnotating } = attach;
+  const creditGuard = useCreditGuard();
 
   const conversationId = useRef<string | null>(null);
   const parentGenerationId = useRef<string | null>(null);
@@ -200,6 +202,13 @@ export default function ChatToEditPage() {
           ...current,
           { id: crypto.randomUUID(), role: "assistant", content: "Updated", image: edited },
         ]);
+      } else if (creditGuard(result)) {
+        // The edit was priced and refused, so it never ran. Take the turn back
+        // out of the thread and return the instruction and its attachments to
+        // the composer — the dialog is the only account of what happened.
+        setHistory((current) => current.slice(0, -1));
+        setChatInput(instruction);
+        attach.setReferenceImages(refsThisTurn);
       } else {
         pushFailure(result.message || "The model returned no image", { instruction, baseImage, refsThisTurn });
       }

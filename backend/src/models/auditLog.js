@@ -34,6 +34,15 @@ const AUDIT_ACTIONS = [
   // ── background jobs ──
   "job.queued",
   "job.cancelled",
+  // ── credits ──
+  // Only the four an administrator performs. Holds, settles and refunds are
+  // the worker's, happen thousands of times a day, and already have an
+  // append-only home in CreditLedger — duplicating them here would bury the
+  // rows this log exists for.
+  "credits.granted",
+  "credits.revoked",
+  "credits.distributed",
+  "credits.reclaimed",
 ];
 
 const TARGET_TYPES = [
@@ -48,6 +57,7 @@ const TARGET_TYPES = [
   // is the only record that the paid call happened.
   "lifestyleModel",
   "marketingKit",
+  "credit_account",
 ];
 
 /**

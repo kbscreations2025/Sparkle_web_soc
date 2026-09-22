@@ -6,6 +6,7 @@ import type { ChatMsg } from "@/components/studio/chat";
 import { fetchConversationForTool, type ApiResult, type QueuedResult } from "@/lib/api";
 import { urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
+import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 
 /**
@@ -77,6 +78,7 @@ export function useGenerationWorkspace({
   });
 
   const { jobs: queueJobs, track } = useJobs();
+  const creditGuard = useCreditGuard();
   const searchParams = useSearchParams();
   const resumeConversationId = searchParams.get("conversationId");
 
@@ -218,12 +220,20 @@ export function useGenerationWorkspace({
         pendingJobId.current = result.job.id;
         pendingKind.current = "generate";
         track(result.job);
+      } else if (creditGuard(result)) {
+        // Refused on price, so nothing was queued and nothing was charged. The
+        // dialog says so; this puts the page back exactly as it was before the
+        // click, rather than leaving a failed run and an opening chat turn for
+        // work that never started.
+        setStatus("idle");
+        setHistory([]);
+        setRequestedCount(0);
       } else {
         setStatus("failed");
         setError(result.message || "Could not queue this generation");
       }
     },
-    [track]
+    [creditGuard, track]
   );
 
   /** One follow-up turn on whichever result is currently shown. */
@@ -289,6 +299,13 @@ export function useGenerationWorkspace({
         pendingJobId.current = result.job.id;
         pendingKind.current = "refine";
         track(result.job);
+      } else if (creditGuard(result)) {
+        // The dialog carries the explanation, so the thread doesn't also need a
+        // failure turn — but the instruction goes back in the box, because it
+        // was never sent and retyping it is the last thing anyone wants.
+        setHistory((current) => current.slice(0, -1));
+        setChatInput(trimmed);
+        setRefining(false);
       } else {
         setHistory((current) => [
           ...current,
@@ -302,7 +319,7 @@ export function useGenerationWorkspace({
         setRefining(false);
       }
     },
-    [attach, images, onRefine, refining, selectedView, track]
+    [attach, creditGuard, images, onRefine, refining, selectedView, track]
   );
 
   const reset = useCallback(() => {

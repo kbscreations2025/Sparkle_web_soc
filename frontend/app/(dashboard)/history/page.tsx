@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -7,6 +7,8 @@ import { io } from "socket.io-client";
 import {
   CalendarRange,
   ChevronDown,
+  Film,
+  Gauge,
   Copy,
   Download,
   History,
@@ -33,6 +35,7 @@ import { downloadImage, downloadName } from "@/lib/image";
 import { conversationHref, toolBadgeStyle, TOOL_LABELS, TOOLS, workspacePathFor } from "@/lib/nav";
 import { describeKit, kitHref, KIT_LABEL } from "@/lib/marketingKits";
 import { usePageToolbar } from "@/lib/page-toolbar-context";
+import { fetchHistoryFacets } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { useDismissable } from "@/lib/useEscapeKey";
@@ -51,7 +54,7 @@ const TOOL_OPTIONS = TOOLS.map((t) => ({ id: t.id, label: t.label }));
  * Three buttons each carrying their own border, background and blur cost
  * three times the chrome and two gaps between them, over a picture that is
  * only ~160px wide. Pooling them into a single container pays for that once
- * — the same grouping the lightbox toolbar uses.
+ * â€” the same grouping the lightbox toolbar uses.
  */
 const TILE_ACTION_GROUP =
   "flex shrink-0 items-center gap-0.5 rounded-full border border-white/20 bg-black/55 p-0.5 backdrop-blur-sm";
@@ -60,13 +63,13 @@ const TILE_ACTION_GROUP =
  * One action inside that pill.
  *
  * Larger on a phone than on a desktop, which is the opposite of how these
- * usually scale — and deliberate. A finger needs the target; a cursor does
+ * usually scale â€” and deliberate. A finger needs the target; a cursor does
  * not, and at `md` the grid has more columns of the same-sized tile, so
  * every pixel the buttons take is covering the picture.
  *
  * Still short of the 32px the chips aim for: three of these plus the tool
  * and quality badges have to fit across a ~170px tile, and the tile itself
- * is the primary target — tapping it opens the lightbox, where the same
+ * is the primary target â€” tapping it opens the lightbox, where the same
  * three actions are full size.
  *
  * No `lg` step: tiles do not get bigger at wide viewports, the grid just
@@ -85,7 +88,7 @@ function modelLabelFor(model?: string | null) {
   return MODEL_LABELS[model] || model;
 }
 
-/** 2 columns on mobile, 4 on tablet, 6 on desktop — tracked live so a rotated tablet or a resized window reflows immediately. */
+/** 2 columns on mobile, 4 on tablet, 6 on desktop â€” tracked live so a rotated tablet or a resized window reflows immediately. */
 function useResponsiveColumns() {
   const [columns, setColumns] = useState(2);
 
@@ -115,7 +118,7 @@ export default function HistoryPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // Filters live in the URL — shareable, and survive back/forward — hydrated
+  // Filters live in the URL â€” shareable, and survive back/forward â€” hydrated
   // once from whatever query string this page was opened with. Both are
   // client-side filters over one fetched dataset (see below): empty means no
   // filter, checking one or more narrows the grid down to just those.
@@ -131,10 +134,25 @@ export default function HistoryPage() {
   /**
    * Which kit kinds to show. The Kits tab's answer to the Tools filter:
    * every kit is the same tool, so filtering by tool there would do
-   * nothing — what distinguishes one kit from another is its kind.
+   * nothing â€” what distinguishes one kit from another is its kind.
    */
   const [selectedKinds, setSelectedKinds] = useState<string[]>(() => {
     const raw = searchParams.get("kinds");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  });
+
+  /** Which resolutions to show â€” the badge on every tile. Empty means all. */
+  const [selectedQualities, setSelectedQualities] = useState<string[]>(() => {
+    const raw = searchParams.get("quality");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  });
+
+  /**
+   * What the run produced, which is a different question from which tool made
+   * it: "find that video" is one filter, not a guess at which tool it was.
+   */
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(() => {
+    const raw = searchParams.get("types");
     return raw ? raw.split(",").filter(Boolean) : [];
   });
 
@@ -167,7 +185,7 @@ export default function HistoryPage() {
 
   /**
    * Saved Marketing Kits, loaded the first time that tab is opened rather
-   * than on mount — most visits to History never look at them, and this is
+   * than on mount â€” most visits to History never look at them, and this is
    * a second request against a collection that is nothing to do with the
    * grid.
    */
@@ -179,12 +197,28 @@ export default function HistoryPage() {
 
   /** Writes the current view and filters back to the query string. */
   const syncUrl = useCallback(
-    (next: { tools?: string[]; members?: string[]; view?: "history" | "kits"; range?: DateRange; kinds?: string[] }) => {
+    (next: {
+      tools?: string[];
+      members?: string[];
+      view?: "history" | "kits";
+      range?: DateRange;
+      kinds?: string[];
+      qualities?: string[];
+      types?: string[];
+    }) => {
       const params = new URLSearchParams(searchParams.toString());
 
       if (next.tools) {
         if (next.tools.length === 0) params.delete("tools");
         else params.set("tools", next.tools.join(","));
+      }
+      if (next.qualities) {
+        if (next.qualities.length === 0) params.delete("quality");
+        else params.set("quality", next.qualities.join(","));
+      }
+      if (next.types) {
+        if (next.types.length === 0) params.delete("types");
+        else params.set("types", next.types.join(","));
       }
       if (next.members) {
         if (next.members.length === 0) params.delete("members");
@@ -222,72 +256,121 @@ export default function HistoryPage() {
     syncUrl({ tools: nextTools, members: nextMembers });
   }
 
-  // One fetch, once — every tool, every teammate the server will give us
-  // (the server only honours `scope: "team"` for someone who actually holds
-  // `result.read.others`, falling back to their own results otherwise, so
-  // it's always safe to ask). Which tool and which people show up is a
-  // client-side filter over this one dataset, not a re-fetch.
+  /*
+   * What the server is being asked for. Every filter is in here, because the
+   * server applies all of them â€” the cursor has to walk the filtered set, not
+   * the whole collection.
+   *
+   * `scope: "team"` is always safe to ask for: the server only honours it for
+   * someone holding `result.read.others` and quietly falls back to their own
+   * work otherwise.
+   */
+  const historyQuery = useMemo(
+    () => ({
+      scope: "team" as const,
+      tools: selectedTools.length ? selectedTools : undefined,
+      members: selectedMembers.length ? selectedMembers : undefined,
+      qualities: selectedQualities.length ? selectedQualities : undefined,
+      types: selectedTypes.length ? selectedTypes : undefined,
+      /*
+       * Sent as exact instants, not as bare dates.
+       *
+       * "From the 1st" means from midnight where the person is, and a bare
+       * `2026-09-01` is parsed as midnight UTC â€” which in this timezone is
+       * half past six the evening before, quietly pulling in a chunk of the
+       * previous day. Resolving the boundary here, where the timezone is
+       * known, keeps the range meaning what the picker showed. `to` covers
+       * the whole of its day, as the picker implies.
+       */
+      from: dateRange.from ? new Date(`${dateRange.from}T00:00:00`).toISOString() : undefined,
+      to: dateRange.to ? new Date(`${dateRange.to}T23:59:59.999`).toISOString() : undefined,
+    }),
+    [selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange]
+  );
+
+  /*
+   * Guards against a slow response for one filter landing after a faster one
+   * for the next and overwriting it. Every filter change starts a new page
+   * one, and they do not come back in order.
+   */
+  const requestId = useRef(0);
+
   useEffect(() => {
-    let cancelled = false;
+    const id = ++requestId.current;
     setLoading(true);
+
     (async () => {
-      const res = await fetchHistory({ scope: "team" });
-      if (cancelled) return;
+      const res = await fetchHistory(historyQuery);
+      // A newer set of filters already superseded this request.
+      if (id !== requestId.current) return;
       if (res.status === "success") {
+        // Replaced, not appended: this is page one of a different question.
         setItems(res.items ?? []);
         setNextCursor(res.nextCursor ?? null);
         setCanReadTeam(Boolean(res.canReadTeam));
       }
       setLoading(false);
     })();
+  }, [historyQuery]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    const id = requestId.current;
+    const res = await fetchHistory({ ...historyQuery, before: nextCursor });
+    // The filters changed while this page was in flight â€” its rows belong to
+    // a query nobody is looking at any more.
+    if (id === requestId.current && res.status === "success") {
+      setItems((current) => [...current, ...(res.items ?? [])]);
+      setNextCursor(res.nextCursor ?? null);
+    }
+    setLoadingMore(false);
+  }, [nextCursor, loadingMore, historyQuery]);
+
+  /*
+   * Everyone whose work this person can see, from the server â€” not everyone
+   * who happens to have been paged in.
+   *
+   * Deriving it from loaded rows was wrong in both directions once filtering
+   * moved server-side: someone absent from the first page could not be
+   * filtered for at all, and the list collapsed to one name the moment a
+   * filter was applied.
+   */
+  const [facetMembers, setFacetMembers] = useState<string[]>([]);
+  const [facetQualities, setFacetQualities] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchHistoryFacets("team").then((res) => {
+      if (cancelled || res.status !== "success") return;
+      setFacetMembers(res.members ?? []);
+      setFacetQualities(res.qualities ?? []);
+    });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    const res = await fetchHistory({ before: nextCursor, scope: "team" });
-    if (res.status === "success") {
-      setItems((current) => [...current, ...(res.items ?? [])]);
-      setNextCursor(res.nextCursor ?? null);
-    }
-    setLoadingMore(false);
-  }, [nextCursor, loadingMore]);
-
-  // Everyone who has shown up in a fetch so far — what the checkbox list
-  // offers. Grows as more pages load; never shrinks when a filter narrows.
+  // Kits are still filtered in the browser, so their authors have to be
+  // offered too â€” the facets call only covers generations.
   const knownMembers = useMemo(
-    () => Array.from(new Set([...items, ...(kits ?? [])].map((row) => row.userName))).sort(),
-    [items, kits]
+    () => Array.from(new Set([...facetMembers, ...(kits ?? []).map((kit) => kit.userName)])).sort(),
+    [facetMembers, kits]
   );
 
-  const visibleItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          /*
-           * A run that wrote a Marketing Kit belongs to the Kits tab, and
-           * only there. It is the same piece of work either way, and the
-           * results grid is the wrong shape for it — a Brand Story shows as
-           * a wall of prose and an Affinity deck as the model's raw JSON,
-           * because what those runs actually produced is a document, not a
-           * picture.
-           *
-           * Keyed on the kit pointer rather than on `tool`, so a Campaign
-           * Kit retouch — which edits one shot and writes no kit of its own
-           * — still appears here, where it has nowhere else to be.
-           */
-          !item.kitId &&
-          withinRange(item.createdAt, dateRange) &&
-          (selectedTools.length === 0 || selectedTools.includes(item.tool)) &&
-          (selectedMembers.length === 0 || selectedMembers.includes(item.userName))
-      ),
-    [items, selectedTools, selectedMembers, dateRange]
-  );
+  /*
+   * The rows, as they came back.
+   *
+   * There is no filtering left to do here â€” tool, member, date range and the
+   * kit-runs exclusion are all applied by the server now, so what arrives is
+   * already the answer. A run that wrote a Marketing Kit is excluded there
+   * for the same reason it was excluded here: it belongs to the Kits tab, and
+   * the grid is the wrong shape for it â€” a Brand Story shows as a wall of
+   * prose and an Affinity deck as the model's raw JSON.
+   */
+  const visibleItems = items;
 
-  // Rows of `columns` items each — virtualized by row, not by card, so a grid
+  // Rows of `columns` items each â€” virtualized by row, not by card, so a grid
   // (not a single-column list) still only mounts what's on screen.
   const rows = useMemo(() => {
     const chunks: HistoryItem[][] = [];
@@ -305,7 +388,7 @@ export default function HistoryPage() {
   const virtualRows = rowVirtualizer.getVirtualItems();
 
   // Infinite scroll driven by the virtualizer's own rendered range, rather
-  // than a separate sentinel/IntersectionObserver — the moment scrolling
+  // than a separate sentinel/IntersectionObserver â€” the moment scrolling
   // brings the last few rows into range, the next page is already loading.
   useEffect(() => {
     // Only while the grid is the thing on screen: the virtualizer's last
@@ -323,7 +406,7 @@ export default function HistoryPage() {
   );
 
   /**
-   * The kits the range allows, by when they were last touched — which is
+   * The kits the range allows, by when they were last touched â€” which is
    * what their caption shows, so the filter and the tile agree.
    */
   const visibleKits = useMemo(
@@ -339,19 +422,19 @@ export default function HistoryPage() {
     [kits, dateRange, selectedKinds, selectedMembers]
   );
 
-  /** What the badge counts — whatever the tab on screen is showing. */
+  /** What the badge counts â€” whatever the tab on screen is showing. */
   const badgeCount = view === "kits" ? (visibleKits?.length ?? 0) : totalImages;
 
   /*
-   * The `finally` is the point. Without it a request that rejects — the
-   * network dropping, a reply that isn't JSON — left `deletingId` set, and
+   * The `finally` is the point. Without it a request that rejects â€” the
+   * network dropping, a reply that isn't JSON â€” left `deletingId` set, and
    * a tile whose Delete button is permanently disabled and spinning is a
    * button that can never be pressed again. A failure has to hand the
    * button back.
    */
   /*
    * The tile's Delete button only *asks*. Nothing is removed until the
-   * dialog is confirmed — a grid of near-identical thumbnails, with the
+   * dialog is confirmed â€” a grid of near-identical thumbnails, with the
    * delete control a few pixels from the one that opens the result, is
    * exactly where a misclick costs something that cannot be recovered.
    */
@@ -403,7 +486,7 @@ export default function HistoryPage() {
 
     const socket = io(BACKEND_URL, { withCredentials: true });
     socket.on("history:generation", (item: HistoryItem) => {
-      // Always prepended to the one dataset — whether it's currently *shown*
+      // Always prepended to the one dataset â€” whether it's currently *shown*
       // is up to `visibleItems`, which reacts to it the moment it lands.
       setItems((current) => (current.some((row) => row.id === item.id) ? current : [item, ...current]));
     });
@@ -420,7 +503,7 @@ export default function HistoryPage() {
 
     setKitsLoading(true);
     // Same reach as the grid, so the Members filter carries across the two
-    // tabs — the server narrows `team` back to own work for anyone without
+    // tabs â€” the server narrows `team` back to own work for anyone without
     // the permission for it.
     listMarketingKits({ limit: 50, scope: "team" }).then((res) => {
       if (cancelled) return;
@@ -443,7 +526,7 @@ export default function HistoryPage() {
 
   /*
    * Kits are deleted from the same grid, by the same gesture, and are just
-   * as unrecoverable — so they ask first too. Same failure handling as a
+   * as unrecoverable â€” so they ask first too. Same failure handling as a
    * result, for the same reason: silence here read as a dead button.
    */
   const removeKit = useCallback(async (kit: MarketingKitSummary) => {
@@ -466,10 +549,18 @@ export default function HistoryPage() {
 
   const hasAccess = can(user, HISTORY_PERMISSION);
 
-  const filterControls = hasAccess ? (
+  /**
+   * The filter row, in one of its two forms.
+   *
+   * `compact` drops every label and leaves the icons. On a phone the labelled
+   * version wrapped to three rows â€” a third of the screen spent on controls
+   * before a single result â€” and the icons say the same thing, with the
+   * count badge each one already carries to show it is doing something.
+   */
+  const renderFilters = (compact: boolean) => (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        {/* A segmented toggle, not two separate pills — one bordered group,
+        {/* A segmented toggle, not two separate pills â€” one bordered group,
             squared off, split by a single divider. The count sits on the
             corner of the tab that is showing: images under History, saved
             decks under Marketing Kits. */}
@@ -478,6 +569,7 @@ export default function HistoryPage() {
             icon={History}
             label="History"
             side="left"
+            compact={compact}
             active={view === "history"}
             onClick={() => showView("history")}
             badge={view === "history" ? badgeCount : undefined}
@@ -487,6 +579,7 @@ export default function HistoryPage() {
             icon={Newspaper}
             label="Marketing Kits"
             side="right"
+            compact={compact}
             active={view === "kits"}
             onClick={() => showView("kits")}
             badge={view === "kits" ? badgeCount : undefined}
@@ -496,14 +589,38 @@ export default function HistoryPage() {
         {/* Unlike the two below, this one shows on both tabs: a date range
             narrows a list of documents exactly as well as a grid of
             pictures. */}
-        <DateFilter range={dateRange} onChange={updateRange} />
+        <DateFilter range={dateRange} onChange={updateRange} compact={compact} />
 
         {canReadTeam && (
           <MemberFilter
             members={knownMembers}
             selected={selectedMembers}
             onChange={(next) => updateFilters(selectedTools, next)}
+            compact={compact}
           />
+        )}
+
+        {/* History only â€” a kit has no resolution and is never a video. */}
+        {view === "history" && (
+          <>
+            <QualityFilter
+              options={facetQualities}
+              selected={selectedQualities}
+              onChange={(next) => {
+                setSelectedQualities(next);
+                syncUrl({ qualities: next });
+              }}
+              compact={compact}
+            />
+            <TypeFilter
+              selected={selectedTypes}
+              onChange={(next) => {
+                setSelectedTypes(next);
+                syncUrl({ types: next });
+              }}
+              compact={compact}
+            />
+          </>
         )}
       </div>
 
@@ -511,7 +628,11 @@ export default function HistoryPage() {
           dimension actually separates the rows there: which tool made a
           result, or which kind a kit is. */}
       {view === "history" ? (
-        <ToolFilter selected={selectedTools} onChange={(next) => updateFilters(next, selectedMembers)} />
+        <ToolFilter
+          selected={selectedTools}
+          onChange={(next) => updateFilters(next, selectedMembers)}
+          compact={compact}
+        />
       ) : (
         <KindFilter
           selected={selectedKinds}
@@ -519,12 +640,15 @@ export default function HistoryPage() {
             setSelectedKinds(next);
             syncUrl({ kinds: next });
           }}
+          compact={compact}
         />
       )}
     </>
-  ) : null;
+  );
 
-  // From `md` up these render in the header, replacing the breadcrumb —
+  const filterControls = hasAccess ? renderFilters(false) : null;
+
+  // From `md` up these render in the header, replacing the breadcrumb â€”
   // there's no room for both there, and the filters are the more useful of
   // the two on this page. Below `md` the header has no room for them either,
   // so they stay in the page body instead (see the `md:hidden` bar below).
@@ -540,8 +664,8 @@ export default function HistoryPage() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-3 md:hidden">
-        {filterControls}
+      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-white/[0.06] px-3 py-2 md:hidden">
+        {hasAccess ? renderFilters(true) : null}
       </div>
 
       {/* A delete that fails has to say so. Silence here was the whole
@@ -616,7 +740,7 @@ export default function HistoryPage() {
             <>
               <span className="text-cream">
                 {TOOL_LABELS[pendingDelete.tool] || pendingDelete.tool}
-                {pendingDelete.createdAt ? ` · ${new Date(pendingDelete.createdAt).toLocaleString()}` : ""}
+                {pendingDelete.createdAt ? ` Â· ${new Date(pendingDelete.createdAt).toLocaleString()}` : ""}
               </span>
               <br />
               This permanently removes the {pendingDelete.outputs.length === 1 ? "file" : "files"} it produced. It
@@ -659,7 +783,7 @@ export default function HistoryPage() {
  * unreadable.
  *
  * Clipped by `line-clamp` alone. A fade at the bottom would read better,
- * but it has to be painted in the tile's own background colour — and that
+ * but it has to be painted in the tile's own background colour â€” and that
  * colour comes from a `bg-white/*` tint that the light theme flips to a
  * black one, so a single hardcoded gradient is a smudge in one theme or
  * the other. The ellipsis says the same thing and cannot be wrong.
@@ -694,6 +818,7 @@ function ViewTab({
   side,
   badge,
   badgeLabel,
+  compact = false,
 }: {
   icon: LucideIcon;
   label: string;
@@ -702,6 +827,8 @@ function ViewTab({
   side: "left" | "right";
   badge?: number;
   badgeLabel?: string;
+  /** Icon only — the phone's form. */
+  compact?: boolean;
 }) {
   return (
     <span className="relative">
@@ -709,15 +836,19 @@ function ViewTab({
         type="button"
         onClick={onClick}
         aria-pressed={active}
+        aria-label={label}
+        title={label}
         className={cn(
-          "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors",
+          "flex items-center justify-center text-xs font-medium transition-colors",
+          compact ? "h-8 w-9" : "gap-1.5 px-3 py-1.5",
           // The divider belongs to the left half, so the group reads as one
           // control however many tabs it grows to.
           side === "left" ? "rounded-l-[5px] border-r border-white/10" : "rounded-r-[5px]",
           active ? "bg-gold/[0.08] text-gold" : "text-faint hover:bg-white/[0.04] hover:text-cream"
         )}
       >
-        <Icon size={12} /> {label}
+        <Icon size={compact ? 14 : 12} />
+        {!compact && label}
       </button>
       {badge != null && badge > 0 && (
         <span
@@ -734,14 +865,14 @@ function ViewTab({
 /**
  * The saved Marketing Kits, as a list rather than the image grid beside it.
  *
- * A kit is a document — it is found by its name and its date, and a row
+ * A kit is a document â€” it is found by its name and its date, and a row
  * carries both plus one thumbnail. The grid next door is the right shape
  * for pictures and the wrong one for these.
  */
 /**
  * The saved kits, as the same tiles the results grid uses.
  *
- * Same square geometry, same column count, same chrome — badge top-left,
+ * Same square geometry, same column count, same chrome â€” badge top-left,
  * actions top-right, caption along the bottom. Switching tabs changes what
  * is in the grid, not what a grid looks like, and a second card style would
  * make the two halves read as two different pages.
@@ -762,7 +893,7 @@ function KitsGrid({
   if (kits.length === 0) {
     return (
       <p className="px-2 py-10 text-center text-sm text-faint">
-        No kits yet — a Brand Story, Affinity deck or Campaign Kit is saved here to reopen and edit.
+        No kits yet â€” a Brand Story, Affinity deck or Campaign Kit is saved here to reopen and edit.
       </p>
     );
   }
@@ -810,7 +941,7 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
           {describeKit(kit)}
         </span>
 
-        {/* A teammate's kit is readable but not theirs to remove — the
+        {/* A teammate's kit is readable but not theirs to remove â€” the
             server refuses it, so the tile doesn't offer it. */}
         {kit.isOwn !== false && (
           <div className={cn(TILE_ACTION_GROUP, "pointer-events-auto")}>
@@ -829,7 +960,7 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
 
       <div className="pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
         {/* Who made it, in the same corner and the same chip the results
-            tiles use for it — the kit's own name is the badge above and the
+            tiles use for it â€” the kit's own name is the badge above and the
             tooltip on the tile, so this corner stays the one place you look
             to see whose work a tile is. */}
         <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:px-2 md:text-[10px] lg:text-[11px]">
@@ -840,7 +971,7 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
         </span>
       </div>
 
-      {/* A kit whose save failed is shown rather than hidden — the run
+      {/* A kit whose save failed is shown rather than hidden â€” the run
           happened, and the reason is the only thing that explains why there
           is nothing to open. */}
       {kit.status === "failed" && (
@@ -852,7 +983,7 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
   );
 }
 
-/** A short relative date for a kit row — the grid's tiles use their own. */
+/** A short relative date for a kit row â€” the grid's tiles use their own. */
 function timeAgoShort(iso: string) {
   const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
   if (days <= 0) return "Today";
@@ -866,7 +997,7 @@ type FilterOption = { id: string; label: string };
 /**
  * Shared shape for both filters here: an icon+label trigger carrying a
  * selection-count badge, and a panel with an "All" toggle above one checkbox
- * per option. Nothing checked means no filter — everything. Checking one or
+ * per option. Nothing checked means no filter â€” everything. Checking one or
  * more narrows the grid down to just those.
  */
 function CheckboxFilter({
@@ -876,6 +1007,7 @@ function CheckboxFilter({
   options,
   selected,
   onChange,
+  compact = false,
 }: {
   icon: LucideIcon;
   label: string;
@@ -883,6 +1015,8 @@ function CheckboxFilter({
   options: FilterOption[];
   selected: string[];
   onChange: (next: string[]) => void;
+  /** Icon only â€” the phone's form, where the labels cost a row each. */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -903,14 +1037,23 @@ function CheckboxFilter({
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        className="flex items-center gap-1.5 rounded-full border border-white/10 bg-surface-raised py-1.5 pl-3 pr-2.5 text-xs font-medium text-cream transition-colors hover:border-white/20"
+        aria-label={label}
+        title={label}
+        className={cn(
+          "flex items-center rounded-full border border-white/10 bg-surface-raised font-medium text-cream transition-colors hover:border-white/20",
+          compact ? "h-8 w-8 justify-center" : "gap-1.5 py-1.5 pl-3 pr-2.5 text-xs"
+        )}
       >
-        <Icon size={12} className="text-faint" />
-        <span>{label}</span>
-        <ChevronDown size={13} className="text-faint" />
+        <Icon size={compact ? 14 : 12} className="text-faint" />
+        {!compact && (
+          <>
+            <span>{label}</span>
+            <ChevronDown size={13} className="text-faint" />
+          </>
+        )}
       </button>
 
-      {/* What's checked, not what they are — the list itself already shows
+      {/* What's checked, not what they are â€” the list itself already shows
           every option. */}
       {selected.length > 0 && (
         <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410] shadow-sm">
@@ -935,7 +1078,7 @@ function CheckboxFilter({
                   ref={(el) => {
                     if (el) el.indeterminate = selected.length > 0 && selected.length < allIds.length;
                   }}
-                  // All checked → clear; anything else (none or some) → all.
+                  // All checked â†’ clear; anything else (none or some) â†’ all.
                   onChange={() => onChange(selected.length === allIds.length ? [] : allIds)}
                   style={{ accentColor: "var(--color-gold)" }}
                 />
@@ -1004,7 +1147,7 @@ const DATE_PRESETS: { id: string; label: string; resolve: () => DateRange }[] = 
  * Whether a timestamp falls inside the range.
  *
  * `to` is inclusive of the whole day. Someone picking "1st to 5th" means
- * through the end of the 5th, not up to midnight at its start — the other
+ * through the end of the 5th, not up to midnight at its start â€” the other
  * reading silently drops everything made on the last day they chose.
  */
 export function withinRange(iso: string, range: DateRange) {
@@ -1023,14 +1166,22 @@ function describeRange(range: DateRange) {
     return resolved.from === range.from && resolved.to === range.to;
   });
   if (preset) return preset.label;
-  if (range.from && range.to) return `${range.from} → ${range.to}`;
+  if (range.from && range.to) return `${range.from} â†’ ${range.to}`;
   if (range.from) return `From ${range.from}`;
   if (range.to) return `Until ${range.to}`;
   return "Date";
 }
 
-/** When to show results from — presets, or an exact pair of dates. */
-function DateFilter({ range, onChange }: { range: DateRange; onChange: (next: DateRange) => void }) {
+/** When to show results from â€” presets, or an exact pair of dates. */
+function DateFilter({
+  range,
+  onChange,
+  compact = false,
+}: {
+  range: DateRange;
+  onChange: (next: DateRange) => void;
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const active = Boolean(range.from || range.to);
@@ -1044,11 +1195,20 @@ function DateFilter({ range, onChange }: { range: DateRange; onChange: (next: Da
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex items-center gap-1.5 rounded-full border border-white/10 bg-surface-raised py-1.5 pl-3 pr-2.5 text-xs font-medium text-cream transition-colors hover:border-white/20"
+        aria-label={active ? `Date range: ${describeRange(range)}` : "Date range"}
+        title={active ? describeRange(range) : "Date range"}
+        className={cn(
+          "flex items-center rounded-full border border-white/10 bg-surface-raised text-xs font-medium text-cream transition-colors hover:border-white/20",
+          compact ? "h-8 w-8 justify-center" : "gap-1.5 py-1.5 pl-3 pr-2.5"
+        )}
       >
-        <CalendarRange size={12} className="text-faint" />
-        <span className="max-w-40 truncate">{describeRange(range)}</span>
-        <ChevronDown size={13} className="text-faint" />
+        <CalendarRange size={compact ? 14 : 12} className="text-faint" />
+        {!compact && (
+          <>
+            <span className="max-w-40 truncate">{describeRange(range)}</span>
+            <ChevronDown size={13} className="text-faint" />
+          </>
+        )}
       </button>
 
       {active && (
@@ -1108,7 +1268,7 @@ function DateFilter({ range, onChange }: { range: DateRange; onChange: (next: Da
   );
 }
 
-function ToolFilter({ selected, onChange }: { selected: string[]; onChange: (next: string[]) => void }) {
+function ToolFilter({ selected, onChange, compact }: { selected: string[]; onChange: (next: string[]) => void; compact?: boolean }) {
   return (
     <CheckboxFilter
       icon={SlidersHorizontal}
@@ -1117,6 +1277,68 @@ function ToolFilter({ selected, onChange }: { selected: string[]; onChange: (nex
       options={TOOL_OPTIONS}
       selected={selected}
       onChange={onChange}
+      compact={compact}
+    />
+  );
+}
+
+/** The two new cuts: what resolution a run was made at, and what it produced. */
+const TYPE_OPTIONS: FilterOption[] = [
+  { id: "image", label: "Images" },
+  { id: "video", label: "Video" },
+  { id: "text", label: "Text" },
+];
+
+function QualityFilter({
+  options,
+  selected,
+  onChange,
+  compact,
+}: {
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  compact?: boolean;
+}) {
+  const choices = useMemo(() => options.map((value) => ({ id: value, label: value })), [options]);
+  return (
+    <CheckboxFilter
+      icon={Gauge}
+      label="Quality"
+      emptyLabel="No resolutions to filter by yet."
+      options={choices}
+      selected={selected}
+      onChange={onChange}
+      compact={compact}
+    />
+  );
+}
+
+/**
+ * What a run produced — not which tool made it.
+ *
+ * "Find that video" is one question; answering it through the Tools list
+ * means knowing that Image to Video is the only tool that makes them, and a
+ * text answer comes from several tools at once.
+ */
+function TypeFilter({
+  selected,
+  onChange,
+  compact,
+}: {
+  selected: string[];
+  onChange: (next: string[]) => void;
+  compact?: boolean;
+}) {
+  return (
+    <CheckboxFilter
+      icon={Film}
+      label="Type"
+      emptyLabel="Nothing to filter by."
+      options={TYPE_OPTIONS}
+      selected={selected}
+      onChange={onChange}
+      compact={compact}
     />
   );
 }
@@ -1127,8 +1349,8 @@ const KIND_OPTIONS: FilterOption[] = (["brand_story", "affinity", "campaign"] as
   label: KIT_LABEL[kind],
 }));
 
-/** Which kinds of kit to show — the Kits tab's counterpart to Tools. */
-function KindFilter({ selected, onChange }: { selected: string[]; onChange: (next: string[]) => void }) {
+/** Which kinds of kit to show â€” the Kits tab's counterpart to Tools. */
+function KindFilter({ selected, onChange, compact }: { selected: string[]; onChange: (next: string[]) => void; compact?: boolean }) {
   return (
     <CheckboxFilter
       icon={SlidersHorizontal}
@@ -1137,19 +1359,22 @@ function KindFilter({ selected, onChange }: { selected: string[]; onChange: (nex
       options={KIND_OPTIONS}
       selected={selected}
       onChange={onChange}
+      compact={compact}
     />
   );
 }
 
-/** Who to show results for — a checkbox per real name the data has reported, never a generic "Whole team" standing in for actual people. */
+/** Who to show results for â€” a checkbox per real name the data has reported, never a generic "Whole team" standing in for actual people. */
 function MemberFilter({
   members,
   selected,
   onChange,
+  compact,
 }: {
   members: string[];
   selected: string[];
   onChange: (next: string[]) => void;
+  compact?: boolean;
 }) {
   const options = useMemo(() => members.map((name) => ({ id: name, label: name })), [members]);
   return (
@@ -1160,6 +1385,7 @@ function MemberFilter({
       options={options}
       selected={selected}
       onChange={onChange}
+      compact={compact}
     />
   );
 }
@@ -1170,7 +1396,7 @@ function MemberFilter({
  * Laid out by CSS breakpoints rather than by `useResponsiveColumns`, and that
  * is the whole point: the hook cannot know the viewport until it has mounted
  * and measured, so it necessarily returns its 2-column default for the first
- * paint. That is precisely the frame the skeleton occupies — which is why the
+ * paint. That is precisely the frame the skeleton occupies â€” which is why the
  * loader used to appear as two oversized boxes and then snap to six small
  * ones. Media queries are resolved before the first paint, so there is no
  * wrong frame to correct.
@@ -1216,7 +1442,7 @@ type HistoryTileProps = {
 
 /**
  * Memoized so a page full of tiles doesn't all re-render every time one
- * unrelated tile's `deleting` state flips, or a new page of results appends —
+ * unrelated tile's `deleting` state flips, or a new page of results appends â€”
  * `onOpen`/`onContinue`/`onDelete` are stable across renders (see the parent's
  * `useCallback`s), and `item` keeps its object identity for every row that
  * hasn't itself changed, so the comparator below bails out on those tiles.
@@ -1235,8 +1461,8 @@ const HistoryTile = memo(
             is still what the download link and the lightbox below point at.
             A video result is a poster frame rather than a broken image.
 
-            A run that made words rather than pictures — Image to Text, and
-            Marketing Kit's writing halves — has no cover at all, and shows
+            A run that made words rather than pictures â€” Image to Text, and
+            Marketing Kit's writing halves â€” has no cover at all, and shows
             an excerpt instead. It used to render nothing, which did not
             hide the run so much as punch a hole in the grid: the tile was
             still counted into its row, so the row came up one short. */}
@@ -1259,7 +1485,7 @@ const HistoryTile = memo(
               {toolLabel}
             </span>
 
-            {/* The output size — "4K", "1K", the video's resolution. Same
+            {/* The output size â€” "4K", "1K", the video's resolution. Same
                 fact the lightbox prints beside the model name, up here too
                 so a grid can be scanned for it without opening anything.
                 Absent on a text result, which has no size. */}
@@ -1285,7 +1511,7 @@ const HistoryTile = memo(
               </button>
             )}
 
-            {/* Absent on a text result — there is no file to save, and a
+            {/* Absent on a text result â€” there is no file to save, and a
                 button that does nothing when pressed reads as broken. */}
             {cover && (
               <button
@@ -1294,7 +1520,7 @@ const HistoryTile = memo(
                 onClick={(event) => {
                   // The tile is clickable; downloading must not also open it.
                   event.stopPropagation();
-                  // The full-size original, never the grid thumbnail — and
+                  // The full-size original, never the grid thumbnail â€” and
                   // saved under its real extension, so a clip arrives as a
                   // playable .mp4 rather than an .jpg nothing will open.
                   downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type));
@@ -1347,3 +1573,5 @@ const HistoryTile = memo(
     prev.canContinue === next.canContinue &&
     prev.deleting === next.deleting
 );
+
+

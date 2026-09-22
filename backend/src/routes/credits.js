@@ -4,6 +4,7 @@ const { hasPermission } = require("../permissions");
 const { handle, bad, isId } = require("./_shared");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const credit = require("../services/credits");
+const AuditLog = require("../models/auditLog");
 const CreditAccount = require("../models/creditAccount");
 const CreditLedger = require("../models/creditLedger");
 const Tenant = require("../models/tenant");
@@ -396,6 +397,51 @@ router.get(
       entries: entries.map((entry) => ({
         ...toEntry(entry),
         holder: entry.userId ? entry.userId.name || entry.userId.email : "Organization pool",
+      })),
+    });
+  })
+);
+
+/** The four movements an administrator can make. */
+const CREDIT_AUDIT_ACTIONS = ["credits.granted", "credits.revoked", "credits.distributed", "credits.reclaimed"];
+
+/**
+ * Who moved this organization's credits, and when.
+ *
+ * The ledger beside it says where credits *went* — every hold, settle and
+ * refund, most of them the worker's doing. This says who decided, which the
+ * ledger cannot: an entry reading "revoke 5,000" names no one.
+ *
+ * It lives here rather than on `/api/audit-log` because that route scopes to
+ * the caller's own tenant by design and refuses a client-supplied tenant
+ * filter outright — the rule that keeps one company's history out of
+ * another's. Reading across tenants is the super admin console's job, and
+ * this router is already behind `requireSuperAdmin`.
+ */
+router.get(
+  "/tenants/:id/audit",
+  handle(async (req, res) => {
+    if (!isId(req.params.id)) return bad(res, "invalid organization id");
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+
+    const rows = await AuditLog.find({
+      tenantId: req.params.id,
+      action: { $in: CREDIT_AUDIT_ACTIONS },
+    })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .exec();
+
+    res.json({
+      status: "success",
+      entries: rows.map((row) => ({
+        id: row._id,
+        action: row.action,
+        status: row.status,
+        actorName: row.actorName,
+        message: row.message,
+        amount: row.metadata?.amount ?? null,
+        createdAt: row.createdAt,
       })),
     });
   })

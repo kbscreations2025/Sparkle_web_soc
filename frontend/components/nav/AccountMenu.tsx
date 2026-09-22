@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Coins, LogOut, Loader2, ScrollText, Sun, Moon } from "lucide-react";
+import { LogOut, Loader2, ScrollText, Sun, Moon, Users } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
 import { can } from "@/lib/permissions";
@@ -87,7 +87,10 @@ export function AccountMenu({ avatarClassName }: { avatarClassName?: string } = 
                 normal member never sees a link they cannot open. */}
             {can(user, "org.audit.read") && (
               <Link
-                href="/audit-log"
+                // A super admin lives in the console and the proxy will not
+                // let them out of it, so the dashboard's copy of this page is
+                // a link that only bounces them back.
+                href={user?.isSuperAdmin ? "/admin/audit-log" : "/audit-log"}
                 role="menuitem"
                 onClick={closeNow}
                 className="flex items-center gap-2 border-t border-white/5 px-2.5 py-2 text-[11px] text-muted transition-colors hover:bg-white/[0.07] hover:text-cream"
@@ -100,16 +103,24 @@ export function AccountMenu({ avatarClassName }: { avatarClassName?: string } = 
             {/* Directly below the Audit Log, and gated the same way: on the
                 grant alone. A super admin sees every organization here, an
                 admin granted `org.credits.read` sees only their own and what
-                each of their people holds, and nobody else sees the link. */}
-            {can(user, "org.credits.read") && (
+                each of their people holds, and nobody else sees the link.
+
+                Called "Users" rather than "Credits" because the page is the
+                roster: it is where members are listed and their access is
+                changed, and the balances are one column of that.
+
+                Hidden from a super admin: `/credits` is in the other shell and
+                would only bounce them, and the console's own Organizations
+                page is already the roster for every tenant. */}
+            {!user?.isSuperAdmin && can(user, "org.credits.read") && (
               <Link
                 href="/credits"
                 role="menuitem"
                 onClick={closeNow}
                 className="flex items-center gap-2 border-t border-white/5 px-2.5 py-2 text-[11px] text-muted transition-colors hover:bg-white/[0.07] hover:text-cream"
               >
-                <Coins size={13} className="shrink-0" />
-                Credits
+                <Users size={13} className="shrink-0" />
+                Users
               </Link>
             )}
 

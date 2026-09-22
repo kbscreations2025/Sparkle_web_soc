@@ -185,22 +185,108 @@ function buildScopeFilter(dbUser, wantsTeam) {
  * generations land while someone is scrolling, a `before` cursor doesn't.
  */
 router.get("/", async (req, res) => {
-  const { tool, before, scope } = req.query;
+  const { tool, member, before, scope, from, to } = req.query;
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
 
   const query = buildScopeFilter(req.dbUser, scope === "team");
-  if (tool && tool !== "all") {
-    if (!GENERATION_TOOLS.includes(tool)) {
+
+  /*
+   * A run that wrote a Marketing Kit belongs to the Kits tab and is never
+   * shown in this grid. Excluded here rather than by the page, because a
+   * page of results the grid then throws away is a page the reader has to
+   * scroll past nothing to get beyond.
+   */
+  query["request.params.kitId"] = null;
+
+  // Repeatable: ?tool=a&tool=b, which is what the page's checkbox list sends.
+  if (tool) {
+    const tools = (Array.isArray(tool) ? tool : [tool]).filter((value) => value !== "all");
+    if (tools.some((value) => !GENERATION_TOOLS.includes(value))) {
       return res.status(400).json({ status: "error", message: "unknown tool", code: "invalid" });
     }
-    query.tool = tool;
+    if (tools.length) query.tool = { $in: tools };
   }
+
+  /*
+   * By the name stored on the generation, which is what the page filters by
+   * and what the dropdown lists. It is a snapshot taken when the run
+   * happened, so a renamed person keeps their old rows under the old name —
+   * true of the label in the grid too, so the two agree.
+   */
+  if (member) {
+    const members = Array.isArray(member) ? member : [member];
+    if (members.length) query.userName = { $in: members };
+  }
+
+  // The resolution a run was asked for — the badge on every tile.
+  if (req.query.quality) {
+    const qualities = Array.isArray(req.query.quality) ? req.query.quality : [req.query.quality];
+    if (qualities.length) query["request.params.quality"] = { $in: qualities };
+  }
+
+  /*
+   * What the run produced, which is not the same question as which tool made
+   * it: Image to Video is the only video tool, but a text answer comes from
+   * several and a picture from most.
+   *
+   * "text" is the awkward one — it is the absence of assets rather than a
+   * value on them, so it is matched as an empty output list with something
+   * written instead. Asking for it alongside a media type is therefore an
+   * `$or` rather than one clause.
+   */
+  if (req.query.type) {
+    const types = (Array.isArray(req.query.type) ? req.query.type : [req.query.type]).filter((value) =>
+      ["image", "video", "text"].includes(value)
+    );
+
+    const clauses = [];
+    if (types.includes("video")) {
+      clauses.push({ "response.outputAssets": { $elemMatch: { type: "video" } } });
+    }
+    if (types.includes("image")) {
+      /*
+       * Missing counts as an image.
+       *
+       * `type` carries a schema default of "image", but a default is applied
+       * when a document is written, not to documents already stored — every
+       * asset snapshot written before Image to Video existed has no `type`
+       * key at all. Matching on the value alone quietly hid all of them,
+       * which is most of the library.
+       */
+      clauses.push({
+        "response.outputAssets": { $elemMatch: { $or: [{ type: "image" }, { type: { $exists: false } }] } },
+      });
+    }
+    if (types.includes("text")) {
+      clauses.push({ "response.outputAssets": { $size: 0 }, "response.text": { $nin: [null, ""] } });
+    }
+
+    if (clauses.length === 1) Object.assign(query, clauses[0]);
+    else if (clauses.length > 1) query.$or = clauses;
+  }
+
   if (before) {
     const cursor = new Date(before);
     if (Number.isNaN(cursor.getTime())) {
       return res.status(400).json({ status: "error", message: "invalid cursor", code: "invalid" });
     }
     query.createdAt = { ...query.createdAt, $lt: cursor };
+  }
+
+  /*
+   * The date range, merged into whatever `createdAt` already carries — the
+   * cursor above, and `dataScope.notBefore` from the scope filter. All three
+   * constrain the same field, so they combine rather than overwrite.
+   */
+  const fromDate = from ? new Date(from) : null;
+  const toDate = to ? new Date(to) : null;
+  if (fromDate && !Number.isNaN(fromDate.getTime())) {
+    query.createdAt = { ...query.createdAt, $gte: fromDate };
+  }
+  if (toDate && !Number.isNaN(toDate.getTime())) {
+    // A bare date means the whole of that day.
+    if (!String(to).includes("T")) toDate.setHours(23, 59, 59, 999);
+    query.createdAt = { ...query.createdAt, $lte: toDate };
   }
 
   const generations = await Generation.find(query)
@@ -216,6 +302,34 @@ router.get("/", async (req, res) => {
     items: page.map((generation) => toHistoryItem(generation, req.dbUser)),
     nextCursor: hasMore ? page[page.length - 1].createdAt.toISOString() : null,
     canReadTeam: hasPermission(req.dbUser, "result.read.others"),
+  });
+});
+
+/**
+ * What the filter dropdowns can offer.
+ *
+ * Needed once filtering moved to the server: the page used to build its
+ * member list from whatever rows had been paged in, which was wrong in both
+ * directions — someone who had not appeared in the first two pages could not
+ * be filtered for at all, and the list shrank as soon as a filter narrowed
+ * the grid. Distinct over the same scope the rows use, so it offers exactly
+ * the people whose work this caller is allowed to see.
+ */
+router.get("/facets", async (req, res) => {
+  const scopeFilter = buildScopeFilter(req.dbUser, req.query.scope === "team");
+  const [members, tools, qualities] = await Promise.all([
+    Generation.distinct("userName", scopeFilter),
+    Generation.distinct("tool", scopeFilter),
+    Generation.distinct("request.params.quality", scopeFilter),
+  ]);
+
+  res.json({
+    status: "success",
+    members: members.filter(Boolean).sort(),
+    tools: tools.filter(Boolean).sort(),
+    // Offered in resolution order rather than alphabetically, where "1K, 2K,
+    // 4K" would sort as "1K, 2K, 4K" by luck and "512, 1K, 2K" would not.
+    qualities: qualities.filter(Boolean).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)),
   });
 });
 

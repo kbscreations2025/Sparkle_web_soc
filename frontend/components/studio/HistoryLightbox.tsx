@@ -13,6 +13,17 @@ import { BrandStoryResult } from "./BrandStoryResult";
 import { looksLikeBrandStory } from "@/lib/brandStory";
 
 /**
+ * One control in the header's action pill.
+ *
+ * 36px on a phone, 32px from `md` up — the opposite of how these usually
+ * scale, and deliberate: a thumb needs the target and a cursor does not.
+ * They were 28px everywhere, which is small to hit while holding a phone,
+ * and five of them sat in a row.
+ */
+const LIGHTBOX_ACTION =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.10] md:h-8 md:w-8";
+
+/**
  * The detail view for one History tile: every output image of that
  * generation as a thumbnail strip, plus the run's metadata (tool, model,
  * quality, when, who). Distinct from the plain `Lightbox` used mid-tool —
@@ -88,31 +99,50 @@ export function HistoryLightbox({
   return (
     <div
       ref={frameRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 backdrop-blur-xl md:p-6 lg:p-8"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-2 backdrop-blur-xl md:p-5 lg:p-6"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="relative flex max-h-[90vh] max-w-[94vw] flex-col items-center"
+        className="relative flex max-h-[94vh] max-w-[96vw] flex-col items-center"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-2 flex w-full flex-wrap items-center justify-between gap-2 md:mb-3 md:gap-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {/* The same colour the tile carried, so the badge doesn't
-                change identity between the grid and the view it opens. */}
-            <span
-              className="flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold md:px-2.5 md:py-1 md:text-[11px]"
-              style={toolBadgeStyle(item.tool)}
-            >
-              {toolLabel}
-            </span>
-            {(modelLabel || item.quality) && (
-              <span className="flex-shrink-0 rounded-full border border-white/[0.10] bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-faint md:px-2.5 md:py-1 md:text-[11px]">
-                {[modelLabel, item.quality].filter(Boolean).join(" · ")}
+          {/*
+            On a phone the close button leaves the pill and sits alone at the
+            top right, where a thumb expects it — it is the most-used control
+            here and was the last of five in a row of 28px targets, which is
+            an awkward thing to hit while holding a phone.
+          */}
+          <div className="flex w-full items-center justify-between gap-1.5 md:w-auto md:justify-start">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* The same colour the tile carried, so the badge doesn't
+                  change identity between the grid and the view it opens. */}
+              <span
+                className="flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold md:px-2.5 md:py-1 md:text-[11px]"
+                style={toolBadgeStyle(item.tool)}
+              >
+                {toolLabel}
               </span>
-            )}
+              {(modelLabel || item.quality) && (
+                <span className="flex-shrink-0 rounded-full border border-white/[0.10] bg-white/[0.05] px-2 py-0.5 text-[10px] font-medium text-faint md:px-2.5 md:py-1 md:text-[11px]">
+                  {[modelLabel, item.quality].filter(Boolean).join(" · ")}
+                </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-white/85 transition-colors hover:bg-white/[0.10] md:hidden"
+            >
+              <X size={16} />
+            </button>
           </div>
-          <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 md:gap-3">
+
+          <div className="flex w-full flex-shrink-0 items-center justify-between gap-2 md:w-auto md:justify-end md:gap-3">
             <p className="whitespace-nowrap text-[10px] text-faint md:text-[11px]">
               {timeLabel} · by {item.userName}
               {item.outputs.length > 1 ? ` · ${activeIndex + 1}/${item.outputs.length}` : ""}
@@ -122,20 +152,22 @@ export function HistoryLightbox({
                 <button
                   type="button"
                   onClick={onContinue}
+                  aria-label="Continue this conversation"
                   title="Continue this conversation"
-                  className="flex h-7 items-center gap-1 rounded-full px-2 text-[10px] font-medium text-white/85 transition-colors hover:bg-white/[0.10] md:h-8"
+                  className={LIGHTBOX_ACTION}
                 >
-                  <MessageCircle size={13} /> 
+                  <MessageCircle size={15} />
                 </button>
               )}
               {item.outputs.length > 1 && (
                 <button
                   type="button"
                   onClick={downloadAll}
-                  title="Download all"
-                  className="flex h-7 items-center gap-1 rounded-full px-2 text-[10px] font-medium text-white/85 transition-colors hover:bg-white/[0.10] md:h-8"
+                  aria-label={`Download all ${item.outputs.length}`}
+                  title={`Download all ${item.outputs.length}`}
+                  className={cn(LIGHTBOX_ACTION, "w-auto gap-1 px-2.5 text-[11px] font-medium")}
                 >
-                  <Download size={13} /> All
+                  <Download size={15} /> All
                 </button>
               )}
               {/* Absent rather than inert on a text result — there is no
@@ -150,36 +182,55 @@ export function HistoryLightbox({
                       downloadName(active.url, `${item.tool}-${item.id}-${activeIndex + 1}`, active.type)
                     )
                   }
-                  title="Download"
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.10] md:h-8 md:w-8"
+                  aria-label="Download this one"
+                  title={item.outputs.length > 1 ? "Download this one" : "Download"}
+                  className={LIGHTBOX_ACTION}
                 >
-                  <Download size={14} />
+                  <Download size={15} />
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => onDelete(item)}
                 disabled={deleting}
+                aria-label="Delete"
                 title="Delete"
-                className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.10] disabled:cursor-not-allowed disabled:opacity-40 md:h-8 md:w-8"
+                className={cn(
+                  LIGHTBOX_ACTION,
+                  // The one destructive control here, so it reads as one on
+                  // hover rather than looking like another way to save.
+                  "hover:bg-error/20 hover:text-error disabled:cursor-not-allowed disabled:opacity-40"
+                )}
               >
-                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
               </button>
+              {/* On a phone this lives at the top right instead — see above. */}
               <button
                 type="button"
                 onClick={onClose}
+                aria-label="Close"
                 title="Close"
-                className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.10] md:h-8 md:w-8"
+                className={cn(LIGHTBOX_ACTION, "hidden md:flex")}
               >
-                <X size={14} />
+                <X size={15} />
               </button>
             </div>
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 items-stretch gap-3">
+        {/*
+          Column on a wide screen, row underneath on a narrow one.
+
+          A 64px strip down the left costs a phone a fifth of its width, and
+          takes it from the picture — which is the whole point of opening
+          this. Below the image there is height to spare, and a horizontal
+          strip is the shape a phone already expects to swipe through.
+          `flex-col-reverse` keeps the image first in the reading order while
+          putting the strip after it on screen.
+        */}
+        <div className="flex min-h-0 flex-1 flex-col-reverse items-stretch gap-3 md:flex-row">
           {item.outputs.length > 1 && (
-            <div className="flex flex-col gap-2 overflow-y-auto">
+            <div className="flex shrink-0 flex-row gap-2 overflow-x-auto md:flex-col md:overflow-y-auto md:overflow-x-visible">
               {item.outputs.map((output, i) => (
                 <button
                   key={output.assetId}
@@ -214,7 +265,7 @@ export function HistoryLightbox({
                   poster={active.thumbnailUrl ?? undefined}
                   controls
                   playsInline
-                  className="max-h-[70vh] max-w-[80vw] rounded md:max-h-[76vh]"
+                  className="max-h-[58vh] max-w-[94vw] rounded md:max-h-[78vh] md:max-w-[86vw]"
                 />
               ) : (
                 /*
@@ -229,7 +280,10 @@ export function HistoryLightbox({
                  * dialog appears, and the full-size original fades in over
                  * the top of it.
                  */
-                <div className="relative select-none overflow-hidden rounded" style={fittedBox(active)}>
+                <div
+                  className={cn("relative select-none overflow-hidden rounded", FITTED_IMAGE)}
+                  style={fittedBox(active)}
+                >
                   {!fullSizeShown && active.thumbnailUrl && (
                     // eslint-disable-next-line @next/next/no-img-element -- placeholder layer, sized by its container
                     <img
@@ -293,7 +347,7 @@ export function HistoryLightbox({
                  text but not which Marketing Kit surface wrote it, and
                  Affinity's stored output is JSON, which finds no headings
                  and correctly falls through to the plain panel. */
-              <div className="max-h-[70vh] w-[min(80vw,64rem)] overflow-y-auto md:max-h-[76vh]">
+              <div className="max-h-[58vh] w-[min(94vw,64rem)] overflow-y-auto md:max-h-[78vh] md:w-[min(86vw,64rem)]">
                 {looksLikeBrandStory(item.text) ? (
                   <BrandStoryResult text={item.text} />
                 ) : item.kitId ? (
@@ -376,13 +430,27 @@ export function HistoryLightbox({
 function fittedBox(asset: HistoryOutput): CSSProperties {
   const ratio = asset.width && asset.height ? asset.width / asset.height : 4 / 3;
 
-  return {
-    aspectRatio: String(ratio),
-    width: `min(80vw, ${(70 * ratio).toFixed(3)}vh)`,
-    maxWidth: "80vw",
-    maxHeight: "70vh",
-  };
+  // The ratio goes out as a custom property so the caps themselves can live in
+  // classes and vary by breakpoint — an inline style cannot carry a media
+  // query, and the two viewports have very different room to give.
+  return { aspectRatio: String(ratio), ["--ar" as string]: String(ratio) };
 }
+
+/**
+ * How much of the screen the picture may take.
+ *
+ * It was 80vw by 70vh at every size, which left a wide margin of scrim on
+ * every side — on a phone a square image was pinned to 80vw and used barely
+ * a third of the height, with the rest of the screen black.
+ *
+ * The caps are what is left after the chrome: the header, the thumbnail strip
+ * (below the image on a phone, beside it from `md`) and the zoom bar. `width`
+ * takes whichever limit binds first so the box is correct before the image
+ * has loaded, and height follows from the ratio.
+ */
+const FITTED_IMAGE =
+  "w-[min(94vw,calc(58vh*var(--ar)))] max-w-[94vw] max-h-[58vh] " +
+  "md:w-[min(86vw,calc(78vh*var(--ar)))] md:max-w-[86vw] md:max-h-[78vh]";
 
 /** Coarse "N units ago" — history doesn't need second-level precision. */
 function timeAgo(iso: string) {

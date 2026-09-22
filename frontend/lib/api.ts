@@ -29,6 +29,15 @@ export type ApiResult<T = Record<string, never>> = {
   // accepted onto the job queue, not finished (see fetchJobs/JobsProvider).
   status: "success" | "queued" | "otp_required" | "session_limit_reached" | "error";
   message?: string;
+  /**
+   * Machine-readable failure, where the message alone isn't enough to decide
+   * what the UI should do — `insufficient_credits` is the one that opens a
+   * dialog rather than printing into an error banner.
+   */
+  code?: string;
+  /** Present on `insufficient_credits`: what the run costs, and what's spendable. */
+  required?: number;
+  available?: number;
 } & T;
 
 /** Extra fields the login and OTP endpoints return alongside `status`. */
@@ -314,10 +323,16 @@ export type AuditEntry = {
   targetType: string | null;
   targetId: string | null;
   message: string | null;
-  metadata: Record<string, unknown>;
   ip: string | null;
-  userAgent: string | null;
   createdAt: string;
+  /**
+   * Whether this row has metadata or a user agent worth expanding for. The
+   * fields themselves are not in the list — they are the widest part of a row
+   * and invisible until expanded, so they come from `getAuditEntryDetail`.
+   */
+  hasDetail: boolean;
+  /** Which organization this happened in. Only sent to a super admin, who reads across all of them. */
+  tenant?: string;
 };
 
 /** The filter dropdowns' contents, scoped to this organization. */
@@ -326,12 +341,16 @@ export type AuditFacets = {
   actions: string[];
   targetTypes: string[];
   actors: { id: string; name: string; email: string }[];
+  /** Super admin only: the organizations available to filter by. */
+  tenants?: { id: string; name: string }[];
 };
 
 export type AuditQuery = {
   action?: string[];
-  status?: "success" | "failure";
-  actorUserId?: string;
+  /** Repeatable: any of these outcomes. */
+  status?: ("success" | "failure")[];
+  /** Repeatable, like `action`: any of these people. */
+  actorUserId?: string[];
   targetType?: string;
   /** Matches the message, actor name or actor email. */
   q?: string;
@@ -340,27 +359,36 @@ export type AuditQuery = {
   /** Cursor: the `nextCursor` from the previous page. */
   before?: string;
   limit?: number;
+  /**
+   * Narrows to one organization. Accepted from a super admin only — for anyone
+   * else the backend ignores it and scopes to their own tenant regardless, so
+   * sending it can never widen what they see.
+   */
+  tenantId?: string[];
 };
 
 /**
- * One page of the caller's own organization's audit trail, newest first.
+ * One page of the audit trail, newest first.
  *
- * There is deliberately no tenant parameter — the backend takes that from the
- * session, so this can only ever read the caller's own organization.
+ * For an org user this is only ever their own organization: the backend takes
+ * the tenant from the session and refuses any filter that would widen it. A
+ * central super admin reads across every organization and may narrow to one
+ * with `tenantId`.
  */
 export function listAuditLog(query: AuditQuery = {}) {
   const params = new URLSearchParams();
   // Repeated key rather than a joined string: the backend reads ?action=a&action=b
   // as an array, which is what the multi-select sends.
   query.action?.forEach((value) => params.append("action", value));
-  if (query.status) params.set("status", query.status);
-  if (query.actorUserId) params.set("actorUserId", query.actorUserId);
+  query.status?.forEach((value) => params.append("status", value));
+  query.actorUserId?.forEach((value) => params.append("actorUserId", value));
   if (query.targetType) params.set("targetType", query.targetType);
   if (query.q) params.set("q", query.q);
   if (query.from) params.set("from", query.from);
   if (query.to) params.set("to", query.to);
   if (query.before) params.set("before", query.before);
   if (query.limit) params.set("limit", String(query.limit));
+  query.tenantId?.forEach((value) => params.append("tenantId", value));
 
   const qs = params.toString();
   return apiRequest<{ entries?: AuditEntry[]; hasMore?: boolean; nextCursor?: string | null }>(
@@ -370,6 +398,13 @@ export function listAuditLog(query: AuditQuery = {}) {
 
 export function getAuditFacets() {
   return apiRequest<AuditFacets>("/api/audit-log/facets");
+}
+
+/** The heavy half of one row, fetched when it is expanded. */
+export function getAuditEntryDetail(id: string) {
+  return apiRequest<{ metadata?: Record<string, unknown>; userAgent?: string | null }>(
+    `/api/audit-log/${id}`
+  );
 }
 
 // ── credit pricing (super admin only) ───────────────────────────────────────
@@ -1385,18 +1420,56 @@ export function resolveModelId<T extends { id: string; label: string }>(
  * unless `scope: "team"` is given, which the server only honours when the
  * caller holds `result.read.others` (see `canReadTeam` in the response).
  * `before` is the `nextCursor` from a previous page — omit it for the first
- * page. `tool` narrows to one tool's generations; omit (or "all") for every
- * tool.
+ * page.
+ *
+ * Every filter is applied by the server, so a page is a page of results the
+ * caller asked for. Filtering in the browser instead meant the cursor walked
+ * the unfiltered collection: narrowing to one teammate searched only the rows
+ * already fetched, and an empty grid never scrolled far enough to ask for
+ * more — so matching work sat unfetched and unreachable.
  */
-export function fetchHistory(params: { tool?: string; before?: string; limit?: number; scope?: "own" | "team" } = {}) {
+export function fetchHistory(
+  params: {
+    /** Any of these tools. Empty or omitted means every tool. */
+    tools?: string[];
+    /** Any of these people, by the name recorded on the run. */
+    members?: string[];
+    /** Any of these resolutions, as the tile's badge shows them — "1K", "2K", "4K". */
+    qualities?: string[];
+    /** What the run produced: "image", "video", or "text" for a text-only answer. */
+    types?: string[];
+    /** Inclusive range over `createdAt`. A bare `to` date covers its whole day. */
+    from?: string;
+    to?: string;
+    before?: string;
+    limit?: number;
+    scope?: "own" | "team";
+  } = {}
+) {
   const query = new URLSearchParams();
-  if (params.tool && params.tool !== "all") query.set("tool", params.tool);
+  params.tools?.forEach((value) => query.append("tool", value));
+  params.members?.forEach((value) => query.append("member", value));
+  params.qualities?.forEach((value) => query.append("quality", value));
+  params.types?.forEach((value) => query.append("type", value));
+  if (params.from) query.set("from", params.from);
+  if (params.to) query.set("to", params.to);
   if (params.before) query.set("before", params.before);
   if (params.limit) query.set("limit", String(params.limit));
   if (params.scope === "team") query.set("scope", "team");
   const qs = query.toString();
   return apiRequest<{ items: HistoryItem[]; nextCursor: string | null; canReadTeam: boolean }>(
     `/api/history${qs ? `?${qs}` : ""}`
+  );
+}
+
+/**
+ * Who and what the History filters can offer, across everything in reach —
+ * not just the rows paged in so far, which is what the page used to derive
+ * its member list from.
+ */
+export function fetchHistoryFacets(scope: "own" | "team" = "team") {
+  return apiRequest<{ members: string[]; tools: string[]; qualities: string[] }>(
+    `/api/history/facets${scope === "team" ? "?scope=team" : ""}`
   );
 }
 
@@ -1519,6 +1592,21 @@ export function fetchCreditTenant(id: string) {
 
 export function fetchCreditLedger(tenantId: string, limit = 100) {
   return apiRequest<{ entries: CreditEntry[] }>(`/api/credits/tenants/${tenantId}/ledger?limit=${limit}`);
+}
+
+/** Who granted, revoked, shared out or took back — the decisions behind the ledger. */
+export type CreditAuditEntry = {
+  id: string;
+  action: string;
+  status: string;
+  actorName?: string;
+  message?: string;
+  amount: number | null;
+  createdAt: string;
+};
+
+export function fetchCreditAudit(tenantId: string, limit = 100) {
+  return apiRequest<{ entries: CreditAuditEntry[] }>(`/api/credits/tenants/${tenantId}/audit?limit=${limit}`);
 }
 
 /** `userId: null` grants to the organization pool instead of a person. */

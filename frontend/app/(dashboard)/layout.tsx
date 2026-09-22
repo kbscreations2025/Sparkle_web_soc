@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { CreditGuardProvider } from "@/lib/credit-guard";
 import { JobsProvider } from "@/lib/jobs-context";
 import { PageToolbarProvider } from "@/lib/page-toolbar-context";
 import { AppShell } from "@/components/AppShell";
@@ -31,17 +32,19 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   // column changes as you move around.
   return (
     <JobsProvider>
-      <PageToolbarProvider>
-        <AppShell nav={<TopNav />} sidebar={<SideNav />}>
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
-            <QueueRail />
-          </div>
-          {/* Announces finished work over whatever page is open — the rail is
-              easy to miss, and hidden entirely on a phone. */}
-          <JobToasts />
-        </AppShell>
-      </PageToolbarProvider>
+      <CreditGuardProvider>
+        <PageToolbarProvider>
+          <AppShell nav={<TopNav />} sidebar={<SideNav />}>
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
+              <QueueRail />
+            </div>
+            {/* Announces finished work over whatever page is open — the rail is
+                easy to miss, and hidden entirely on a phone. */}
+            <JobToasts />
+          </AppShell>
+        </PageToolbarProvider>
+      </CreditGuardProvider>
     </JobsProvider>
   );
 }

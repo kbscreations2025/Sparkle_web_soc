@@ -19,6 +19,7 @@ import type { ChatMsg } from "@/components/studio/chat";
 import { cleanImage, refineImage, fetchConversationForTool, resolveModelId, toModelOptions } from "@/lib/api";
 import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
+import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
@@ -103,6 +104,7 @@ export function CleaningWorkspace<TModel extends string>({
 
   // Renamed: `jobs` in this component is the photos on screen, not the queue.
   const { jobs: queueJobs, track } = useJobs();
+  const creditGuard = useCreditGuard();
   /**
    * Which queued job belongs to which photo on screen.
    *
@@ -318,6 +320,18 @@ export function CleaningWorkspace<TModel extends string>({
           // without waiting for the first socket update.
           track(result.job);
           updateJob(item.id, { status: "running" });
+        } else if (creditGuard(result)) {
+          /*
+           * Out of credits, so every photo still to come would be refused for
+           * the same reason. Stopping here keeps that from becoming a request
+           * per photo and a dialog that reopens behind itself — and the ones
+           * already queued keep running, since they were paid for.
+           */
+          const from = items.indexOf(item);
+          for (const remaining of items.slice(from)) {
+            updateJob(remaining.id, { status: "failed", error: "Not enough credits" });
+          }
+          break;
         } else {
           updateJob(item.id, { status: "failed", error: result.message || "Could not queue this photo" });
         }

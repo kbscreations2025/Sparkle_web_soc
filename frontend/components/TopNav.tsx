@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Menu, X } from "lucide-react";
+import { Lock, Menu, X } from "lucide-react";
 import { useNavItems } from "@/lib/nav";
 import { usePageActionsValue, usePageToolbarValue } from "@/lib/page-toolbar-context";
 import { NavBar, NavLogo } from "@/components/nav/NavBar";
@@ -159,11 +159,28 @@ export function TopNav() {
             }
             className={cn(
               "text-xs font-semibold tabular-nums leading-none",
-              credits && credits.available === 0 ? "text-error" : "text-gold-shine"
+              // Red is "you cannot run anything", which is only true once the
+              // frozen credits are gone too. Nothing spendable *because* runs
+              // are holding it all is a wait, not a wall.
+              credits && credits.balance === 0 ? "text-error" : "text-gold-shine"
             )}
           >
             {credits ? credits.available.toLocaleString() : "—"}
           </span>
+
+          {/* Frozen credits, said out loud. They were only ever in the tooltip,
+              so a balance that dropped the moment a run started looked like it
+              had been spent — and then partly came back when the run settled
+              for fewer images than it asked for, which looked like a bug. */}
+          {credits && credits.reserved > 0 && (
+            <span
+              title={`${credits.reserved.toLocaleString()} credits are held for runs in progress. They are charged when a run finishes, and returned if it fails.`}
+              className="flex items-center gap-1 text-[10px] font-medium tabular-nums leading-none text-muted"
+            >
+              <Lock size={9} className="shrink-0 opacity-70" aria-hidden />
+              {credits.reserved.toLocaleString()}
+            </span>
+          )}
 
           <span aria-hidden className="w-px h-5 shrink-0 bg-gold/20" />
 

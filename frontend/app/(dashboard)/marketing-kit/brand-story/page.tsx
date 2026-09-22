@@ -13,6 +13,7 @@ import { brandStory, fetchMarketingKit, updateMarketingKit, type MarketingKit } 
 import { makeThumbnail } from "@/lib/image";
 import { filesToUploadItems, uploadErrorMessage } from "@/lib/uploads";
 import { readSheetFiles, SHEET_FILE_ACCEPT } from "@/lib/sheetFiles";
+import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 import { failureMessage, useSettledJob } from "@/lib/useSettledJob";
 import { useAuth } from "@/lib/auth-context";
@@ -42,6 +43,7 @@ export default function BrandStoryPage() {
 function BrandStoryWorkspace() {
   const { user } = useAuth();
   const { jobs, track } = useJobs();
+  const creditGuard = useCreditGuard();
   const searchParams = useSearchParams();
   const openKitId = searchParams.get("kitId");
 
@@ -162,6 +164,8 @@ function BrandStoryWorkspace() {
     if (res.status === "queued" && res.job) {
       setJobId(res.job.id);
       track(res.job);
+    } else if (creditGuard(res)) {
+      setStatus("idle");
     } else {
       setStatus("failed");
       setError(res.message || "Could not queue this narrative");

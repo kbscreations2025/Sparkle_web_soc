@@ -1,10 +1,9 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, Coins, Minus, Plus, RefreshCw } from "lucide-react";
 import {
   distributeCredits,
-  fetchCreditLedger,
   fetchCreditTenant,
   fetchCreditTenants,
   fetchMyOrgCredits,
@@ -14,7 +13,6 @@ import {
   revokeCredits,
   updateOrgMember,
   type updateMember,
-  type CreditEntry,
   type CreditMember,
   type CreditTenantSummary,
 } from "@/lib/api";
@@ -23,13 +21,14 @@ import { can } from "@/lib/permissions";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 import { MemberRows } from "@/components/admin/MemberRows";
 import { CreditAmountDialog } from "@/components/admin/CreditAmountDialog";
+import { CreditLogs } from "@/components/admin/CreditLogs";
 import { cn } from "@/lib/utils";
 
 
 /**
  * Credits: who holds them, and the console for issuing them.
  *
- * Platform staff only — a customer cannot reach this however privileged they
+ * Platform staff only â€” a customer cannot reach this however privileged they
  * are inside their own organization, because issuing credit to yourself is
  * not an organizational action. The server enforces the same rule; this
  * check only decides what to render.
@@ -45,7 +44,7 @@ export default function CreditsPage() {
    * A dispatcher, and deliberately hook-free beyond `useAuth`.
    *
    * The two views have different state, and choosing between them with an
-   * early return *above* their hooks is what React's rules forbid — the
+   * early return *above* their hooks is what React's rules forbid â€” the
    * hook count would change the moment `user` arrived and the branch
    * flipped. Separate components keep each one's hooks unconditional.
    */
@@ -65,7 +64,7 @@ export default function CreditsPage() {
 
 /**
  * Across every organization: what each holds, and the console for issuing
- * more. The central super admin only — issuing credit from nothing is the
+ * more. The central super admin only â€” issuing credit from nothing is the
  * one act that stays with whoever carries the cost.
  */
 function StaffCredits() {
@@ -113,7 +112,7 @@ function StaffCredits() {
         )}
 
         {tenants === null ? (
-          <p className="py-10 text-center text-sm text-faint">Loading…</p>
+          <p className="py-10 text-center text-sm text-faint">Loadingâ€¦</p>
         ) : tenants.length === 0 ? (
           <p className="py-10 text-center text-sm text-faint">No organizations yet.</p>
         ) : (
@@ -159,7 +158,7 @@ function StaffCredits() {
         )}
 
         <p className="text-[11px] leading-relaxed text-faint">
-          A run is charged to the person who made it, and someone with no credits cannot generate — nothing falls back
+          A run is charged to the person who made it, and someone with no credits cannot generate â€” nothing falls back
           to the organization pool yet. Grant to a member directly to unblock them.
         </p>
       </div>
@@ -173,7 +172,7 @@ function StaffCredits() {
  * The one difference from the staff view is what the buttons do: an admin
  * *shares out* what the organization already holds, they do not create it.
  * So the pool has no grant control, and every hand-out is checked against
- * what is in the pool — an organization that has run out has to ask
+ * what is in the pool â€” an organization that has run out has to ask
  * platform staff for more.
  */
 function MyOrgCredits() {
@@ -197,7 +196,7 @@ function MyOrgCredits() {
    */
   const load = useCallback(async () => {
     // Independent requests, so they go together rather than one after the
-    // other — this is time-to-first-paint on the page's only content.
+    // other â€” this is time-to-first-paint on the page's only content.
     const [res, people] = await Promise.all([fetchMyOrgCredits(), fetchOrgMembers()]);
 
     if (res.status !== "success") {
@@ -217,7 +216,7 @@ function MyOrgCredits() {
    *
    * The refusals are the interesting part: the server rejects an edit to
    * the admin's own row, and any grant they do not hold themselves. The UI
-   * disables both, so arriving here means something was out of date — the
+   * disables both, so arriving here means something was out of date â€” the
    * reason is surfaced and the roster re-read, rather than leaving a
    * checkbox showing a state the server never accepted.
    */
@@ -249,7 +248,7 @@ function MyOrgCredits() {
   if (!data || data.status !== "success") {
     return (
       <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-faint">{error || "Loading…"}</p>
+        <p className="text-sm text-faint">{error || "Loadingâ€¦"}</p>
       </div>
     );
   }
@@ -261,7 +260,7 @@ function MyOrgCredits() {
       <div className="mx-auto max-w-4xl space-y-4">
         <header className="flex items-center gap-2">
           <Coins size={18} className="text-gold/70" />
-          <h1 className="text-sm font-semibold text-cream">{data.tenant.name} · credits</h1>
+          <h1 className="text-sm font-semibold text-cream">{data.tenant.name} Â· credits</h1>
         </header>
 
         {error && (
@@ -272,7 +271,7 @@ function MyOrgCredits() {
             the page rather than sitting in the table with the people. */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-surface-raised p-4">
           <div>
-            {/* Named, not "Organization pool" — an admin who belongs to more
+            {/* Named, not "Organization pool" â€” an admin who belongs to more
                 than one organization needs to see which one's budget this
                 is, and the generic label reads the same in all of them. */}
             <p className="text-xs font-medium text-cream">{data.tenant.name} pool</p>
@@ -292,16 +291,16 @@ function MyOrgCredits() {
         {shortfall && (
           <p className="rounded-lg border border-gold/20 bg-gold/[0.06] px-3 py-2 text-[11px] leading-relaxed text-gold/90">
             The pool is empty, so there is nothing to share out. Credits are issued to an organization by platform
-            staff — ask them to top the pool up.
+            staff â€” ask them to top the pool up.
           </p>
         )}
-        {/* The console's own member table — the component itself, not a
+        {/* The console's own member table â€” the component itself, not a
             copy of its markup. Reusing MemberRows is what makes the
             permissions editor available here at no extra cost, and means
             the two rosters can never drift apart. */}
         <div className="space-y-1.5">
           <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
-            Members · {data.members.length}
+            Members Â· {data.members.length}
           </p>
 
           {roster ? (
@@ -309,7 +308,7 @@ function MyOrgCredits() {
               members={roster.members}
               groups={roster.groups}
               /* Only what this admin holds; the rest render locked. The
-                 server refuses them too — this just avoids a dead end. */
+                 server refuses them too â€” this just avoids a dead end. */
               assignableGrants={roster.assignableGrants}
               /* Their own row is shown but not editable. */
               selfId={roster.selfId}
@@ -350,7 +349,7 @@ function MyOrgCredits() {
       </div>
 
       {/* The amount is typed here, not decided by the button that opened
-          this — and the dialog prints the resulting balance, because
+          this â€” and the dialog prints the resulting balance, because
           "giving 5,000" does not say whether they end on 5,000 or 5,000
           more. Capped at the pool when giving, at their own unspent
           balance when taking back. */}
@@ -371,7 +370,8 @@ function MyOrgCredits() {
 /** One organization: the pool, every member, and the statement. */
 function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => void }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchCreditTenant>> | null>(null);
-  const [entries, setEntries] = useState<CreditEntry[]>([]);
+  // Bumped after a grant or revoke, so the logs re-read along with the balances.
+  const [logsToken, setLogsToken] = useState(0);
   const [error, setError] = useState("");
   const [pending, setPending] = useState<{
     userId: string | null;
@@ -382,10 +382,10 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [detail, ledger] = await Promise.all([fetchCreditTenant(tenantId), fetchCreditLedger(tenantId, 60)]);
+    const detail = await fetchCreditTenant(tenantId);
     if (detail.status === "success") setData(detail);
     else setError(detail.message || "Could not load that organization.");
-    if (ledger.status === "success") setEntries(ledger.entries);
+    setLogsToken((value) => value + 1);
   }, [tenantId]);
 
   useEffect(() => {
@@ -412,7 +412,7 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
   if (!data || data.status !== "success") {
     return (
       <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-faint">{error || "Loading…"}</p>
+        <p className="text-sm text-faint">{error || "Loadingâ€¦"}</p>
       </div>
     );
   }
@@ -456,7 +456,7 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
           )}
         </div>
 
-        <Ledger entries={entries} />
+        <CreditLogs tenantId={tenantId} reloadToken={logsToken} />
       </div>
 
       <ConfirmDialog
@@ -575,7 +575,7 @@ function MemberRow({
         <p className="truncate text-xs font-medium text-cream">{member.name}</p>
         <p className="truncate text-[11px] text-faint">
           {member.email}
-          {member.status !== "active" && <span className="ml-1.5 text-warning">· {member.status}</span>}
+          {member.status !== "active" && <span className="ml-1.5 text-warning">Â· {member.status}</span>}
         </p>
       </div>
       <div className="flex items-center gap-4">
@@ -612,55 +612,6 @@ function Figure({ label, value, muted = false }: { label: string; value: number;
       <p className={cn("text-xs font-medium tabular-nums", muted ? "text-muted" : "text-cream")}>
         {value.toLocaleString()}
       </p>
-    </div>
-  );
-}
-
-/**
- * The statement.
- *
- * Holds are shown alongside charges rather than filtered out: "frozen 200"
- * followed by "charged 50" is the story of a four-image run that delivered
- * one, and hiding the first line makes the second look like a mistake.
- */
-function Ledger({ entries }: { entries: CreditEntry[] }) {
-  if (entries.length === 0) return null;
-
-  const sign = (entry: CreditEntry) =>
-    entry.kind === "hold"
-      ? `−${entry.held.toLocaleString()} frozen`
-      : entry.amount === 0
-        ? `+${entry.held.toLocaleString()} released`
-        : `${entry.amount > 0 ? "+" : ""}${entry.amount.toLocaleString()}`;
-
-  return (
-    <div className="space-y-1.5">
-      <p className="text-[10px] font-medium uppercase tracking-widest text-faint">Recent activity</p>
-      <div className="overflow-hidden rounded-xl border border-white/[0.08]">
-        <table className="w-full text-left text-[11px]">
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.id} className="border-t border-white/[0.04] first:border-t-0">
-                <td className="whitespace-nowrap px-3 py-2 text-faint">
-                  {new Date(entry.createdAt).toLocaleString()}
-                </td>
-                <td className="px-3 py-2 text-muted">{entry.holder || "—"}</td>
-                <td className="px-3 py-2">
-                  <span className="text-cream">{entry.kind}</span>
-                  {entry.tool && <span className="ml-1.5 text-faint">{entry.tool}</span>}
-                  {/* The quote, which is what makes a charge explicable */}
-                  {entry.unitPrice !== null && entry.units !== null && (
-                    <span className="ml-1.5 text-faint">
-                      {entry.units} × {entry.unitPrice}
-                    </span>
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-cream">{sign(entry)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

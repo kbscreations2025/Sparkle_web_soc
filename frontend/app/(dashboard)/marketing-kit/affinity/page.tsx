@@ -13,6 +13,7 @@ import { newPiece, type AffinityPiece } from "@/lib/affinity";
 import { exportAffinityPdf, exportAffinityPptx } from "@/lib/exportAffinity";
 import { makeThumbnail } from "@/lib/image";
 import { usePageActions } from "@/lib/page-toolbar-context";
+import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 import { failureMessage, useSettledJob } from "@/lib/useSettledJob";
 import { useAuth } from "@/lib/auth-context";
@@ -41,6 +42,7 @@ export default function AffinityPage() {
 function AffinityWorkspace() {
   const { user } = useAuth();
   const { jobs, track } = useJobs();
+  const creditGuard = useCreditGuard();
   const searchParams = useSearchParams();
   const openKitId = searchParams.get("kitId");
 
@@ -172,6 +174,8 @@ function AffinityWorkspace() {
     if (res.status === "queued" && res.job) {
       setJobId(res.job.id);
       track(res.job);
+    } else if (creditGuard(res)) {
+      setStatus("idle");
     } else {
       setStatus("failed");
       setError(res.message || "Could not queue this deck");
