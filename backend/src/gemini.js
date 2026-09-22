@@ -37,6 +37,23 @@ const GEMINI_VIDEO_MODEL_LABELS = {
   "veo-3.1-lite-generate-preview": "Veo 3.1 Lite",
 };
 
+/**
+ * An ASSET reference for a video run: "this object appears in the clip",
+ * as opposed to a STYLE reference, which would only lend its look.
+ *
+ * Deliberately NOT the SDK's `VideoGenerationReferenceType.ASSET`. That enum
+ * is `"ASSET"`, the converter passes the string through verbatim, and the
+ * Gemini Developer API rejects it — the wire value is lowercase `"asset"`,
+ * as in Google's own samples. See REFERENCE_MODE in prompts/video.js for the
+ * rest of what this mode will and won't accept.
+ */
+function assetVideoReference(image, referenceType) {
+  return {
+    image: { imageBytes: image.base64, mimeType: image.mimeType },
+    referenceType,
+  };
+}
+
 function resolveVideoModel(requestedModel) {
   return GEMINI_VIDEO_MODELS.includes(requestedModel) ? requestedModel : DEFAULT_VIDEO_MODEL;
 }
@@ -416,16 +433,34 @@ async function generateVideo({ apiKey, modelId, prompt, image, config, onPoll })
 
   const mimeType = video.mimeType || "video/mp4";
 
-  // The Gemini Developer API hands back the bytes directly.
+  // Sometimes the bytes come back inline.
   if (video.videoBytes) return { base64: video.videoBytes, mimeType, text: null };
 
-  // Vertex AI hands back a GCS reference instead, which has to be fetched.
-  // Downloaded to memory rather than to a temp file (as the Next route did):
-  // the bytes are about to be re-encoded and uploaded anyway, and a worker
-  // that crashes mid-job would otherwise leave the file behind.
+  /*
+   * More often they don't: the response carries a Files API URI that has to
+   * be fetched separately, with the same key that made the video.
+   *
+   * Fetched by hand rather than through `ai.files.download()`. That helper
+   * returns `Promise<void>` and writes to a `downloadPath` on disk — it
+   * hands back no bytes at all. Reading its return value produced an empty
+   * buffer, which uploaded cleanly as a 0-byte mp4: a job that reported
+   * success, a poster frame that rendered, and a player with nothing to
+   * play. Hence the explicit emptiness check below — a video that arrives
+   * with no bytes must fail the job rather than be stored.
+   */
   if (video.uri) {
-    const downloaded = await ai.files.download({ file: video });
-    const buffer = Buffer.isBuffer(downloaded) ? downloaded : Buffer.from(await new Response(downloaded).arrayBuffer());
+    const url = video.uri.includes("alt=media")
+      ? video.uri
+      : `${video.uri}${video.uri.includes("?") ? "&" : "?"}alt=media`;
+
+    const response = await withRetry(() => fetch(url, { headers: { "x-goog-api-key": apiKey } }));
+    if (!response.ok) {
+      throw new Error(`Could not download the generated video (${response.status} ${response.statusText})`);
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length) throw new Error("The generated video downloaded as an empty file");
+
     return { base64: buffer.toString("base64"), mimeType, text: null };
   }
 
@@ -443,6 +478,7 @@ module.exports = {
   qualitiesFor,
   resolveModel,
   resolveVideoModel,
+  assetVideoReference,
   labelFor,
   videoLabelFor,
   classifyError,

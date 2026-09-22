@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { LogOut, Loader2, Sun, Moon } from "lucide-react";
+import { LogOut, Loader2, ScrollText, Sun, Moon } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
+import { can } from "@/lib/permissions";
 import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 
@@ -78,6 +80,22 @@ export function AccountMenu({ avatarClassName }: { avatarClassName?: string } = 
               <p className="text-cream text-xs font-medium truncate leading-tight">{user?.name ?? "User"}</p>
               <p className="text-faint text-[10px] truncate leading-tight">{user?.email ?? ""}</p>
             </div>
+
+            {/* Sits with the account rather than in the tool rail: it is a
+                record of what everyone here has done, not a tool anyone uses
+                to make something. Hidden entirely without the grant, so a
+                normal member never sees a link they cannot open. */}
+            {can(user, "org.audit.read") && (
+              <Link
+                href="/audit-log"
+                role="menuitem"
+                onClick={closeNow}
+                className="flex items-center gap-2 border-t border-white/5 px-2.5 py-2 text-[11px] text-muted transition-colors hover:bg-white/[0.07] hover:text-cream"
+              >
+                <ScrollText size={13} className="shrink-0" />
+                Audit Log
+              </Link>
+            )}
 
             {/* Status and both actions share one row — icons carry the labels. */}
             <div className="flex items-center gap-0.5 px-1.5 py-1 border-t border-white/5">

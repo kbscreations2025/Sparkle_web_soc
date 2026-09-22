@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Eraser, Hand, Sparkles, Sun, SwatchBook, Wand2, type LucideIcon } from "lucide-react";
+import { Eraser, Sparkles, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
@@ -20,8 +20,9 @@ type CleaningMode = {
 };
 
 /**
- * The six things this tool can do. Only the ones with an `href` have a
- * workspace built; the rest render as plain cards until they do.
+ * What this tool can do. Every mode here has a workspace behind it — a card
+ * that leads nowhere reads as a broken feature rather than a promised one,
+ * so a mode earns its card by being built.
  */
 const MODES: CleaningMode[] = [
   {
@@ -37,30 +38,6 @@ const MODES: CleaningMode[] = [
     description: "Clear specks, fibres and hairline marks from the surface",
     icon: Eraser,
     href: "/cleaning/dust-scratches",
-  },
-  {
-    id: "reflections",
-    label: "Reflections & Glare",
-    description: "Tame hotspots and studio reflections on metal and stones",
-    icon: Sun,
-  },
-  {
-    id: "hands",
-    label: "Hands & Props",
-    description: "Remove fingers, stands and holders from the shot",
-    icon: Hand,
-  },
-  {
-    id: "colour",
-    label: "Colour Correct",
-    description: "True up metal tone and stone colour to match the real piece",
-    icon: SwatchBook,
-  },
-  {
-    id: "enhance",
-    label: "Sharpen & Enhance",
-    description: "Lift detail in the setting, prongs and engraving",
-    icon: Wand2,
   },
 ];
 

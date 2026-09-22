@@ -99,6 +99,13 @@ const auditLogSchema = new mongoose.Schema(
 
 // The console's default view: this organization's history, newest first.
 auditLogSchema.index({ tenantId: 1, createdAt: -1 });
+// The org audit page's filters. Each is prefixed with tenantId because that
+// clause is never absent there — the page is always scoped to one
+// organization — and suffixed with createdAt so the sort is served by the
+// index too, rather than being an in-memory sort of the matched set.
+auditLogSchema.index({ tenantId: 1, action: 1, createdAt: -1 });
+auditLogSchema.index({ tenantId: 1, actorUserId: 1, createdAt: -1 });
+auditLogSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 // "What has this person done" — independent of which org they did it in.
 auditLogSchema.index({ actorUserId: 1, createdAt: -1 });
 // "Show me every login failure" / "every forced logout" across the app.

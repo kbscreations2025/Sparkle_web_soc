@@ -29,7 +29,7 @@ import {
   type HistoryItem,
   type MarketingKitSummary,
 } from "@/lib/api";
-import { downloadImage } from "@/lib/image";
+import { downloadImage, downloadName } from "@/lib/image";
 import { conversationHref, toolBadgeStyle, TOOL_LABELS, TOOLS, workspacePathFor } from "@/lib/nav";
 import { describeKit, kitHref, KIT_LABEL } from "@/lib/marketingKits";
 import { usePageToolbar } from "@/lib/page-toolbar-context";
@@ -39,6 +39,7 @@ import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 import { HistoryLightbox } from "@/components/studio/HistoryLightbox";
 import { AssetThumb } from "@/components/studio/AssetThumb";
+import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 
 const HISTORY_PERMISSION = "result.read.own";
 
@@ -159,6 +160,10 @@ export default function HistoryPage() {
   const [canReadTeam, setCanReadTeam] = useState(false);
   const [selected, setSelected] = useState<HistoryItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  /** The result the user has asked to delete, waiting on the confirmation. */
+  const [pendingDelete, setPendingDelete] = useState<HistoryItem | null>(null);
+  const [pendingKitDelete, setPendingKitDelete] = useState<MarketingKitSummary | null>(null);
 
   /**
    * Saved Marketing Kits, loaded the first time that tab is opened rather
@@ -337,13 +342,43 @@ export default function HistoryPage() {
   /** What the badge counts — whatever the tab on screen is showing. */
   const badgeCount = view === "kits" ? (visibleKits?.length ?? 0) : totalImages;
 
+  /*
+   * The `finally` is the point. Without it a request that rejects — the
+   * network dropping, a reply that isn't JSON — left `deletingId` set, and
+   * a tile whose Delete button is permanently disabled and spinning is a
+   * button that can never be pressed again. A failure has to hand the
+   * button back.
+   */
+  /*
+   * The tile's Delete button only *asks*. Nothing is removed until the
+   * dialog is confirmed — a grid of near-identical thumbnails, with the
+   * delete control a few pixels from the one that opens the result, is
+   * exactly where a misclick costs something that cannot be recovered.
+   */
+  const requestDelete = useCallback((item: HistoryItem) => {
+    setDeleteError("");
+    setPendingDelete(item);
+  }, []);
+
   const handleDelete = useCallback(async (item: HistoryItem) => {
     setDeletingId(item.id);
-    const res = await deleteHistoryItem(item.id);
-    setDeletingId(null);
-    if (res.status === "success") {
-      setItems((current) => current.filter((row) => row.id !== item.id));
-      setSelected((current) => (current?.id === item.id ? null : current));
+    setDeleteError("");
+    try {
+      const res = await deleteHistoryItem(item.id);
+      if (res.status === "success") {
+        setItems((current) => current.filter((row) => row.id !== item.id));
+        setSelected((current) => (current?.id === item.id ? null : current));
+        return;
+      }
+      setDeleteError(res.message || "Could not delete that result. Please try again.");
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete that result. Please try again.");
+    } finally {
+      setDeletingId(null);
+      // Closed either way: on success there is nothing left to confirm, and
+      // on failure the reason is in the banner behind it, which the dialog
+      // would otherwise be covering.
+      setPendingDelete(null);
     }
   }, []);
 
@@ -406,9 +441,27 @@ export default function HistoryPage() {
     [syncUrl]
   );
 
-  const removeKit = useCallback(async (id: string) => {
-    const res = await deleteMarketingKit(id);
-    if (res.status === "success") setKits((current) => (current ?? []).filter((kit) => kit.id !== id));
+  /*
+   * Kits are deleted from the same grid, by the same gesture, and are just
+   * as unrecoverable — so they ask first too. Same failure handling as a
+   * result, for the same reason: silence here read as a dead button.
+   */
+  const removeKit = useCallback(async (kit: MarketingKitSummary) => {
+    setDeletingId(kit.id);
+    setDeleteError("");
+    try {
+      const res = await deleteMarketingKit(kit.id);
+      if (res.status === "success") {
+        setKits((current) => (current ?? []).filter((row) => row.id !== kit.id));
+        return;
+      }
+      setDeleteError(res.message || "Could not delete that kit. Please try again.");
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete that kit. Please try again.");
+    } finally {
+      setDeletingId(null);
+      setPendingKitDelete(null);
+    }
   }, []);
 
   const hasAccess = can(user, HISTORY_PERMISSION);
@@ -491,9 +544,17 @@ export default function HistoryPage() {
         {filterControls}
       </div>
 
+      {/* A delete that fails has to say so. Silence here was the whole
+          problem: the tile stayed, and nothing explained why. */}
+      {deleteError && (
+        <p className="shrink-0 border-b border-error/20 bg-error/[0.08] px-4 py-2 text-xs text-error sm:px-5">
+          {deleteError}
+        </p>
+      )}
+
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 lg:p-4">
         {view === "kits" ? (
-          <KitsGrid kits={visibleKits} loading={kitsLoading} columns={columns} onDelete={removeKit} />
+          <KitsGrid kits={visibleKits} loading={kitsLoading} columns={columns} onDelete={setPendingKitDelete} />
         ) : loading ? (
           <SkeletonGrid rows={3} />
         ) : visibleItems.length === 0 ? (
@@ -520,7 +581,7 @@ export default function HistoryPage() {
                       deleting={deletingId === item.id}
                       onOpen={openItem}
                       onContinue={handleContinue}
-                      onDelete={handleDelete}
+                      onDelete={requestDelete}
                     />
                   ))}
                 </div>
@@ -543,8 +604,48 @@ export default function HistoryPage() {
         canContinue={Boolean(selected?.isOwn && workspacePathFor(selected.tool, selected.model))}
         deleting={Boolean(selected && deletingId === selected.id)}
         onClose={() => setSelected(null)}
-        onDelete={handleDelete}
+        onDelete={requestDelete}
         onContinue={() => selected && handleContinue(selected)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title="Delete this result?"
+        message={
+          pendingDelete ? (
+            <>
+              <span className="text-cream">
+                {TOOL_LABELS[pendingDelete.tool] || pendingDelete.tool}
+                {pendingDelete.createdAt ? ` · ${new Date(pendingDelete.createdAt).toLocaleString()}` : ""}
+              </span>
+              <br />
+              This permanently removes the {pendingDelete.outputs.length === 1 ? "file" : "files"} it produced. It
+              cannot be undone.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete"
+        busy={Boolean(pendingDelete && deletingId === pendingDelete.id)}
+        onConfirm={() => pendingDelete && handleDelete(pendingDelete)}
+        onCancel={() => setPendingDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pendingKitDelete)}
+        title="Delete this kit?"
+        message={
+          pendingKitDelete ? (
+            <>
+              <span className="text-cream">{pendingKitDelete.title || "Untitled kit"}</span>
+              <br />
+              This permanently removes the kit and everything in it. It cannot be undone.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete"
+        busy={Boolean(pendingKitDelete && deletingId === pendingKitDelete.id)}
+        onConfirm={() => pendingKitDelete && removeKit(pendingKitDelete)}
+        onCancel={() => setPendingKitDelete(null)}
       />
     </div>
   );
@@ -654,7 +755,7 @@ function KitsGrid({
   kits: MarketingKitSummary[] | null;
   loading: boolean;
   columns: number;
-  onDelete: (id: string) => void;
+  onDelete: (kit: MarketingKitSummary) => void;
 }) {
   if (loading || kits === null) return <SkeletonGrid rows={2} />;
 
@@ -675,7 +776,7 @@ function KitsGrid({
   );
 }
 
-function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (id: string) => void }) {
+function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: MarketingKitSummary) => void }) {
   return (
     <div
       title={kit.title || "Untitled kit"}
@@ -715,7 +816,7 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (id: s
           <div className={cn(TILE_ACTION_GROUP, "pointer-events-auto")}>
             <button
               type="button"
-              onClick={() => onDelete(kit.id)}
+              onClick={() => onDelete(kit)}
               title="Delete"
               aria-label={`Delete ${kit.title || "this kit"}`}
               className={cn(TILE_ACTION_BUTTON, "hover:bg-error/75")}
@@ -1193,8 +1294,10 @@ const HistoryTile = memo(
                 onClick={(event) => {
                   // The tile is clickable; downloading must not also open it.
                   event.stopPropagation();
-                  // The full-size original, never the grid thumbnail.
-                  downloadImage(cover.url, `${item.tool}-${item.id}.jpg`);
+                  // The full-size original, never the grid thumbnail — and
+                  // saved under its real extension, so a clip arrives as a
+                  // playable .mp4 rather than an .jpg nothing will open.
+                  downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type));
                 }}
                 className={TILE_ACTION_BUTTON}
               >

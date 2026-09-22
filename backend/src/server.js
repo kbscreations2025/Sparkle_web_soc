@@ -6,6 +6,7 @@ const config = require("./config");
 const { connectDb } = require("./db");
 const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
+const adminPricingRoutes = require("./routes/adminPricing");
 const cleaningRoutes = require("./routes/cleaning");
 const chatToEditRoutes = require("./routes/chatToEdit");
 const textToImageRoutes = require("./routes/textToImage");
@@ -17,6 +18,7 @@ const marketingKitRoutes = require("./routes/marketingKit");
 const lexiconRoutes = require("./routes/lexicon");
 const historyRoutes = require("./routes/history");
 const jobRoutes = require("./routes/jobs");
+const auditLogRoutes = require("./routes/auditLog");
 const { initSocket } = require("./socket");
 const { startQueueEventsBridge, closeQueue } = require("./queue");
 const { closeRedisConnections, isRedisReady } = require("./redis");
@@ -38,6 +40,9 @@ app.use(cookieParser());
 // telling the truth about the wrong thing.
 app.get("/health", (req, res) => res.json({ status: "ok", redis: isRedisReady() ? "ready" : "unavailable" }));
 app.use("/api/auth", authRoutes);
+// Mounted ahead of adminRoutes: both live under /api/admin, and the pricing
+// router owns the /pricing subtree entirely.
+app.use("/api/admin/pricing", adminPricingRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/cleaning", cleaningRoutes);
 app.use("/api/chat-to-edit", chatToEditRoutes);
@@ -53,6 +58,7 @@ app.use("/api/marketing-kit", marketingKitRoutes);
 app.use("/api/lexicon", lexiconRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/jobs", jobRoutes);
+app.use("/api/audit-log", auditLogRoutes);
 
 /**
  * Last stop for anything a route didn't handle itself.

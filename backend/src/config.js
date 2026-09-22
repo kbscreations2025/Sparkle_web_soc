@@ -24,6 +24,20 @@ module.exports = {
   mongoDbName: process.env.MONGODB_DB_NAME || "sparkle",
 
   /**
+   * Rupees to the dollar, for showing provider rates in both currencies on
+   * the pricing console.
+   *
+   * One configured number rather than a second stored column per rule: every
+   * provider publishes in USD, so a rupee figure is a presentation of the
+   * dollar one. Storing both would let them drift the moment the rate moved,
+   * and re-stating 19 rules by hand is exactly the chore this avoids.
+   *
+   * Indicative only — it is not a live feed, and nothing bills against it.
+   * Update it when it has moved enough to matter.
+   */
+  usdToInr: Number(process.env.USD_TO_INR) || 96,
+
+  /**
    * Redis backs the job queue (see queue.js). `rediss://` turns on TLS, which
    * every managed provider (Render, Upstash) requires from outside its own
    * network — ioredis reads that from the scheme, so nothing else to set.

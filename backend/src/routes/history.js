@@ -292,6 +292,28 @@ router.get("/conversations/:id", async (req, res) => {
  * are already gone but claims otherwise.
  */
 router.delete("/:id", async (req, res) => {
+  try {
+    return await deleteGeneration(req, res);
+  } catch (err) {
+    /*
+     * Express 4 does not catch a rejection from an async handler: it never
+     * reaches the error middleware, so nothing answers the request and the
+     * client waits forever. On the Delete button that reads as a spinner
+     * that never stops and a tile that never goes away — a hang, not an
+     * error. A failure has to come back as a reply.
+     *
+     * A malformed id is the ordinary case (Mongoose throws CastError rather
+     * than returning null), and it means the same thing as no match.
+     */
+    if (err.name === "CastError") {
+      return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+    }
+    console.error(`history delete: ${req.params.id} failed:`, err);
+    return res.status(500).json({ status: "error", message: "Could not delete that result", code: "delete_failed" });
+  }
+});
+
+async function deleteGeneration(req, res) {
   const generation = await Generation.findOne({
     _id: req.params.id,
     tenantId: req.dbUser.tenantId,
@@ -302,7 +324,10 @@ router.delete("/:id", async (req, res) => {
     return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
   }
 
-  const assetIds = [...(generation.request.inputAssetIds || []), ...(generation.response.outputAssetIds || [])];
+  // Optional all the way down: a row that never got as far as recording its
+  // assets is exactly the kind of row a user wants to clear out, so it must
+  // not be the one that can't be deleted.
+  const assetIds = [...(generation.request?.inputAssetIds || []), ...(generation.response?.outputAssetIds || [])];
   const assets = await Asset.find({ _id: { $in: assetIds }, deletedAt: null });
 
   await Promise.all(
@@ -326,7 +351,7 @@ router.delete("/:id", async (req, res) => {
   generation.deletedAt = now;
   await generation.save();
 
-  res.json({ status: "success" });
-});
+  return res.json({ status: "success" });
+}
 
 module.exports = router;

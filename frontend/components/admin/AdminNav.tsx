@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, KeyRound, type LucideIcon } from "lucide-react";
+import { Building2, Coins, KeyRound, type LucideIcon } from "lucide-react";
 import { NavBar, NavLogo, NavDivider } from "@/components/nav/NavBar";
 import { AccountMenu } from "@/components/nav/AccountMenu";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const CONSOLE_NAV = [
   { href: "/admin", label: "Organizations", icon: Building2 },
   { href: "/admin/api-keys", label: "API Keys", icon: KeyRound },
+  { href: "/admin/pricing", label: "Pricing", icon: Coins },
 ];
 
 export function AdminNav() {

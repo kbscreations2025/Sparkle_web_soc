@@ -48,7 +48,25 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<A
       ...options.headers,
     },
   });
-  return res.json();
+
+  /*
+   * A reply that isn't JSON is still an answer, and callers all expect the
+   * `{ status }` shape. Parsing straight into `res.json()` turned a proxy
+   * error page or an empty body into a thrown exception in the middle of
+   * whatever the caller was doing — which, for anything without a
+   * try/catch, meant no error shown and a spinner left running.
+   */
+  try {
+    return await res.json();
+  } catch {
+    return {
+      status: "error",
+      message: res.ok
+        ? "The server sent a reply this app could not read."
+        : `The server returned an error (${res.status}).`,
+      code: "bad_response",
+    } as unknown as ApiResult<T>;
+  }
 }
 
 /**
@@ -269,6 +287,163 @@ export function deleteOrganization(id: string) {
 
 export function deleteMember(memberId: string) {
   return apiRequest(`/api/admin/members/${memberId}`, { method: "DELETE" });
+}
+
+// ── audit log (org admin — needs org.audit.read) ────────────────────────────
+
+export type AuditEntry = {
+  id: string;
+  action: string;
+  status: "success" | "failure";
+  actor: { userId: string | null; name: string | null; email: string | null };
+  targetType: string | null;
+  targetId: string | null;
+  message: string | null;
+  metadata: Record<string, unknown>;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+};
+
+/** The filter dropdowns' contents, scoped to this organization. */
+export type AuditFacets = {
+  /** Only the actions this organization has actually produced. */
+  actions: string[];
+  targetTypes: string[];
+  actors: { id: string; name: string; email: string }[];
+};
+
+export type AuditQuery = {
+  action?: string[];
+  status?: "success" | "failure";
+  actorUserId?: string;
+  targetType?: string;
+  /** Matches the message, actor name or actor email. */
+  q?: string;
+  from?: string;
+  to?: string;
+  /** Cursor: the `nextCursor` from the previous page. */
+  before?: string;
+  limit?: number;
+};
+
+/**
+ * One page of the caller's own organization's audit trail, newest first.
+ *
+ * There is deliberately no tenant parameter — the backend takes that from the
+ * session, so this can only ever read the caller's own organization.
+ */
+export function listAuditLog(query: AuditQuery = {}) {
+  const params = new URLSearchParams();
+  // Repeated key rather than a joined string: the backend reads ?action=a&action=b
+  // as an array, which is what the multi-select sends.
+  query.action?.forEach((value) => params.append("action", value));
+  if (query.status) params.set("status", query.status);
+  if (query.actorUserId) params.set("actorUserId", query.actorUserId);
+  if (query.targetType) params.set("targetType", query.targetType);
+  if (query.q) params.set("q", query.q);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  if (query.before) params.set("before", query.before);
+  if (query.limit) params.set("limit", String(query.limit));
+
+  const qs = params.toString();
+  return apiRequest<{ entries?: AuditEntry[]; hasMore?: boolean; nextCursor?: string | null }>(
+    `/api/audit-log${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function getAuditFacets() {
+  return apiRequest<AuditFacets>("/api/audit-log/facets");
+}
+
+// ── credit pricing (super admin only) ───────────────────────────────────────
+
+export type PricingUnit = "per_image" | "per_request" | "per_second";
+
+/**
+ * One row of the price table: what a provider charges us for a unit of work,
+ * and what we charge the customer for it. See
+ * backend/src/models/creditPricingRule.js for why both live on one row.
+ */
+export type PricingRule = {
+  id: string;
+  label: string;
+  /** Null = applies to every organization. */
+  tenantId: string | null;
+  tool: string | null;
+  modelId: string | null;
+  quality: string | null;
+  unit: PricingUnit;
+  /** The provider's own published rate. Null when none has been recorded. */
+  providerRate: number | null;
+  providerCurrency: string;
+  creditsPerUnit: number;
+  notes: string | null;
+  active: boolean;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** The dropdown contents for the pricing form — the backend owns these lists. */
+export type PricingCatalogue = {
+  units: PricingUnit[];
+  currencies: string[];
+  /** Rupees to the dollar, for showing a provider rate in both. Indicative. */
+  usdToInr: number;
+  tools: string[];
+  models: { group: string; models: { id: string; label: string; qualities: string[] }[] }[];
+  organizations: { id: string; name: string; slug: string }[];
+};
+
+export type PricingRuleInput = {
+  label: string;
+  tenantId?: string | null;
+  tool?: string | null;
+  modelId?: string | null;
+  quality?: string | null;
+  unit?: PricingUnit;
+  providerRate?: number | string | null;
+  providerCurrency?: string;
+  creditsPerUnit: number | string;
+  notes?: string | null;
+};
+
+export function getPricingCatalogue() {
+  return apiRequest<PricingCatalogue>("/api/admin/pricing/catalogue");
+}
+
+export function listPricingRules(includeRetired = false) {
+  return apiRequest<{ rules?: PricingRule[] }>(
+    `/api/admin/pricing${includeRetired ? "?includeRetired=true" : ""}`
+  );
+}
+
+export function createPricingRule(body: PricingRuleInput) {
+  return apiRequest<{ rule?: PricingRule }>("/api/admin/pricing", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updatePricingRule(id: string, patch: Partial<PricingRuleInput>) {
+  return apiRequest<{ rule?: PricingRule }>(`/api/admin/pricing/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+/**
+ * Retires a rule by default, which keeps it on record. `purge` removes the
+ * row outright — only for one created by mistake that never priced anything.
+ */
+export function deletePricingRule(id: string, purge = false) {
+  return apiRequest<{ rule?: PricingRule }>(
+    `/api/admin/pricing/${id}${purge ? "?purge=true" : ""}`,
+    { method: "DELETE" }
+  );
 }
 
 // ── image cleaning ──────────────────────────────────────────────────────────
@@ -821,7 +996,7 @@ export const VIDEO_RESOLUTIONS = [
  * the first one rather than failing the run.
  */
 export const VIDEO_CAMERA_STYLES = [
-  { id: "orbit", label: "Slow 360° Orbit", description: "An elegant, slow 360° rotation — every angle revealed, the whole piece always in view." },
+  { id: "orbit", label: "Slow 360° Orbit", description: "One complete turntable revolution — front, side, back, side, home. Loops seamlessly." },
   { id: "push-in", label: "Push-In Reveal", description: "Starts on the full piece, then eases in slightly closer." },
   { id: "pan", label: "Elegant Pan", description: "The camera glides smoothly side to side across the piece." },
   { id: "static", label: "Static Hero Hold", description: "The camera stays still; only light and reflections move." },
@@ -840,9 +1015,46 @@ export const VIDEO_MOOD_STYLES = [
   { id: "plain-white", label: "Plain White", description: "Pure seamless white, clean e-commerce look." },
 ] as const;
 
-/** Animates one still. Minutes rather than seconds — it runs on its own queue lane. */
+/**
+ * How many views a clip can be built from. Mirrors MAX_VIEWS in
+ * `backend/src/prompts/video.js`.
+ */
+export const MAX_VIDEO_VIEWS = 6;
+
+/**
+ * How many of those Veo will take as visual references — its own hard
+ * limit, not ours. The remaining views are still read by the design-spec
+ * pass, which has no such cap, so they sharpen the written description the
+ * clip is held to rather than being ignored.
+ */
+export const VIDEO_REFERENCE_VIEWS = 3;
+
+/**
+ * The one combination Veo's reference mode accepts — mirrors REFERENCE_MODE
+ * in `backend/src/prompts/video.js`, which enforces it. Anything else comes
+ * back as an opaque 400 minutes into the queue, so with more than one view
+ * the page locks these rather than offering picks that can't be honoured.
+ *
+ * Notably Fast and Lite do not support reference images at all.
+ */
+export const VIDEO_REFERENCE_MODE = {
+  model: "veo-3.1-generate-preview" as VideoModelId,
+  aspectRatio: "16:9",
+  resolution: "720p",
+  durationSeconds: 8,
+} as const;
+
+/**
+ * Animates a piece from one to three views of it. Minutes rather than
+ * seconds — it runs on its own queue lane.
+ *
+ * One view is a first frame: the clip opens on that exact photo. Two or
+ * three go in as references instead, which is what lets an orbit show the
+ * real back of the piece — at the cost of the opening frame, which Veo then
+ * composes itself.
+ */
 export function imageToVideo(body: {
-  image: string;
+  images: string[];
   description?: string;
   model: VideoModelId;
   camera: string;

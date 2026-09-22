@@ -180,9 +180,37 @@ export async function downloadAllImages(sources: string[], baseName: string): Pr
   let saved = 0;
   for (const [index, src] of sources.entries()) {
     if (index > 0) await new Promise((resolve) => setTimeout(resolve, 300));
-    if (await downloadImage(src, `${baseName}-${index + 1}.jpg`)) saved++;
+    if (await downloadImage(src, downloadName(src, `${baseName}-${index + 1}`))) saved++;
   }
   return saved;
+}
+
+/**
+ * The name a stored result should land on disk under.
+ *
+ * The extension is read off the stored url, because that is what the bytes
+ * actually are — the download streams the object through untouched, so a
+ * name invented independently of it is just a guess. Every Download button
+ * used to hardcode `.jpg`, which meant a clip saved as a photo: the bytes
+ * were a perfectly good mp4, and the operating system opened them in an
+ * image viewer and gave up.
+ *
+ * `type` is the fallback for a url with no extension, and "jpg" the
+ * fallback for that — this is a filename, so it must always produce one.
+ */
+export function downloadName(url: string, baseName: string, type?: string): string {
+  // Parsed as a url so a query string or fragment can't be mistaken for an
+  // extension. The base is a throwaway: it only makes a relative url parse.
+  let pathname = url;
+  try {
+    pathname = new URL(url, "https://placeholder.invalid").pathname;
+  } catch {
+    /* Not a url at all — fall through and try the raw string. */
+  }
+
+  const match = pathname.match(/\.([a-z0-9]{2,4})$/i);
+  const extension = match ? match[1].toLowerCase() : type === "video" ? "mp4" : "jpg";
+  return `${baseName}.${extension}`;
 }
 
 export async function downloadImage(src: string, filename: string): Promise<boolean> {

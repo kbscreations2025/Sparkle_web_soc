@@ -40,6 +40,21 @@ const GRANT_GROUPS = [
       { grant: "result.read.others", label: "See other people's results", hint: "How far this reaches is set by the data scope" },
     ],
   },
+  {
+    id: "organization",
+    label: "Organization",
+    grants: [
+      {
+        grant: "org.audit.read",
+        label: "Read the audit log",
+        // Worth spelling out: unlike `result.read.others`, this one is not
+        // narrowed by the data scope. The audit log is an accountability
+        // record, and one filtered to a subset of colleagues would be
+        // misleading rather than merely partial.
+        hint: "Every tracked action in their own organization — not narrowed by the data scope",
+      },
+    ],
+  },
 ];
 
 const ALL_GRANTS = GRANT_GROUPS.flatMap((group) => group.grants.map((entry) => entry.grant));

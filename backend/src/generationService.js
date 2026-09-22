@@ -229,6 +229,16 @@ async function createAsset({
   durationMs = null,
 }) {
   const buffer = Buffer.from(image.base64, "base64");
+  /*
+   * An empty asset is always a bug upstream, and storing one hides it in the
+   * worst possible way: the job completes, the row appears in history, the
+   * poster frame renders from the input still, and only pressing play shows
+   * that there is nothing there. Better to fail the generation loudly.
+   */
+  if (!buffer.length) {
+    throw new Error(`The ${assetTypeFor(image.mimeType)} came back empty and was not saved`);
+  }
+
   const extension = extensionFor(image.mimeType);
   const type = assetTypeFor(image.mimeType);
   const assetId = new mongoose.Types.ObjectId();

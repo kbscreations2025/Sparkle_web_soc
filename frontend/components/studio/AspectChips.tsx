@@ -17,11 +17,14 @@ export function AspectChips<TId extends string>({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   label?: string;
   options: readonly (Aspect & { id: TId })[];
   value: TId;
   onChange: (id: TId) => void;
+  /** For a caller whose ratio is fixed by the run it is about to make. */
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -34,9 +37,10 @@ export function AspectChips<TId extends string>({
               key={option.id}
               type="button"
               onClick={() => onChange(option.id)}
+              disabled={disabled}
               aria-pressed={active}
               className={cn(
-                "flex min-h-11 min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-2 rounded-xl border text-xs font-medium transition-colors sm:min-w-0",
+                "flex min-h-11 min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-2 rounded-xl border text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-0",
                 active
                   ? "border-gold/30 bg-gold/10 text-gold"
                   : "border-white/[0.07] bg-white/[0.03] text-muted hover:border-white/[0.14] hover:text-cream"

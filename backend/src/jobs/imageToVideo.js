@@ -1,7 +1,13 @@
 const { registerJobHandler } = require("./registry");
-const { routeVideoCall, loadTenantOrThrow } = require("../aiRouting");
+const { routeVideoCall, routeTextCall, loadTenantOrThrow } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
-const { buildImageAnimationPrompt, DEFAULT_NEGATIVE_PROMPT } = require("../prompts/video");
+const {
+  buildImageAnimationPrompt,
+  buildDesignSpecPrompt,
+  DEFAULT_NEGATIVE_PROMPT,
+  MAX_REFERENCE_IMAGES,
+  REFERENCE_MODE,
+} = require("../prompts/video");
 const gemini = require("../gemini");
 const User = require("../models/user");
 
@@ -30,11 +36,68 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
   const modelId = gemini.resolveVideoModel(data.requestedModel);
   const modelLabel = gemini.videoLabelFor(modelId);
 
+  // Older queued jobs predate `images` and carry only `image`.
+  const views = (Array.isArray(data.images) && data.images.length ? data.images : [data.image]).filter(Boolean);
+  const multiView = views.length > 1;
+
+  /*
+   * Read the piece before filming it.
+   *
+   * Best-effort on purpose. This is a paid, minutes-long run, and a clip
+   * made without the spec is still a clip — losing the whole job because a
+   * text model was briefly unavailable would be a far worse trade than
+   * filming with the standard guardrails alone. Failure is logged and the
+   * run continues.
+   */
+  const designSpec = await withProgress({ from: 5, to: 15, phase: "analysing" }, async ({ stepDone }) => {
+    try {
+      const { output } = await routeTextCall({
+        tenant,
+        modelId: gemini.DEFAULT_TEXT_MODEL,
+        prompt: buildDesignSpecPrompt(views.length),
+        images: views.map((view) => ({ mimeType: view.mimeType, base64: view.base64 })),
+      });
+      await stepDone(null);
+      return output?.text?.trim() || null;
+    } catch (err) {
+      console.error("[imageToVideo] design analysis failed, filming without it:", err.message);
+      await stepDone(null);
+      return null;
+    }
+  });
+
   const prompt = buildImageAnimationPrompt({
     camera: data.camera,
     mood: data.mood,
     description: data.description,
+    /*
+     * What Veo is actually handed, not what was uploaded. Telling it "the 6
+     * reference images" when three arrived would have it looking for
+     * pictures that are not there; the other views reached it already, as
+     * the design spec.
+     */
+    viewCount: Math.min(views.length, MAX_REFERENCE_IMAGES),
+    designSpec,
   });
+
+  /*
+   * Two different Veo modes, not one with an extra argument. A single still
+   * is a first frame: the clip literally opens on the user's photo. Several
+   * views go in as ASSET references instead — the SDK rejects `image`
+   * alongside them — so Veo rebuilds the piece from every angle and composes
+   * its own opening frame. That is the trade: the back of the ring is real
+   * on an orbit, and the first frame is no longer pinned.
+   */
+  const viewInput = multiView
+    ? {
+        image: undefined,
+        // Only the first three: Veo refuses a fourth. The others have
+        // already done their work in the design spec above.
+        referenceImages: views
+          .slice(0, MAX_REFERENCE_IMAGES)
+          .map((view) => gemini.assetVideoReference(view, REFERENCE_MODE.referenceType)),
+      }
+    : { image: { imageBytes: views[0].base64, mimeType: views[0].mimeType }, referenceImages: undefined };
 
   const { output, providerId } = await withProgress(
     { from: 15, to: 80, phase: "generating" },
@@ -43,13 +106,20 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
         tenant,
         modelId,
         prompt,
-        image: { imageBytes: data.image.base64, mimeType: data.image.mimeType },
+        image: viewInput.image,
         config: {
           numberOfVideos: 1,
           aspectRatio: data.aspectRatio,
           resolution: data.resolution,
           durationSeconds: data.durationSeconds,
-          negativePrompt: DEFAULT_NEGATIVE_PROMPT,
+          /*
+           * Reference mode rejects a negative prompt outright, so in that
+           * mode the "don't redesign the piece" guardrails live only in the
+           * prompt — which is why buildImageAnimationPrompt opens with them
+           * rather than relying on this list.
+           */
+          ...(multiView ? {} : { negativePrompt: DEFAULT_NEGATIVE_PROMPT }),
+          ...(viewInput.referenceImages ? { referenceImages: viewInput.referenceImages } : {}),
         },
       });
       await stepDone(null);
@@ -80,10 +150,14 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
       aspectRatio: data.aspectRatio,
       resolution: data.resolution,
       durationSeconds: data.durationSeconds,
+      viewCount: views.length,
+      /** What the vision pass read off the photos — so a bad clip can be traced to a bad reading. */
+      designSpec: designSpec || null,
     },
-    // The still the clip was made from. It is also what the video's poster
-    // frame is rendered from — see recordGeneration.
-    inputImages: [{ image: data.image, role: "uploaded" }],
+    // The stills the clip was made from. The first is also what the video's
+    // poster frame is rendered from — see recordGeneration — so the order
+    // the user uploaded in is kept rather than sorted.
+    inputImages: views.map((view) => ({ image: view, role: "uploaded" })),
     outputImages: [{ image: output, role: "generated" }],
     durationMs: data.durationSeconds * 1000,
     providerId,

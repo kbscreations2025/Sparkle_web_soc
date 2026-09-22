@@ -3,7 +3,7 @@
 import { useState, type CSSProperties } from "react";
 import { Download, Loader2, MessageCircle, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import type { HistoryItem, HistoryOutput } from "@/lib/api";
-import { downloadImage } from "@/lib/image";
+import { downloadImage, downloadName } from "@/lib/image";
 import { useEscapeKey } from "@/lib/useEscapeKey";
 import { useImageZoom } from "@/lib/useImageZoom";
 import { toolBadgeStyle } from "@/lib/nav";
@@ -81,7 +81,7 @@ export function HistoryLightbox({
    */
   async function downloadAll() {
     for (const [i, output] of item!.outputs.entries()) {
-      await downloadImage(output.url, `${item!.tool}-${item!.id}-${i + 1}.jpg`);
+      await downloadImage(output.url, downloadName(output.url, `${item!.tool}-${item!.id}-${i + 1}`, output.type));
     }
   }
 
@@ -144,7 +144,12 @@ export function HistoryLightbox({
               {active && (
                 <button
                   type="button"
-                  onClick={() => downloadImage(active.url, `${item.tool}-${item.id}-${activeIndex + 1}.jpg`)}
+                  onClick={() =>
+                    downloadImage(
+                      active.url,
+                      downloadName(active.url, `${item.tool}-${item.id}-${activeIndex + 1}`, active.type)
+                    )
+                  }
                   title="Download"
                   className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.10] md:h-8 md:w-8"
                 >

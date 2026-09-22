@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "worker": "node src/worker.js",
     "worker:dev": "nodemon src/worker.js",
-    "backfill:thumbnails": "node src/scripts/backfillThumbnails.js"
+    "backfill:thumbnails": "node src/scripts/backfillThumbnails.js",
+    "seed:pricing": "node src/scripts/seedPricing.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1128.0",
