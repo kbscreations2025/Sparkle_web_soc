@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useRef, useState } from "react";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
@@ -36,7 +36,31 @@ import { cn } from "@/lib/utils";
 const PERMISSION = "tool.image_to_video.run";
 
 /**
- * Image to Video: a piece, animated — from one view of it or up to three.
+ * The four angles that describe a ring, as named slots rather than a pile of
+ * files.
+ *
+ * Two reasons, and the second is the real one. A labelled slot tells the user
+ * which angles are worth photographing â€” "add another view" does not, and the
+ * views people actually supplied were front-heavy. And because each slot is
+ * named, the analysis pass can be *told* which photograph is the back rather
+ * than inferring it, which is what makes the symmetry judgement it now makes
+ * coherent: mirroring is meaningless if you don't know which side you're
+ * looking at.
+ *
+ * Anything past these is an extra view â€” still read by the analysis, which has
+ * no provider limit, and still worth uploading.
+ */
+const NAMED_VIEWS = [
+  { id: "front", label: "Front", hint: "Face on" },
+  { id: "side", label: "Side", hint: "Profile" },
+  { id: "back", label: "Back", hint: "Reverse" },
+  { id: "top", label: "Top", hint: "Looking down" },
+] as const;
+
+type NamedViewId = (typeof NAMED_VIEWS)[number]["id"];
+
+/**
+ * Image to Video: a piece, animated â€” from one view of it or up to three.
  *
  * The extra views are not extra clips. They are the same object photographed
  * from different angles, handed to Veo as references so that when the camera
@@ -44,7 +68,7 @@ const PERMISSION = "tool.image_to_video.run";
  * The cost is stated on the page, because it is not obvious: with more than
  * one view there is no pinned opening frame.
  *
- * No refine loop — a clip can't be edited by asking, only regenerated — so
+ * No refine loop â€” a clip can't be edited by asking, only regenerated â€” so
  * this doesn't use the shared generate-then-refine workspace. What matters
  * most here is that the wait is minutes rather than seconds, which is
  * exactly why the run is followed through the queue: this page can be
@@ -55,8 +79,20 @@ export default function ImageToVideoPage() {
   const { jobs, track } = useJobs();
   const creditGuard = useCreditGuard();
 
-  /** Views of one piece, in upload order — the first is the primary view. */
-  const [photos, setPhotos] = useState<string[]>([]);
+  /**
+   * The named angles, and anything beyond them.
+   *
+   * Kept apart because they behave differently: a named slot holds one photo
+   * and replacing it is the point, while extras are a growing list. What the
+   * run actually sends is the two flattened together â€” see `photos` below.
+   */
+  const [slots, setSlots] = useState<Record<NamedViewId, string | null>>({
+    front: null,
+    side: null,
+    back: null,
+    top: null,
+  });
+  const [extras, setExtras] = useState<string[]>([]);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [camera, setCamera] = useState<string>(VIDEO_CAMERA_STYLES[0].id);
@@ -69,10 +105,12 @@ export default function ImageToVideoPage() {
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
 
+  /** The extras picker. Each named slot owns its own, so one file lands in one slot. */
   const fileInput = useRef<HTMLInputElement>(null);
+  const slotInputs = useRef<Partial<Record<NamedViewId, HTMLInputElement | null>>>({});
   /**
    * The run this page is following. State rather than a ref because the
-   * progress bar renders from it — a ref write would not re-render, so the
+   * progress bar renders from it â€” a ref write would not re-render, so the
    * bar would lag a tick behind the job it is measuring.
    */
   const [jobId, setJobId] = useState<string | null>(null);
@@ -101,38 +139,63 @@ export default function ImageToVideoPage() {
     return <ToolAccessNotice tool="Image to Video" />;
   }
 
-  /**
-   * Adds views up to the cap. Files past it are ignored with a note rather
-   * than silently dropped — a user who picked five angles should be told
-   * which two the clip won't see.
+  /*
+   * What the run sends: the named angles that were filled, in the order they
+   * are listed, then the extras.
+   *
+   * The order is not cosmetic. The first entry is the primary view â€” the
+   * opening frame on a single-view run â€” and the first three are what Veo
+   * takes as references, so Front/Side/Back reaching the model ahead of a
+   * gallery shot is the point of naming them at all.
    */
-  async function accept(files: FileList | File[] | null | undefined) {
-    const picked = Array.from(files ?? []);
-    if (!picked.length) return;
+  const filledNamed = NAMED_VIEWS.filter((view) => slots[view.id]);
+  const photos = [...filledNamed.map((view) => slots[view.id] as string), ...extras];
+  /** Parallel to `photos` â€” tells the analysis which angle each photo is. */
+  const viewLabels = [...filledNamed.map((view) => view.label), ...extras.map(() => "Additional")];
 
-    const room = MAX_VIDEO_VIEWS - photos.length;
-    if (room <= 0) {
-      setError(`A clip can be built from at most ${MAX_VIDEO_VIEWS} views — remove one to add another.`);
-      return;
-    }
+  /**
+   * One named angle. Replaces whatever that slot held â€” picking a new Back is
+   * how you correct a bad Back, not how you add a fifth view.
+   */
+  async function acceptSlot(id: NamedViewId, files: FileList | File[] | null | undefined) {
+    const file = Array.from(files ?? [])[0];
+    if (!file) return;
 
     try {
-      const added = await Promise.all(picked.slice(0, room).map(compressImage));
-      setPhotos((current) => [...current, ...added]);
+      const compressed = await compressImage(file);
+      setSlots((current) => ({ ...current, [id]: compressed }));
       setVideoUrl(null);
       setStatus("idle");
-      setError(
-        picked.length > room
-          ? `Added ${room} more — a clip can be built from at most ${MAX_VIDEO_VIEWS} views.`
-          : ""
-      );
+      setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read that file");
     }
   }
 
-  function removeView(index: number) {
-    setPhotos((current) => current.filter((_, at) => at !== index));
+  /**
+   * Extra angles, up to whatever the cap leaves after the named ones. Files
+   * past it are ignored with a note rather than silently dropped â€” a user who
+   * picked five should be told which two the clip won't see.
+   */
+  async function acceptExtras(files: FileList | File[] | null | undefined) {
+    const picked = Array.from(files ?? []);
+    if (!picked.length) return;
+
+    const room = MAX_VIDEO_VIEWS - photos.length;
+    if (room <= 0) {
+      setError(`At most ${MAX_VIDEO_VIEWS} views in total â€” remove one to add another.`);
+      return;
+    }
+
+    try {
+      const added = await Promise.all(picked.slice(0, room).map((file) => compressImage(file)));
+      setExtras((current) => [...current, ...added]);
+      setVideoUrl(null);
+      setStatus("idle");
+      setError(picked.length > room ? `Added ${room} more â€” at most ${MAX_VIDEO_VIEWS} views in total.` : "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read that file");
+    }
   }
 
   async function handleRender() {
@@ -144,6 +207,10 @@ export default function ImageToVideoPage() {
     const preview = await makeThumbnail(photos[0]);
     const res = await imageToVideo({
       images: photos,
+      // Which angle each photo is, so the analysis can say "the back showsâ€¦"
+      // rather than working it out â€” and so its symmetry judgement has sides
+      // to reason about.
+      viewLabels,
       description,
       camera,
       mood,
@@ -167,7 +234,8 @@ export default function ImageToVideoPage() {
   }
 
   function reset() {
-    setPhotos([]);
+    setSlots({ front: null, side: null, back: null, top: null });
+    setExtras([]);
     setVideoUrl(null);
     setStatus("idle");
     setError("");
@@ -179,7 +247,7 @@ export default function ImageToVideoPage() {
   const canAddView = photos.length < MAX_VIDEO_VIEWS;
 
   /*
-   * With more than one view the settings are not the user's to choose —
+   * With more than one view the settings are not the user's to choose â€”
    * reference mode accepts exactly one combination. They are shown as the
    * locked values rather than left displaying picks the run would ignore.
    */
@@ -202,93 +270,130 @@ export default function ImageToVideoPage() {
               multiple
               hidden
               onChange={(event) => {
-                accept(event.target.files);
+                acceptExtras(event.target.files);
                 event.target.value = "";
               }}
             />
 
-            {photos.length === 0 ? (
-              <button
-                type="button"
-                onClick={() => fileInput.current?.click()}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragging(true);
-                }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragging(false);
-                  accept(event.dataTransfer.files);
-                }}
-                className={cn(
-                  "flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-12 transition-colors",
-                  dragging ? "border-gold/40 bg-gold/[0.06]" : "border-white/[0.12] bg-white/[0.02] hover:border-white/25"
-                )}
-              >
-                <Upload size={20} className="text-faint" />
-                <p className="text-sm font-medium text-cream">Drop photos here, or click to choose</p>
-                <p className="text-[11px] text-faint">
-                  Up to {MAX_VIDEO_VIEWS} views of the same piece — front, side, back, gallery, underside. The piece is
-                  filmed, never redesigned.
-                </p>
-              </button>
-            ) : (
-              <div className="space-y-2">
-                {/* The primary view stays large: at one view it is the opening
-                    frame, and at several it is still the angle the piece is
-                    recognised by. The others sit under it as a strip. */}
-                <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
-                  <div className="relative aspect-[4/3] w-full">
-                    <Image
-                      src={photos[0]}
-                      alt="Primary view of the piece"
-                      fill
-                      sizes="(max-width: 1024px) 100vw, 480px"
-                      className="object-contain"
-                    />
-                  </div>
-                  {multiView && (
-                    <span className="absolute left-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white/85 backdrop-blur-sm">
-                      View 1
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => removeView(0)}
-                    aria-label="Remove this view"
-                    className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-colors hover:bg-black/75"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
+            {/*
+              Four named angles, then anything else.
 
-                <div className="grid grid-cols-3 gap-2">
-                  {photos.slice(1).map((view, index) => (
+              A single dropzone asked for "views" and got four photographs of
+              the front. Naming the slots is the instruction: it says which
+              angles are worth taking, shows at a glance which one is still
+              missing, and lets a bad Back be replaced rather than removed and
+              re-added at the end of a list.
+            */}
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-cream">Views</p>
+                <span className="text-[10px] text-faint">
+                  {photos.length}/{MAX_VIDEO_VIEWS}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {NAMED_VIEWS.map((view) => {
+                  const src = slots[view.id];
+                  return (
                     <div
-                      key={view.slice(-48) + index}
+                      key={view.id}
+                      className={cn(
+                        "relative overflow-hidden rounded-lg border transition-colors",
+                        src ? "border-white/10 bg-white/[0.03]" : "border-dashed border-white/[0.12] bg-white/[0.02]"
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => slotInputs.current[view.id]?.click()}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          acceptSlot(view.id, event.dataTransfer.files);
+                        }}
+                        className="block aspect-square w-full"
+                        aria-label={src ? `Replace the ${view.label} view` : `Add the ${view.label} view`}
+                      >
+                        {src ? (
+                          <span className="relative block h-full w-full">
+                            <Image
+                              src={src}
+                              alt={`${view.label} view of the piece`}
+                              fill
+                              sizes="160px"
+                              className="object-contain"
+                            />
+                          </span>
+                        ) : (
+                          <span className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-center">
+                            <Plus size={14} className="text-faint" />
+                            <span className="text-[10px] font-medium leading-tight text-muted">{view.label}</span>
+                            <span className="text-[9px] leading-tight text-faint">{view.hint}</span>
+                          </span>
+                        )}
+                      </button>
+
+                      {src && (
+                        <>
+                          <span className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white/85 backdrop-blur-sm">
+                            {view.label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSlots((current) => ({ ...current, [view.id]: null }))}
+                            aria-label={`Remove the ${view.label} view`}
+                            className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-colors hover:bg-black/75"
+                          >
+                            <X size={12} />
+                          </button>
+                        </>
+                      )}
+
+                      <input
+                        ref={(node) => {
+                          slotInputs.current[view.id] = node;
+                        }}
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        onChange={(event) => {
+                          acceptSlot(view.id, event.target.files);
+                          event.target.value = "";
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/*
+                Extras are shown only once the named angles have been started,
+                so an empty page offers one clear instruction rather than two
+                competing ones.
+              */}
+              {photos.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  {extras.map((src, index) => (
+                    <div
+                      key={src.slice(-48) + index}
                       className="relative overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"
                     >
                       <div className="relative aspect-square w-full">
-                        <Image src={view} alt={`View ${index + 2} of the piece`} fill sizes="160px" className="object-contain" />
+                        <Image src={src} alt={`Additional view ${index + 1}`} fill sizes="120px" className="object-contain" />
                       </div>
                       <span
-                        title={
-                          index + 2 <= VIDEO_REFERENCE_VIEWS
-                            ? "Sent to the model as a visual reference"
-                            : "Read by the analysis, which has no limit on views"
-                        }
-                        className="absolute left-1.5 top-1.5 rounded-full bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white/85 backdrop-blur-sm"
+                        title="Read by the analysis, which has no limit on views"
+                        className="pointer-events-none absolute left-1 top-1 rounded-full bg-black/55 px-1.5 py-0.5 text-[9px] font-medium text-white/85 backdrop-blur-sm"
                       >
-                        {index + 2 <= VIDEO_REFERENCE_VIEWS ? `View ${index + 2}` : "Analysed"}
+                        Extra
                       </span>
                       <button
                         type="button"
-                        onClick={() => removeView(index + 1)}
-                        aria-label={`Remove view ${index + 2}`}
-                        className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-colors hover:bg-black/75"
+                        onClick={() => setExtras((current) => current.filter((_, at) => at !== index))}
+                        aria-label={`Remove additional view ${index + 1}`}
+                        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-colors hover:bg-black/75"
                       >
-                        <X size={12} />
+                        <X size={11} />
                       </button>
                     </div>
                   ))}
@@ -305,34 +410,30 @@ export default function ImageToVideoPage() {
                       onDrop={(event) => {
                         event.preventDefault();
                         setDragging(false);
-                        accept(event.dataTransfer.files);
+                        acceptExtras(event.dataTransfer.files);
                       }}
                       className={cn(
-                        "flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-2 text-center transition-colors",
+                        "flex aspect-square w-full flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed px-1 text-center transition-colors",
                         dragging ? "border-gold/40 bg-gold/[0.06]" : "border-white/[0.12] bg-white/[0.02] hover:border-white/25"
                       )}
                     >
-                      <Plus size={16} className="text-faint" />
-                      <span className="text-[10px] leading-tight text-faint">
-                        Add another
-                        <br />
-                        angle
-                      </span>
+                      <Plus size={14} className="text-faint" />
+                      <span className="text-[9px] leading-tight text-faint">More</span>
                     </button>
                   )}
                 </div>
+              )}
 
-                {/* The one thing a user cannot guess: extra views buy a real
-                    back and side, and cost the guaranteed opening frame. */}
-                <p className="text-[11px] text-faint">
-                  {!multiView
-                    ? "One view — the clip opens on this exact photo. Add a side or back angle so an orbit shows the real thing."
+              <p className="text-[11px] leading-relaxed text-faint">
+                {photos.length === 0
+                  ? "Front, side, back and top of the same piece. The more angles the analysis has, the less the clip has to invent â€” and the piece is filmed, never redesigned."
+                  : !multiView
+                    ? "One view â€” the clip opens on this exact photo. Add a side or back so a turn shows the real thing rather than an invented one."
                     : photos.length <= VIDEO_REFERENCE_VIEWS
-                      ? `${photos.length} views of one piece — the camera will film the real back and sides rather than inventing them. The clip won't open on any one of these photos.`
-                      : `${photos.length} views of one piece. All ${photos.length} are analysed in detail to pin down the design; the first ${VIDEO_REFERENCE_VIEWS} are also sent to the model as visual references, which is its own limit. The clip won't open on any one of these photos.`}
-                </p>
-              </div>
-            )}
+                      ? `${photos.length} views of one piece â€” the camera will film the real back and sides rather than inventing them. The clip won't open on any one of these photos.`
+                      : `${photos.length} views of one piece. All ${photos.length} are analysed in detail to pin down the design â€” including whether it is symmetrical â€” and the first ${VIDEO_REFERENCE_VIEWS} also go to the model as visual references, which is its own limit. The clip won't open on any one of these photos.`}
+              </p>
+            </div>
 
             <OptionChips label="Camera" options={VIDEO_CAMERA_STYLES} value={camera} onChange={setCamera} />
             <p className="-mt-1 text-[11px] text-faint">
@@ -344,7 +445,7 @@ export default function ImageToVideoPage() {
                 photo means the model invents the half it was never shown. */}
             {camera === "orbit" && photos.length > 0 && !multiView && (
               <p className="-mt-1 rounded-lg border border-gold/20 bg-gold/[0.06] px-2.5 py-2 text-[11px] leading-relaxed text-gold/90">
-                A full turn from one photo means the back and far side are invented — they won&apos;t match the real
+                A full turn from one photo means the back and far side are invented â€” they won&apos;t match the real
                 piece. Add a side and a back view and the rotation is built from your photos instead.
               </p>
             )}
@@ -430,7 +531,7 @@ export default function ImageToVideoPage() {
               label="Anything else"
               value={description}
               onChange={setDescription}
-              placeholder="Optional — extra direction for the motion"
+              placeholder="Optional â€” extra direction for the motion"
             />
 
             <RunButton
@@ -439,8 +540,8 @@ export default function ImageToVideoPage() {
               icon={rendering ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
             >
               {rendering
-                ? "Rendering…"
-                : `Animate ${multiView ? `these ${photos.length} views` : "this photo"} · ${effective.durationSeconds}s`}
+                ? "Renderingâ€¦"
+                : `Animate ${multiView ? `these ${photos.length} views` : "this photo"} Â· ${effective.durationSeconds}s`}
             </RunButton>
 
             {rendering && job && (
@@ -448,10 +549,10 @@ export default function ImageToVideoPage() {
                 <JobProgressBar percent={job.progress} />
                 <p className="text-[11px] text-faint">
                   {job.phase === "analysing"
-                    ? "Reading the piece — stones, setting, band — so the clip can't drift from it…"
+                    ? "Reading the piece â€” stones, setting, band â€” so the clip can't drift from itâ€¦"
                     : job.phase === "saving"
-                      ? "Saving the clip…"
-                      : "Rendering — this takes a few minutes."}{" "}
+                      ? "Saving the clipâ€¦"
+                      : "Rendering â€” this takes a few minutes."}{" "}
                   You can leave
                   this page; it will be in your queue and your history when it&apos;s done.
                 </p>
@@ -467,7 +568,7 @@ export default function ImageToVideoPage() {
                 <div className="flex justify-end px-3 pb-3">
                   {/* A button, not `<a download>`. The download attribute is
                       ignored on a cross-origin url, and the clip is served
-                      from R2 — so the link opened the video in the tab
+                      from R2 â€” so the link opened the video in the tab
                       instead of saving it. downloadImage pulls it through
                       our own backend, which marks it as an attachment. */}
                   <button

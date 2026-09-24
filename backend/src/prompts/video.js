@@ -160,6 +160,7 @@ Cover, in this order, only what is actually visible:
 • Accent stones: setting style, shape, how far they run along the band, and the COUNT per side
 • Band/shank: profile, taper, width relative to the head, split or solid
 • Decorative detail: milgrain, engraving, filigree, cutouts, texture — and exactly where
+• Symmetry: whether the piece is bilaterally symmetrical about its vertical axis — i.e. whether the left and right sides are mirror images with matching stone counts and spacing. State this explicitly either way, and if it is NOT symmetrical, name precisely which features differ between the two sides (a bypass or crossover shank, a toi-et-moi pairing, an off-centre stone, detail on one shoulder only).
 
 RULES
 — Output only the specification. No preamble, no headings, no bullet points.
@@ -168,14 +169,31 @@ RULES
 — Describe ONLY the jewellery. Say nothing about background, lighting, shadows, camera angle, framing or photographic style.
 — No evaluative adjectives: not "beautiful", not "elegant", not "stunning".
 — Describe only what you can see. Never guess at a detail the photograph does not show.
-— Keep it under 180 words.`;
+— The one exception is symmetry, which is a judgement you must make rather than a detail you can read off: decide it from what is visible and say so plainly. "Symmetrical" is a claim that the unphotographed side mirrors the photographed one, so do not make it unless the visible evidence supports it.
+— Keep it under 200 words.`;
 
-/** Same pass, told that the photographs are one object rather than several. */
-function buildDesignSpecPrompt(viewCount = 1) {
-  if (viewCount <= 1) return DESIGN_SPEC_PROMPT;
+/**
+ * Same pass, told that the photographs are one object rather than several.
+ *
+ * `labels` names each photograph's angle, in order, when the caller knows it
+ * — the page collects Front, Side, Back and Top as separate slots. Worth
+ * passing: "the back shows a plain gallery" is a far more useful reading than
+ * "one of the photographs shows a plain gallery", and the symmetry judgement
+ * this prompt now asks for is only coherent if the model knows which side it
+ * is looking at.
+ */
+function buildDesignSpecPrompt(viewCount = 1, labels = []) {
+  const named = Array.isArray(labels) ? labels.filter(Boolean).slice(0, viewCount) : [];
+
+  if (viewCount <= 1) {
+    return named.length ? `${DESIGN_SPEC_PROMPT}\n\nNOTE: The photograph is the ${named[0]} view.` : DESIGN_SPEC_PROMPT;
+  }
+
+  const angles = named.length === viewCount ? ` They are, in order: ${named.join(", ")}.` : "";
+
   return `${DESIGN_SPEC_PROMPT}
 
-NOTE: You are given ${viewCount} photographs of ONE SINGLE piece from different angles — not ${viewCount} different pieces. Combine them into one specification of that one piece, and use the extra angles to describe the sides and back that a single photograph could not show.`;
+NOTE: You are given ${viewCount} photographs of ONE SINGLE piece from different angles — not ${viewCount} different pieces.${angles} Combine them into one specification of that one piece, and use the extra angles to describe the sides and back that a single photograph could not show.`;
 }
 
 /** Keep shine physically realistic, never over-the-top or fake-looking. */
@@ -221,6 +239,26 @@ function buildImageAnimationPrompt({ camera, mood, description, viewCount = 1, d
      */
     spec
       ? `The piece in the photograph(s) is EXACTLY this, and must remain exactly this in every frame: ${spec} Every count, shape and proportion in that specification is a hard requirement — if a frame would show a different number of stones, a different setting, a different band profile or a different metal, that frame is wrong.`
+      : "",
+    /*
+     * What to do about the sides nobody photographed.
+     *
+     * Most rings are bilaterally symmetrical, and that is a fact the model
+     * can use rather than guess around: the side the camera has not seen is
+     * the mirror of the side it has. Said explicitly, the unseen half stops
+     * being a blank the model fills creatively and becomes something it can
+     * derive — which is where an orbit usually loses its stone counts.
+     *
+     * Conditional on the spec having found symmetry, never assumed. A bypass
+     * shank, a toi-et-moi or an off-centre stone is asymmetrical by design,
+     * and mirroring one of those would "fix" the piece into something the
+     * jeweller does not make — the same redesign this prompt opens by
+     * forbidding. So the instruction says to read the specification's verdict
+     * and follow it, including the case where it says the piece is not
+     * symmetrical.
+     */
+    spec
+      ? "The specification above states whether the piece is bilaterally symmetrical. If it says the piece IS symmetrical: any side or angle the rotation reveals that was not photographed must be the exact MIRROR of its opposite side — the same stone counts, the same spacing, the same prong and detail placement, reflected. Derive that half rather than inventing it. If instead the specification names asymmetrical features, those features must NOT be mirrored or evened out: reproduce them exactly as described, on the side described, and leave the opposite side as the specification says it is."
       : "",
     /*
      * Multi-view runs hand Veo up to three ASSET references, and without this

@@ -54,7 +54,7 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
       const { output } = await routeTextCall({
         tenant,
         modelId: gemini.DEFAULT_TEXT_MODEL,
-        prompt: buildDesignSpecPrompt(views.length),
+        prompt: buildDesignSpecPrompt(views.length, data.viewLabels || []),
         images: views.map((view) => ({ mimeType: view.mimeType, base64: view.base64 })),
       });
       await stepDone(null);

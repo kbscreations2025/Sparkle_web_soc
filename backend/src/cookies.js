@@ -7,6 +7,7 @@ const baseCookieOptions = {
   secure: isProd,
   sameSite: isProd ? "none" : "lax",
   path: "/",
+  ...(config.cookieDomain ? { domain: config.cookieDomain } : {}),
 };
 
 // Browsers cap cookie lifetime at 400 days; the underlying session itself

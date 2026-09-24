@@ -1105,6 +1105,13 @@ export const VIDEO_REFERENCE_MODE = {
  */
 export function imageToVideo(body: {
   images: string[];
+  /**
+   * What angle each image is — "Front", "Side", "Back", "Top" — parallel to
+   * `images`. Read by the analysis pass, which describes the piece better
+   * when it knows which photograph is the back, and cannot judge symmetry at
+   * all without knowing which side it is looking at.
+   */
+  viewLabels?: string[];
   description?: string;
   model: VideoModelId;
   camera: string;

@@ -7,6 +7,10 @@ module.exports = {
   clientId: process.env.CLIENT_ID,
   clientSecret: process.env.CLIENT_SECRET,
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:3000",
+  // Parent domain shared by the frontend and API hosts in production (e.g.
+  // ".kbscreations.com"). Without it the auth cookies are pinned to the API host,
+  // and the frontend's Next proxy never sees them, so every login bounces back.
+  cookieDomain: process.env.COOKIE_DOMAIN || undefined,
   // This app's code in the central login's permissioned_applications list.
   // Without it, super-admin detection falls back to the central top-level role.
   centralAppCode: process.env.CENTRAL_APP_CODE,

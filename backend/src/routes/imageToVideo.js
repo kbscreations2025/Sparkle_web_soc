@@ -33,7 +33,7 @@ function oneOf(value, allowed, fallback) {
 }
 
 router.post("/", async (req, res) => {
-  const { image, images, description, model: requestedModel, camera, mood, aspectRatio, resolution, durationSeconds, preview, conversationId } =
+  const { image, images, viewLabels, description, model: requestedModel, camera, mood, aspectRatio, resolution, durationSeconds, preview, conversationId } =
     req.body || {};
 
   /*
@@ -86,6 +86,14 @@ router.post("/", async (req, res) => {
       /** First view stays under `image` so anything reading one still keeps working. */
       image: parsedViews[0],
       images: parsedViews,
+      /*
+       * Which angle each view is, when the client said — sliced alongside the
+       * views so a dropped seventh angle cannot shift the labels out of step
+       * with the photographs they name.
+       */
+      viewLabels: Array.isArray(viewLabels)
+        ? viewLabels.slice(0, parsedViews.length).map((label) => String(label).slice(0, 24))
+        : null,
       description: description || null,
       camera: oneOf(camera, CAMERA_STYLES.map((style) => style.id), CAMERA_STYLES[0].id),
       mood: oneOf(mood, MOOD_STYLES.map((style) => style.id), MOOD_STYLES[0].id),
