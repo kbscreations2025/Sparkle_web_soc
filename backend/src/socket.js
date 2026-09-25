@@ -16,11 +16,11 @@ let ioInstance = null;
  * A read, never a write: linking an account is the login path's job, and a
  * websocket handshake must not be able to create rows.
  */
-async function appUserIdFor(centralUserId) {
+async function appUserFor(centralUserId) {
   if (!centralUserId) return null;
   try {
-    const row = await User.findOne({ authUserId: centralUserId }).select("_id").lean();
-    return row ? String(row._id) : null;
+    const row = await User.findOne({ authUserId: centralUserId }).select("_id tenantId").lean();
+    return row ? { id: String(row._id), tenantId: row.tenantId ? String(row.tenantId) : null } : null;
   } catch (err) {
     // A socket that can't resolve its second room still gets auth events on
     // the first one — worth degrading rather than refusing the connection.
@@ -51,7 +51,9 @@ function initSocket(httpServer) {
     // connection handler on purpose: an await there would leave a window after
     // the socket is live but before it has joined its rooms, and anything
     // emitted in that window would be dropped.
-    socket.data.appUserId = await appUserIdFor(socket.data.user.user_id);
+    const appUser = await appUserFor(socket.data.user.user_id);
+    socket.data.appUserId = appUser?.id ?? null;
+    socket.data.tenantId = appUser?.tenantId ?? null;
     next();
   });
 
@@ -75,6 +77,10 @@ function initSocket(httpServer) {
     // answered with `otp_required` and no user object — the email is the only
     // handle we have on whose sessions were just displaced.
     if (socket.data.email) socket.join(`email:${socket.data.email}`);
+
+    // Everyone in one organization, for the few events that concern all of
+    // them — see emitToTenant, and why those events carry no content.
+    if (socket.data.tenantId) socket.join(`tenant:${socket.data.tenantId}`);
   });
 
   setInterval(() => revalidateAll(io), REVALIDATE_INTERVAL_MS);
@@ -146,6 +152,20 @@ function emitToUser(userId, event, payload) {
   ioInstance.to(`user:${userId}`).emit(event, payload);
 }
 
+/**
+ * Pushes an event to every open tab in one organization.
+ *
+ * Only ever a ping, never the thing itself. Who may see a colleague's result
+ * depends on each viewer's grants and data scope, and those are checked by
+ * the REST routes — so a tenant-wide event says only "something changed",
+ * and each page asks for what it is allowed to see. Putting a result in the
+ * payload would hand it to everyone in the organization, scope or not.
+ */
+function emitToTenant(tenantId, event, payload = {}) {
+  if (!ioInstance || !tenantId) return;
+  ioInstance.to(`tenant:${tenantId}`).emit(event, payload);
+}
+
 /** Evicts every socket in `room`, returning how many there were. */
 function evictRoom(room) {
   if (!ioInstance) return 0;
@@ -174,4 +194,4 @@ function forceLogoutByEmail(email) {
   return evictRoom(`email:${String(email).toLowerCase()}`);
 }
 
-module.exports = { initSocket, forceLogout, forceLogoutByEmail, liveSessionCounts, emitToUser };
+module.exports = { initSocket, forceLogout, forceLogoutByEmail, liveSessionCounts, emitToUser, emitToTenant };

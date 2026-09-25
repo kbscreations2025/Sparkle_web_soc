@@ -79,6 +79,7 @@ export default function ImageToSketchPage() {
     workspace.generate(() => imageToSketch({ image: photo, style, model, quality, count, preview }), {
       count,
       prompt: `Sketch this photo — ${SKETCH_STYLES.find((entry) => entry.id === style)?.label}`,
+      images: [photo],
     });
   }
 

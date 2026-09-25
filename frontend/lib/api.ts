@@ -1395,23 +1395,41 @@ export type ConversationTurn = {
 /**
  * The full thread behind one History tile, in turn order — fetched when a
  * tool page is asked to resume a past conversation rather than start fresh.
- * Only the conversation's own owner can fetch it; the server 403s otherwise.
+ *
+ * The owner gets it to continue. Someone else gets it only with
+ * `org.conversations.read` and within their data scope, and then with
+ * `readOnly: true` — the page must drop its composer, and the server refuses
+ * a turn on it anyway. Anyone else gets a 403.
  */
 export function fetchConversation(conversationId: string) {
-  return apiRequest<{ tool: string; generations: ConversationTurn[] }>(`/api/history/conversations/${conversationId}`);
+  return apiRequest<{
+    tool: string;
+    readOnly?: boolean;
+    /** Who the thread belongs to, when it is not the viewer's. */
+    ownerName?: string | null;
+    generations: ConversationTurn[];
+  }>(`/api/history/conversations/${conversationId}`);
 }
+
+/** A loaded thread, and whether the viewer may add to it. */
+export type ConversationThread = {
+  generations: ConversationTurn[];
+  /** Someone else's chat, opened to read. No composer, no retry, no hints. */
+  readOnly: boolean;
+  ownerName: string | null;
+};
 
 /**
  * `fetchConversation`, pre-validated for one specific tool's page — every
- * resuming page needs the same "did this load, and is it actually mine"
+ * resuming page needs the same "did this load, and is it for this tool"
  * check before touching its own state, so it lives here once instead of
- * being repeated per tool. Returns null on any failure (not found, wrong
- * tool, empty thread) so the caller can just bail out.
+ * being repeated per tool. Returns null on any failure (not found, not
+ * allowed, wrong tool, empty thread) so the caller can just bail out.
  */
-export async function fetchConversationForTool(conversationId: string, tool: string) {
+export async function fetchConversationForTool(conversationId: string, tool: string): Promise<ConversationThread | null> {
   const res = await fetchConversation(conversationId);
   if (res.status !== "success" || res.tool !== tool || res.generations.length === 0) return null;
-  return res.generations;
+  return { generations: res.generations, readOnly: Boolean(res.readOnly), ownerName: res.ownerName ?? null };
 }
 
 /** Finds a model by id or (for a history row recorded before the id was, or a resumed label) by its Sparkle label. */
@@ -1449,11 +1467,14 @@ export function fetchHistory(
     from?: string;
     to?: string;
     before?: string;
+    /** Only rows newer than this — what a live refresh asks for. */
+    after?: string;
     limit?: number;
     scope?: "own" | "team";
   } = {}
 ) {
   const query = new URLSearchParams();
+  if (params.after) query.set("after", params.after);
   params.tools?.forEach((value) => query.append("tool", value));
   params.members?.forEach((value) => query.append("member", value));
   params.qualities?.forEach((value) => query.append("quality", value));
@@ -1597,23 +1618,20 @@ export function fetchCreditTenant(id: string) {
   }>(`/api/credits/tenants/${id}`);
 }
 
-export function fetchCreditLedger(tenantId: string, limit = 100) {
-  return apiRequest<{ entries: CreditEntry[] }>(`/api/credits/tenants/${tenantId}/ledger?limit=${limit}`);
-}
-
-/** Who granted, revoked, shared out or took back — the decisions behind the ledger. */
-export type CreditAuditEntry = {
-  id: string;
-  action: string;
-  status: string;
-  actorName?: string;
-  message?: string;
-  amount: number | null;
-  createdAt: string;
-};
-
-export function fetchCreditAudit(tenantId: string, limit = 100) {
-  return apiRequest<{ entries: CreditAuditEntry[] }>(`/api/credits/tenants/${tenantId}/audit?limit=${limit}`);
+/** Every organization's ledger at once, for the audit log's credit view. Super admin only. */
+export function fetchAllCreditLedger({
+  tenantIds = [],
+  before,
+  limit = 50,
+}: { tenantIds?: string[]; before?: string | null; limit?: number } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  tenantIds.forEach((id) => params.append("tenantId", id));
+  if (before) params.set("before", before);
+  return apiRequest<{
+    entries: (CreditEntry & { tenant: string | null })[];
+    hasMore: boolean;
+    nextCursor: string | null;
+  }>(`/api/credits/ledger?${params}`);
 }
 
 /** `userId: null` grants to the organization pool instead of a person. */

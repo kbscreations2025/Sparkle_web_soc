@@ -64,6 +64,46 @@
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.10); }
 
+/* ---- Opt-in visible scroller, for long tables ----
+   Scrollbars are hidden everywhere above; a table hundreds of rows deep is
+   the exception, where the thumb is the only sign of how much is left.
+   A 3px pill in an 7px lane, inset so it sits inside the table's rounded
+   frame. The track starts below the sticky header, and leaves 16px at each
+   end for the jump arrows (components/admin/ScrollEnds.tsx) so the thumb
+   never slides under one. The native arrow buttons stay off — they only
+   step a few pixels. `scrollbar-width` stays `auto`: any other value makes
+   Chromium ignore the ::-webkit rules. */
+.thin-scrollbar { scrollbar-width: auto; }
+.thin-scrollbar::-webkit-scrollbar {
+  display: block; width: 7px; height: 7px;
+  /* Carries the header's colour across the scrollbar lane, so the header
+     band runs edge to edge instead of stopping 10px short. */
+  background: linear-gradient(var(--color-surface-float) var(--scroll-inset-top, 0px), transparent 0);
+}
+.thin-scrollbar::-webkit-scrollbar-button { display: none; }
+.thin-scrollbar::-webkit-scrollbar-corner { background: transparent; }
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  margin-top: calc(var(--scroll-inset-top, 0px) + 16px);
+  margin-bottom: 16px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border: 2px solid transparent;          /* insets the pill: 7px lane, 3px thumb */
+  background-clip: padding-box;
+  border-radius: 999px;
+  min-height: 24px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(196,168,106,0.55); border-width: 1.5px; }
+.thin-scrollbar::-webkit-scrollbar-thumb:active { background-color: rgba(196,168,106,0.75); border-width: 1.5px; }
+[data-theme="light"] .thin-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(90,68,40,0.22); }
+[data-theme="light"] .thin-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(160,120,40,0.55); }
+[data-theme="light"] .thin-scrollbar::-webkit-scrollbar-thumb:active { background-color: rgba(160,120,40,0.75); }
+/* Firefox has no ::-webkit rules: a thin themed bar is the closest it gets. */
+@supports not selector(::-webkit-scrollbar) {
+  .thin-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(90,68,40,0.28) transparent; }
+}
+
 /* ---- Selection ---- */
 ::selection { background: rgba(196,168,106,0.18); color: #DFC07E; }
 

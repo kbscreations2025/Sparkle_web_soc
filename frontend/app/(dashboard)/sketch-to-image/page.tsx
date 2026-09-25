@@ -80,7 +80,11 @@ export default function SketchToImagePage() {
     const preview = await makeThumbnail(sketches[0]);
     workspace.generate(
       () => sketchToImage({ images: sketches, description: notes.trim() || undefined, model, quality, count, preview }),
-      { count, prompt: notes.trim() || `Render ${sketches.length > 1 ? `${sketches.length} sketch views` : "this sketch"}` }
+      {
+        count,
+        prompt: notes.trim() || `Render ${sketches.length > 1 ? `${sketches.length} sketch views` : "this sketch"}`,
+        images: sketches,
+      }
     );
   }
 

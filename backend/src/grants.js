@@ -109,6 +109,31 @@ const GRANT_GROUPS = [
         label: "Manage their colleagues' permissions",
         hint: "Only permissions they hold themselves, and never their own — their own organization only",
       },
+      {
+        grant: "org.conversations.read",
+        /*
+         * Reading, never continuing. The holder can open a colleague's chat
+         * from History and see every turn, but the composer is gone and the
+         * server refuses a new turn on a conversation that is not theirs
+         * (generationService.recordGeneration) — a next turn would be billed
+         * to and attributed to whoever sent it, not who started the thread.
+         * Still bounded by the data scope: it opens chats behind results the
+         * holder can already see, not anyone's in the organization.
+         */
+        label: "Open colleagues' chats, read-only",
+        hint: "Every turn of a chat behind a result they can see — they cannot continue it",
+      },
+      {
+        grant: "org.results.delete",
+        /*
+         * Their own results can always be deleted; this is for everyone
+         * else's. Bounded by the data scope like reading is, so it removes
+         * only what the holder can already see in History — and every such
+         * delete is audited, since the owner is not the one doing it.
+         */
+        label: "Delete colleagues' results",
+        hint: "Permanently removes a result they can see, and its files — recorded in the audit log",
+      },
     ],
   },
 ];

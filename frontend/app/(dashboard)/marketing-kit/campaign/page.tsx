@@ -133,7 +133,11 @@ function CampaignKitWorkspace() {
           quality,
           preview,
         }),
-      { count: 4, prompt: "Build a campaign kit — two lifestyle shots and two studio shots" }
+      {
+        count: 4,
+        prompt: "Build a campaign kit — two lifestyle shots and two studio shots",
+        images: [...jewelry.map((item) => item.dataUrl), library.choice!.src],
+      }
     );
   }
 

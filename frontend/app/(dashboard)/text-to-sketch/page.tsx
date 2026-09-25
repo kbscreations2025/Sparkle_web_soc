@@ -91,7 +91,7 @@ export default function TextToSketchPage() {
           count,
           referenceImage: referenceImage ?? undefined,
         }),
-      { count, prompt: finalDescription }
+      { count, prompt: finalDescription, images: referenceImage ? [referenceImage] : [] }
     );
   }
 

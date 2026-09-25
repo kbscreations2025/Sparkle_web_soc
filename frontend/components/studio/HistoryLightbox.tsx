@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { Download, Loader2, MessageCircle, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, Eye, Loader2, MessageCircle, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import type { HistoryItem, HistoryOutput } from "@/lib/api";
 import { downloadImage, downloadName } from "@/lib/image";
 import { useEscapeKey } from "@/lib/useEscapeKey";
@@ -35,6 +35,8 @@ export function HistoryLightbox({
   toolLabel,
   modelLabel,
   canContinue,
+  canView,
+  canDelete = true,
   deleting,
   onClose,
   onDelete,
@@ -46,6 +48,10 @@ export function HistoryLightbox({
   modelLabel?: string | null;
   /** Whether this generation is the viewer's own, in a tool that can resume a thread. */
   canContinue?: boolean;
+  /** A colleague's result the viewer may open to read (org.conversations.read). Uses `onContinue`. */
+  canView?: boolean;
+  /** Their own result, or a colleague's with org.results.delete. */
+  canDelete?: boolean;
   deleting?: boolean;
   onClose: () => void;
   onDelete: (item: HistoryItem) => void;
@@ -159,6 +165,17 @@ export function HistoryLightbox({
                   <MessageCircle size={15} />
                 </button>
               )}
+              {canView && (
+                <button
+                  type="button"
+                  onClick={onContinue}
+                  aria-label={`View ${item.userName}'s chat (read-only)`}
+                  title={`View ${item.userName}'s chat (read-only)`}
+                  className={LIGHTBOX_ACTION}
+                >
+                  <Eye size={15} />
+                </button>
+              )}
               {item.outputs.length > 1 && (
                 <button
                   type="button"
@@ -189,21 +206,24 @@ export function HistoryLightbox({
                   <Download size={15} />
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => onDelete(item)}
-                disabled={deleting}
-                aria-label="Delete"
-                title="Delete"
-                className={cn(
-                  LIGHTBOX_ACTION,
-                  // The one destructive control here, so it reads as one on
-                  // hover rather than looking like another way to save.
-                  "hover:bg-error/20 hover:text-error disabled:cursor-not-allowed disabled:opacity-40"
-                )}
-              >
-                {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-              </button>
+              {/* Own results, or a colleague's with org.results.delete. */}
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(item)}
+                  disabled={deleting}
+                  aria-label="Delete"
+                  title="Delete"
+                  className={cn(
+                    LIGHTBOX_ACTION,
+                    // The one destructive control here, so it reads as one on
+                    // hover rather than looking like another way to save.
+                    "hover:bg-error/20 hover:text-error disabled:cursor-not-allowed disabled:opacity-40"
+                  )}
+                >
+                  {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                </button>
+              )}
               {/* On a phone this lives at the top right instead — see above. */}
               <button
                 type="button"

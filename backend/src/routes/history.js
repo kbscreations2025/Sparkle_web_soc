@@ -7,6 +7,8 @@ const Generation = require("../models/generation");
 const Asset = require("../models/asset");
 const { GENERATION_TOOLS, toPublicAsset } = require("../generations");
 const { deleteObject } = require("../storage/r2");
+const { logAudit, actorFrom, requestMeta } = require("../auditLog");
+const { emitToTenant } = require("../socket");
 
 const router = express.Router();
 
@@ -185,7 +187,7 @@ function buildScopeFilter(dbUser, wantsTeam) {
  * generations land while someone is scrolling, a `before` cursor doesn't.
  */
 router.get("/", async (req, res) => {
-  const { tool, member, before, scope, from, to } = req.query;
+  const { tool, member, before, after, scope, from, to } = req.query;
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
 
   const query = buildScopeFilter(req.dbUser, scope === "team");
@@ -271,6 +273,20 @@ router.get("/", async (req, res) => {
       return res.status(400).json({ status: "error", message: "invalid cursor", code: "invalid" });
     }
     query.createdAt = { ...query.createdAt, $lt: cursor };
+  }
+
+  /*
+   * The other direction: only what is newer than the page's newest tile.
+   * Asked for when a `history:changed` ping says a colleague finished
+   * something — the page fetches just the new rows, through this same scoped
+   * query, rather than reloading everything it already shows.
+   */
+  if (after) {
+    const cursor = new Date(after);
+    if (Number.isNaN(cursor.getTime())) {
+      return res.status(400).json({ status: "error", message: "invalid cursor", code: "invalid" });
+    }
+    query.createdAt = { ...query.createdAt, $gt: cursor };
   }
 
   /*
@@ -364,9 +380,13 @@ function toHistoryItem(generation, dbUser) {
 /**
  * The full thread behind one History tile, in turn order — what a tool page
  * needs to rebuild its chat and pick up where the conversation left off.
- * Only the conversation's own owner may resume it: a shared "whole team"
- * view is read-only, since continuing someone else's thread would attribute
- * the next turn to whoever clicked, not who started it.
+ *
+ * Only the conversation's own owner may resume it. Anyone else gets it only
+ * with `org.conversations.read`, only if the thread is within their data
+ * scope — the same reach that put its tile in their History — and only
+ * read-only: the response says `readOnly`, the tool page drops its composer,
+ * and recordGeneration refuses a turn on someone else's conversation. Every
+ * such view is audited, since it is one person reading another's work.
  */
 router.get("/conversations/:id", async (req, res) => {
   const generations = await Generation.find({
@@ -380,13 +400,40 @@ router.get("/conversations/:id", async (req, res) => {
   if (generations.length === 0) {
     return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
   }
-  if (String(generations[0].userId) !== String(req.dbUser._id)) {
-    return res.status(403).json({ status: "error", message: "you can only continue your own generations", code: "forbidden" });
+  const owner = generations[0];
+  const isOwn = String(owner.userId) === String(req.dbUser._id);
+
+  if (!isOwn) {
+    const forbidden = () =>
+      res.status(403).json({ status: "error", message: "you can only continue your own generations", code: "forbidden" });
+
+    if (!req.isSuperAdmin && !hasPermission(req.dbUser, "org.conversations.read")) return forbidden();
+
+    // Within reach = at least one of its turns would appear in their team
+    // History. Checked against the same filter, so the two can never disagree.
+    if (!req.isSuperAdmin) {
+      const inScope = await Generation.exists({ ...buildScopeFilter(req.dbUser, true), conversationId: req.params.id });
+      if (!inScope) return forbidden();
+    }
+
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: req.dbUser.tenantId,
+      action: "conversation.viewed",
+      status: "success",
+      targetType: "conversation",
+      targetId: String(req.params.id),
+      message: `viewed ${owner.userName || "a colleague"}'s ${owner.tool} chat`,
+      metadata: { ownerId: String(owner.userId), ownerName: owner.userName || null, tool: owner.tool },
+    });
   }
 
   res.json({
     status: "success",
-    tool: generations[0].tool,
+    tool: owner.tool,
+    readOnly: !isOwn,
+    ownerName: isOwn ? null : owner.userName || null,
     generations: generations.map((g) => ({
       id: String(g._id),
       sequence: g.sequence,
@@ -427,16 +474,33 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+/**
+ * Your own result, always. A colleague's only with `org.results.delete`, and
+ * only one within your data scope — the same filter that put its tile in
+ * your team History, so you can delete exactly what you can see and nothing
+ * further. Anything else is a 404, not a 403: whether someone else's result
+ * exists is not something to confirm to a caller who may not touch it.
+ */
 async function deleteGeneration(req, res) {
-  const generation = await Generation.findOne({
+  const notFound = () => res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+
+  const own = await Generation.findOne({
     _id: req.params.id,
     tenantId: req.dbUser.tenantId,
     userId: req.dbUser._id,
     deletedAt: null,
   });
+
+  let generation = own;
   if (!generation) {
-    return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+    if (!req.isSuperAdmin && !hasPermission(req.dbUser, "org.results.delete")) return notFound();
+    generation = await Generation.findOne(
+      req.isSuperAdmin
+        ? { _id: req.params.id, tenantId: req.dbUser.tenantId, deletedAt: null }
+        : { ...buildScopeFilter(req.dbUser, true), _id: req.params.id }
+    );
   }
+  if (!generation) return notFound();
 
   // Optional all the way down: a row that never got as far as recording its
   // assets is exactly the kind of row a user wants to clear out, so it must
@@ -464,6 +528,31 @@ async function deleteGeneration(req, res) {
   await Asset.updateMany({ _id: { $in: assetIds } }, { deletedAt: now });
   generation.deletedAt = now;
   await generation.save();
+
+  // Other open History pages drop the tile if they have it. The id alone,
+  // which says nothing to a page that never had the tile.
+  emitToTenant(req.dbUser.tenantId, "history:changed", { kind: "removed", id: String(generation._id) });
+
+  // Removing a colleague's work is the kind of thing someone later asks
+  // "who did this" about. Clearing out your own is just housekeeping.
+  if (!own) {
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId: req.dbUser.tenantId,
+      action: "generation.deleted",
+      status: "success",
+      targetType: "generation",
+      targetId: String(generation._id),
+      message: `deleted ${generation.userName || "a colleague"}'s ${generation.tool} result`,
+      metadata: {
+        ownerId: String(generation.userId),
+        ownerName: generation.userName || null,
+        tool: generation.tool,
+        conversationId: generation.conversationId ? String(generation.conversationId) : null,
+      },
+    });
+  }
 
   return res.json({ status: "success" });
 }

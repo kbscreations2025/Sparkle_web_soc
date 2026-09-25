@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, Building2, CheckCircle2, ChevronDown, ListFilter, Loader2, Search, CalendarRange, SlidersHorizontal, UserRound, X } from "lucide-react";
+import { AlertCircle, Building2, CheckCircle2, ChevronDown, Coins, History, ListFilter, Loader2, Search, CalendarRange, SlidersHorizontal, UserRound, X } from "lucide-react";
 import {
   listAuditLog,
   getAuditFacets,
   getAuditEntryDetail,
+  fetchAllCreditLedger,
+  type CreditEntry,
   type AuditEntry,
   type AuditFacets,
   type AuditQuery,
@@ -15,6 +17,7 @@ import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { useDismissable } from "@/lib/useEscapeKey";
 import { HEAD_ROW } from "@/components/admin/table";
+import { ScrollEnds } from "@/components/admin/ScrollEnds";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +37,7 @@ const ROW_CELL = "px-3 py-1.5 text-[12px]";
  * A pinned column header.
  *
  * Sticky sits on each `th`, not on the `thead`: a sticky `thead` is honoured
- * inconsistently and, where it is, its background does not reliably paint â€”
+ * inconsistently and, where it is, its background does not reliably paint —
  * rows showed straight through the column names. A cell is a normal box and
  * behaves.
  *
@@ -47,7 +50,7 @@ const STICKY_HEAD = cn(
   "sticky top-0 z-10 bg-surface-float shadow-[inset_0_-1px_0_rgba(255,255,255,0.10)]"
 );
 
-/** A square icon-only control in the filter bar â€” the mobile form of a field. */
+/** A square icon-only control in the filter bar — the mobile form of a field. */
 const ICON_BUTTON =
   "relative flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-muted transition-colors hover:border-white/[0.18] hover:text-cream";
 
@@ -75,7 +78,7 @@ const OUTCOMES = [
 ];
 
 /**
- * `auth.login_success` â†’ "Login success". The action strings are a stable
+ * `auth.login_success` → "Login success". The action strings are a stable
  * wire format and read badly in a table; this makes them readable without a
  * hand-kept label map that would fall behind every action added.
  */
@@ -85,10 +88,10 @@ function humanizeAction(action: string) {
   return tail.charAt(0).toUpperCase() + tail.slice(1);
 }
 
-/** The area an action belongs to â€” `auth.login_success` â†’ "auth". */
+/** The area an action belongs to — `auth.login_success` → "auth". */
 const areaOf = (action: string) => action.split(".")[0];
 
-/** `jobType` / `job_type` / `before.creditsPerUnit` â†’ "Job type" / "Before Â· credits per unit". */
+/** `jobType` / `job_type` / `before.creditsPerUnit` → "Job type" / "Before Â· credits per unit". */
 function humanizeKey(key: string) {
   const words = key
     .split(".")
@@ -111,9 +114,9 @@ function humanizeKey(key: string) {
  * missing value, and an empty array reads as an em dash for the same reason.
  */
 function formatValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "â€”";
+  if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (Array.isArray(value)) return value.length ? value.map(formatValue).join(", ") : "â€”";
+  if (Array.isArray(value)) return value.length ? value.map(formatValue).join(", ") : "—";
   // A timestamp inside metadata (dataScope.grantedAt, and anything logged
   // later) should read the same way as the When column rather than as a raw
   // ISO string. Matched strictly so an id or a model name that happens to
@@ -134,7 +137,7 @@ function formatValue(value: unknown): string {
  * (a pricing rule's `before`/`after`), and "Before Â· credits per unit" reads
  * better in a two-column grid than an indented sub-table would.
  *
- * Nulls are kept rather than dropped â€” for an audit record, "this field was
+ * Nulls are kept rather than dropped — for an audit record, "this field was
  * explicitly empty" is information, not noise.
  */
 function flattenMetadata(metadata: Record<string, unknown>, prefix = ""): [string, unknown][] {
@@ -171,12 +174,12 @@ function DetailField({
  * "3m", "2h", "5d", then a date once it is older than a week.
  *
  * The exact stamp is still one hover away (see the row's `title`). Scanning a
- * log is about recency â€” "was that just now or last Tuesday?" â€” and a column
+ * log is about recency — "was that just now or last Tuesday?" — and a column
  * of identical-looking full dates answers that far more slowly than this.
  */
 function formatRelative(iso: string) {
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "â€”";
+  if (Number.isNaN(then)) return "—";
 
   const seconds = Math.floor((Date.now() - then) / 1000);
   if (seconds < 60) return "just now";
@@ -210,7 +213,7 @@ export default function AuditLogPage() {
   const [hasMore, setHasMore] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // â”€â”€ filters â”€â”€
+  // ── filters ──
   /*
    * Seeded from the URL, and written back to it as they change. A filtered
    * audit log is the thing people send each other — "look at what happened
@@ -237,6 +240,18 @@ export default function AuditLogPage() {
   // this from anyone else, so it is a view control here and not a permission.
   const [tenantIds, setTenantIds] = useState<string[]>(() => params.getAll("tenant"));
 
+  /*
+   * Super admin only: the audit trail, or every organization's credit ledger
+   * (holds, settles, refunds). The ledger endpoint reads across tenants and
+   * sits behind requireSuperAdmin, so nobody else is offered the switch.
+   */
+  const isSuper = Boolean(user?.isSuperAdmin);
+  const [view, setView] = useState<"activity" | "credits">(() =>
+    params.get("view") === "credits" ? "credits" : "activity"
+  );
+  const showCredits = isSuper && view === "credits";
+  const [creditSummary, setCreditSummary] = useState({ count: 0, hasMore: false, loading: true });
+
   const allowed = can(user, PERMISSION);
 
   // One search request per pause in typing, not one per keystroke.
@@ -258,6 +273,7 @@ export default function AuditLogPage() {
    */
   useEffect(() => {
     const next = new URLSearchParams();
+    if (showCredits) next.set("view", "credits");
     if (debouncedSearch.trim()) next.set("q", debouncedSearch.trim());
     actions.forEach((value) => next.append("action", value));
     statuses.forEach((value) => next.append("status", value));
@@ -270,7 +286,7 @@ export default function AuditLogPage() {
     // Only when it actually differs, or this writes on every render.
     if (query === params.toString()) return;
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  }, [debouncedSearch, actions, statuses, actorUserIds, tenantIds, from, to, params, pathname, router]);
+  }, [showCredits, debouncedSearch, actions, statuses, actorUserIds, tenantIds, from, to, params, pathname, router]);
 
   const query = useMemo<AuditQuery>(
     () => ({
@@ -291,7 +307,7 @@ export default function AuditLogPage() {
 
   /*
    * Guards against a slow first page landing after a faster later one and
-   * overwriting it â€” every filter change fires a new request, and they do not
+   * overwriting it — every filter change fires a new request, and they do not
    * come back in order.
    */
   const requestId = useRef(0);
@@ -342,7 +358,7 @@ export default function AuditLogPage() {
     const id = requestId.current;
     try {
       const result = await listAuditLog({ ...query, before: cursor });
-      // A filter changed while this page was in flight â€” its rows belong to a
+      // A filter changed while this page was in flight — its rows belong to a
       // query nobody is looking at any more.
       if (id !== requestId.current) return;
       if (result.status === "success") {
@@ -399,7 +415,7 @@ export default function AuditLogPage() {
 
   function clearFilters() {
     setSearch("");
-    // Collapse the phone's search field too â€” leaving an empty box open
+    // Collapse the phone's search field too — leaving an empty box open
     // after "Clear" reads as though the reset only half-worked.
     setSearchOpen(false);
     setActions([]);
@@ -413,7 +429,7 @@ export default function AuditLogPage() {
   if (!allowed) return <ToolAccessNotice tool="Audit Log" />;
 
   /*
-   * The page itself does not scroll â€” `overflow-hidden` here and a single
+   * The page itself does not scroll — `overflow-hidden` here and a single
    * scrolling region around the rows further down. That is what lets the
    * filter bar and the column headers stay put while only the data moves;
    * with the page scrolling instead, both would slide away at the first
@@ -440,6 +456,39 @@ export default function AuditLogPage() {
          * wraps when the pane is small.
          */}
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-surface-raised/60 p-1.5">
+          {isSuper && <ViewToggle view={view} onChange={setView} />}
+
+          {showCredits ? (
+            <>
+              {facets?.tenants && facets.tenants.length > 0 && (
+                <ChecklistFilter
+                  options={facets.tenants}
+                  selected={tenantIds}
+                  onChange={setTenantIds}
+                  name="organization"
+                  emptyLabel="All organizations"
+                  plural="organizations"
+                  icon={<Building2 size={13} />}
+                />
+              )}
+              <span className="ml-auto whitespace-nowrap px-1 text-[11px] text-faint">
+                {creditSummary.loading
+                  ? "Loading.."
+                  : `${creditSummary.count}${creditSummary.hasMore ? "+" : ""} movements`}
+              </span>
+              {tenantIds.length > 0 && (
+                <button
+                  onClick={() => setTenantIds([])}
+                  aria-label="Clear organization filter"
+                  title="Clear organization filter"
+                  className={ICON_BUTTON}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </>
+          ) : (
+          <>
           {/* Search is a field from sm up. On a phone it starts as an icon and
               expands on tap: a permanent text box was taking the whole first
               row on its own. */}
@@ -541,21 +590,26 @@ export default function AuditLogPage() {
               <X size={13} />
             </button>
           )}
+          </>
+          )}
         </div>
 
-        {/* â”€â”€ table â”€â”€ */}
-        {loading && entries.length === 0 ? (
+        {/* ── table ── */}
+        {showCredits ? (
+          <CreditMovements tenantIds={tenantIds} onSummary={setCreditSummary} />
+        ) : loading && entries.length === 0 ? (
           <TableSkeleton />
         ) : entries.length === 0 ? (
           <p className="text-sm text-muted">
             {activeFilters > 0 ? "Nothing matches those filters." : "No activity recorded yet."}
           </p>
         ) : (
-          <>
+          // The wrapper holds the jump arrows still while the rows scroll.
+          <div className="relative flex min-h-0 flex-1 flex-col">
             {/* The one scrolling region on the page. */}
             <div
               ref={scrollerRef}
-              className="min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-surface-raised/60"
+              className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
             >
               {/* 460 rather than 900: with the tighter cells and a relative
                   timestamp the columns fit the pane without a horizontal
@@ -564,7 +618,7 @@ export default function AuditLogPage() {
                 <thead>
                   <tr className={HEAD_ROW}>
                     {/* Below lg the time moves inside the Action cell rather
-                        than holding a column of its own â€” see AuditRow. */}
+                        than holding a column of its own — see AuditRow. */}
                     <th className={cn(STICKY_HEAD, "hidden w-[92px] lg:table-cell")}>When</th>
                     <th className={cn(STICKY_HEAD, "w-[150px]")}>Action</th>
                     <th className={cn(STICKY_HEAD, "hidden w-[130px] md:table-cell")}>Who</th>
@@ -586,7 +640,7 @@ export default function AuditLogPage() {
                 </tbody>
               </table>
 
-              {/* Inside the scroller, after the last row â€” it is the end of
+              {/* Inside the scroller, after the last row — it is the end of
                   the list, so it belongs where scrolling actually ends
                   rather than pinned under the frame. */}
               {hasMore && (
@@ -608,7 +662,8 @@ export default function AuditLogPage() {
                 </div>
               )}
             </div>
-          </>
+            <ScrollEnds scrollerRef={scrollerRef} insetTop={30} />
+          </div>
         )}
       </div>
     </div>
@@ -659,6 +714,216 @@ function TableSkeleton() {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** Switches the page between the audit trail and the credit ledger. */
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: "activity" | "credits";
+  onChange: (view: "activity" | "credits") => void;
+}) {
+  // Icons alone on a phone, like the rest of the bar's controls; labels from sm up.
+  const options = [
+    { id: "activity", label: "Activity", icon: <History size={13} /> },
+    { id: "credits", label: "Credit movements", icon: <Coins size={13} /> },
+  ] as const;
+
+  return (
+    <div role="tablist" className="flex shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="tab"
+          aria-selected={view === option.id}
+          aria-label={option.label}
+          title={option.label}
+          onClick={() => onChange(option.id)}
+          className={cn(
+            "flex h-[24px] w-[28px] items-center justify-center whitespace-nowrap rounded-md text-[11px] transition-colors sm:h-auto sm:w-auto sm:px-2.5 sm:py-1",
+            view === option.id ? "bg-gold/15 font-medium text-gold" : "text-muted hover:text-cream"
+          )}
+        >
+          <span className="sm:hidden">{option.icon}</span>
+          <span className="hidden sm:inline">{option.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type LedgerRow = CreditEntry & { tenant: string | null };
+
+/**
+ * Every hold, settle and refund across organizations, newest first.
+ *
+ * Holds stay in alongside charges: "frozen 200" followed by "charged 50" is
+ * the story of a four-image run that delivered one, and hiding the first line
+ * makes the second look like a mistake.
+ */
+function CreditMovements({
+  tenantIds,
+  onSummary,
+}: {
+  tenantIds: string[];
+  onSummary: (summary: { count: number; hasMore: boolean; loading: boolean }) => void;
+}) {
+  const [rows, setRows] = useState<LedgerRow[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState("");
+  const requestId = useRef(0);
+  const tenantKey = tenantIds.join(",");
+
+  useEffect(() => {
+    const id = ++requestId.current;
+    setLoading(true);
+    fetchAllCreditLedger({ tenantIds: tenantKey ? tenantKey.split(",") : [] })
+      .then((result) => {
+        if (id !== requestId.current) return;
+        if (result.status === "success") {
+          setRows(result.entries ?? []);
+          setHasMore(Boolean(result.hasMore));
+          setCursor(result.nextCursor ?? null);
+          setError("");
+        } else {
+          setError(result.message || "Could not load credit movements");
+        }
+      })
+      .catch(() => {
+        if (id === requestId.current) setError("Could not reach the server");
+      })
+      .finally(() => {
+        if (id === requestId.current) setLoading(false);
+      });
+  }, [tenantKey]);
+
+  useEffect(() => {
+    onSummary({ count: rows.length, hasMore, loading });
+  }, [rows.length, hasMore, loading, onSummary]);
+
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    const id = requestId.current;
+    try {
+      const result = await fetchAllCreditLedger({
+        tenantIds: tenantKey ? tenantKey.split(",") : [],
+        before: cursor,
+      });
+      if (id !== requestId.current) return;
+      if (result.status === "success") {
+        setRows((current) => [...current, ...(result.entries ?? [])]);
+        setHasMore(Boolean(result.hasMore));
+        setCursor(result.nextCursor ?? null);
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [cursor, loadingMore, tenantKey]);
+
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasMore) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) loadMore();
+      },
+      { root: scrollerRef.current, rootMargin: "400px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore]);
+
+  const amountOf = (entry: LedgerRow) =>
+    entry.kind === "hold"
+      ? `−${entry.held.toLocaleString()} frozen`
+      : entry.amount === 0
+        ? `+${entry.held.toLocaleString()} released`
+        : `${entry.amount > 0 ? "+" : ""}${entry.amount.toLocaleString()}`;
+
+  if (error) {
+    return (
+      <p className="shrink-0 rounded-lg border border-error/20 bg-error/[0.08] px-3 py-2 text-xs text-error">{error}</p>
+    );
+  }
+  if (loading && rows.length === 0) return <TableSkeleton />;
+  if (rows.length === 0) return <p className="text-sm text-muted">No credits have moved yet.</p>;
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollerRef}
+        className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
+      >
+        <table className="w-full min-w-[460px] border-collapse">
+          <thead>
+            <tr className={HEAD_ROW}>
+              <th className={cn(STICKY_HEAD, "w-[92px]")}>When</th>
+              <th className={cn(STICKY_HEAD, "hidden w-[140px] md:table-cell")}>Organization</th>
+              <th className={cn(STICKY_HEAD, "w-[140px]")}>Holder</th>
+              <th className={STICKY_HEAD}>Movement</th>
+              <th className={cn(STICKY_HEAD, "w-[120px] text-right")}>Credits</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((entry) => (
+              <tr key={entry.id} className="border-t border-white/5">
+                <td
+                  className={cn(ROW_CELL, "whitespace-nowrap text-muted tabular-nums")}
+                  title={formatWhen(entry.createdAt)}
+                >
+                  {formatRelative(entry.createdAt)}
+                </td>
+                <td className={cn(ROW_CELL, "hidden truncate text-muted md:table-cell")}>
+                  {entry.tenant || <span className="text-faint">—</span>}
+                </td>
+                <td className={cn(ROW_CELL, "truncate text-cream")}>{entry.holder || "—"}</td>
+                <td className={ROW_CELL}>
+                  <span className="font-medium text-cream">{entry.kind}</span>
+                  {entry.tool && <span className="ml-1.5 text-faint">{entry.tool}</span>}
+                  {/* The quote, which is what makes a charge explicable */}
+                  {entry.unitPrice !== null && entry.units !== null && (
+                    <span className="ml-1.5 text-faint">
+                      {entry.units} × {entry.unitPrice}
+                    </span>
+                  )}
+                </td>
+                <td className={cn(ROW_CELL, "whitespace-nowrap text-right tabular-nums text-cream")}>
+                  {amountOf(entry)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+  
+        {hasMore && (
+          <div
+            ref={sentinelRef}
+            className="flex w-full items-center justify-center gap-1.5 border-t border-white/5 px-3 py-3 text-[11px] text-faint"
+          >
+            {loadingMore ? (
+              <>
+                <Loader2 size={12} className="animate-spin" /> Loading more…
+              </>
+            ) : (
+              <button onClick={loadMore} className="transition-colors hover:text-cream">
+                Load more
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <ScrollEnds scrollerRef={scrollerRef} insetTop={30} />
     </div>
   );
 }
@@ -769,7 +1034,7 @@ function AuditRow({
               {areaOf(entry.action)}
             </span>
             {/* Only a super admin is reading more than one organization, and
-                only they are sent this â€” for everyone else every row would
+                only they are sent this — for everyone else every row would
                 carry the same badge. A badge rather than a column, so the
                 shared page keeps one table shape for both readers. */}
             {entry.tenant && (
@@ -789,17 +1054,17 @@ function AuditRow({
             {formatRelative(entry.createdAt)}
           </span>
         </td>
-        {/* One line, with the email on hover â€” it was doubling every row's
+        {/* One line, with the email on hover — it was doubling every row's
             height to show something that is almost always redundant with
             the name beside it. */}
         <td
           className={cn(ROW_CELL, "hidden truncate text-muted md:table-cell")}
           title={entry.actor.email ?? undefined}
         >
-          {entry.actor.name || entry.actor.email || <span className="text-faint">â€”</span>}
+          {entry.actor.name || entry.actor.email || <span className="text-faint">—</span>}
         </td>
         <td className={cn(ROW_CELL, "text-muted")}>
-          {entry.message || <span className="text-faint">â€”</span>}
+          {entry.message || <span className="text-faint">—</span>}
           {hasDetail && (
             <ChevronDown
               size={11}
@@ -813,11 +1078,11 @@ function AuditRow({
               readable, so the actor rides along underneath instead of
               disappearing. */}
           <span className="block truncate text-[10px] text-faint md:hidden">
-            {entry.actor.name || entry.actor.email || "â€”"}
+            {entry.actor.name || entry.actor.email || "—"}
           </span>
         </td>
         <td className={cn(ROW_CELL, "hidden whitespace-nowrap text-faint tabular-nums lg:table-cell")}>
-          {entry.ip || "â€”"}
+          {entry.ip || "—"}
         </td>
       </tr>
 
@@ -866,7 +1131,7 @@ function AuditRow({
  * `include` splits them by how often they are reached for. Organization and
  * person are the cuts someone makes constantly, so they stay in the bar;
  * outcome and a date range are occasional, and six controls in one row left
- * the bar too dense to read â€” they moved behind the filter icon, which had
+ * the bar too dense to read — they moved behind the filter icon, which had
  * only existed on phones.
  */
 function FilterFields({
@@ -1275,7 +1540,7 @@ function ChecklistFilter({
  * Multi-select for actions, grouped by area.
  *
  * A plain `<select multiple>` is unusable at this length, and a single-select
- * would not answer "show me every auth failure and every forced logout" â€”
+ * would not answer "show me every auth failure and every forced logout" —
  * which is the question this page exists for.
  */
 function ActionFilter({
@@ -1309,7 +1574,7 @@ function ActionFilter({
 
   return (
     <div ref={rootRef} className="relative">
-      {/* Icon-only on a phone, a labelled field from sm up â€” the same
+      {/* Icon-only on a phone, a labelled field from sm up — the same
           control, sized to the space it has. */}
       <button
         type="button"

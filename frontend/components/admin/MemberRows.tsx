@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { Minus, Monitor, Plus, Shield, SlidersHorizontal, Trash2, Loader2 } from "lucide-react";
 import type { GrantGroup, Member, DataScope, updateMember } from "@/lib/api";
 import { Modal } from "@/components/admin/Modal";
-import { NESTED_CELL as CELL, HEAD_ROW, NESTED_TABLE_FRAME } from "@/components/admin/table";
+import { COMPACT_CELL as CELL, COMPACT_HEAD as HEAD, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
 
 const ROLES = ["user", "admin"];
@@ -50,6 +50,7 @@ export function MemberRows({
   assignableGrants,
   selfId,
   canRemove = true,
+  visible,
 }: {
   members: Member[];
   groups: GrantGroup[];
@@ -71,6 +72,12 @@ export function MemberRows({
   selfId?: string;
   /** False on the organization page — removing people stays with the console. */
   canRemove?: boolean;
+  /**
+   * Which rows to show, for a search box above the table. A filter rather
+   * than a shorter `members` list, because the permissions editor picks
+   * "selected" peers from everyone — hiding a row must not hide them there.
+   */
+  visible?: (member: Member) => boolean;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -78,23 +85,42 @@ export function MemberRows({
     return <p className="px-4 py-6 text-[12px] text-muted">Nobody here yet. Use the add button above.</p>;
   }
 
+  // The viewer's own row first, then admins, then everyone else — each group
+  // keeping the server's order, since sort is stable. Admins are the people
+  // a reader of this table is usually looking for.
+  const isSelf = (member: Member) => Boolean(selfId) && String(member.id) === String(selfId);
+  const rank = (member: Member) => (isSelf(member) ? 0 : member.role === "admin" ? 1 : 2);
+  const shown = (visible ? members.filter(visible) : [...members]).sort((a, b) => rank(a) - rank(b));
+
   return (
-    <div className={NESTED_TABLE_FRAME}>
+    // Same frame, header and density as the audit log, so the two lists an
+    // admin moves between read as one system. On a phone the table narrows
+    // to name, credits and actions — the reasons to open it — and status
+    // folds under the email rather than pushing credits off-screen.
+    <div className={TABLE_FRAME}>
       <table className="w-full border-collapse">
         <thead>
           <tr className={HEAD_ROW}>
-            <th className={cn(CELL, "hidden w-10 sm:table-cell")}>#</th>
-            <th className={CELL}>Name</th>
-            <th className={cn(CELL, "hidden md:table-cell")}>Role</th>
-            <th className={CELL}>Status</th>
-            <th className={cn(CELL, "hidden lg:table-cell")}>Last login</th>
-            <th className={cn(CELL, "hidden lg:table-cell")}>Active</th>
-            <th className={cn(CELL, "text-center")}>Credits</th>
-            <th className={cn(CELL, "text-right")}>Actions</th>
+            <th className={cn(HEAD, "hidden w-10 sm:table-cell")}>#</th>
+            <th className={HEAD}>Name</th>
+            {/* From lg only: below that the shield by the name already says who is an admin. */}
+            <th className={cn(HEAD, "hidden lg:table-cell")}>Role</th>
+            <th className={cn(HEAD, "hidden sm:table-cell")}>Status</th>
+            <th className={cn(HEAD, "hidden lg:table-cell")}>Last login</th>
+            <th className={cn(HEAD, "hidden lg:table-cell")}>Active</th>
+            <th className={cn(HEAD, "text-center")}>Credits</th>
+            <th className={cn(HEAD, "text-right")}>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {members.map((member, index) => (
+          {shown.length === 0 && (
+            <tr>
+              <td colSpan={8} className="px-4 py-6 text-center text-[12px] text-muted">
+                No members match these filters.
+              </td>
+            </tr>
+          )}
+          {shown.map((member, index) => (
             <MemberRow
               key={member.id}
               member={member}
@@ -263,37 +289,47 @@ function MemberRow({
 
   return (
     <>
-      <tr className="border-t border-white/5 align-middle">
-        <td className={cn(CELL, "hidden text-faint sm:table-cell")}>{index}</td>
+      <tr className={cn("border-t border-white/5 align-middle transition-colors hover:bg-white/[0.03]", open && "bg-white/[0.03]")}>
+        <td className={cn(CELL, "hidden text-faint tabular-nums sm:table-cell")}>{index}</td>
 
-        <td className={CELL}>
+        <td className={cn(CELL, "max-w-[150px] sm:max-w-[240px]")}>
           <div className="flex items-center gap-1.5">
             {/* Marks the admin label at a glance, as in the roster design. */}
             {member.role === "admin" && <Shield size={12} className="shrink-0 text-gold/70" />}
-            <div className="min-w-0">
+            <div className="min-w-0 leading-tight">
               <p className="truncate font-medium text-cream">
                 {member.name || member.email}
                 {/* The reader's own row, which the server sorts to the top.
                     Without the label the ordering reads as a bug. */}
                 {readOnly && (
-                  <span className="ml-1.5 rounded bg-gold/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-gold">
+                  <span className="ml-1.5 rounded border border-gold/20 bg-gold/[0.06] px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-gold/80">
                     You
                   </span>
                 )}
               </p>
-              <p className="truncate text-[11px] text-gold/60">{member.email}</p>
+              <p className="truncate text-[10px] text-faint">{member.email}</p>
+              {/* The status column's stand-in on a phone. Read-only here;
+                  changing it is a wider-screen task. */}
+              <span
+                className={cn(
+                  "mt-0.5 inline-block rounded border px-1 py-px text-[9px] font-semibold uppercase tracking-wide sm:hidden",
+                  STATUS_TONE[member.status] ?? STATUS_TONE.removed
+                )}
+              >
+                {member.status}
+              </span>
             </div>
           </div>
         </td>
 
-        <td className={cn(CELL, "hidden md:table-cell")}>
+        <td className={cn(CELL, "hidden lg:table-cell")}>
           {/* Editable inline: role is only a label, so this changes nothing about access. */}
           <select
             value={member.role}
             onChange={(event) => onPatch({ role: event.target.value })}
             disabled={readOnly}
             aria-label={`Role label for ${member.email}`}
-            className="rounded border border-white/10 bg-white/[0.06] px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cream outline-none focus:border-gold/40"
+            className="rounded border border-white/10 bg-white/[0.06] px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cream outline-none focus:border-gold/40 disabled:opacity-70"
           >
             {ROLES.map((role) => (
               <option key={role} value={role}>
@@ -303,14 +339,14 @@ function MemberRow({
           </select>
         </td>
 
-        <td className={CELL}>
+        <td className={cn(CELL, "hidden sm:table-cell")}>
           <select
             value={member.status}
             onChange={(event) => onPatch({ status: event.target.value })}
             disabled={readOnly}
             aria-label={`Account status for ${member.email}`}
             className={cn(
-              "rounded border px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide outline-none",
+              "rounded border px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide outline-none disabled:opacity-70",
               STATUS_TONE[member.status] ?? STATUS_TONE.removed
             )}
           >
@@ -322,7 +358,7 @@ function MemberRow({
           </select>
         </td>
 
-        <td className={cn(CELL, "hidden whitespace-nowrap text-muted lg:table-cell")}>{formatLastLogin(member.lastLoginAt)}</td>
+        <td className={cn(CELL, "hidden whitespace-nowrap text-muted tabular-nums lg:table-cell")}>{formatLastLogin(member.lastLoginAt)}</td>
 
         <td className={cn(CELL, "hidden lg:table-cell")}>
           {/* Live socket connections right now — open tabs and devices. */}
@@ -334,7 +370,7 @@ function MemberRow({
                 : "Not connected"
             }
           >
-            <Monitor size={15} className={member.liveSessions > 0 ? "text-success" : "text-faint"} />
+            <Monitor size={13} className={member.liveSessions > 0 ? "text-success" : "text-faint"} />
             {member.liveSessions > 0 && (
               <span className="absolute -right-1.5 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-void">
                 {member.liveSessions}
@@ -390,13 +426,13 @@ function MemberRow({
               aria-expanded={open}
               title="Permissions and data scope"
               className={cn(
-                "rounded border p-1.5 transition-colors",
+                "rounded border p-1 transition-colors",
                 open
                   ? "border-gold/40 bg-gold/15 text-gold"
                   : "border-white/10 text-muted hover:bg-white/[0.07] hover:text-cream"
               )}
             >
-              <SlidersHorizontal size={13} />
+              <SlidersHorizontal size={12} />
             </button>
 
             {confirming ? (

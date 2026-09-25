@@ -25,3 +25,21 @@ export type ChatMsg = {
   retryImage?: string;
   retryRefImages?: string[];
 };
+
+/**
+ * The images a recorded turn was given, in a user bubble's shape: what the
+ * turn worked on shown large, references small. Used wherever a thread is
+ * rebuilt from History, so a reopened chat shows the same inputs a live one did.
+ *
+ * On a refinement the thing worked on is the "edited" input — whichever
+ * result was picked, possibly one of several variations, possibly marked
+ * up. It is shown on the turn rather than assumed from the answer above,
+ * because with more than one variation the answer above does not say which.
+ */
+export function turnImages(inputs: { url: string; role: string }[]): Pick<ChatMsg, "image" | "refImages"> {
+  const shown = inputs.filter((asset) => asset.url);
+  const primary = shown.filter((asset) => asset.role !== "reference").map((asset) => asset.url);
+  const references = shown.filter((asset) => asset.role === "reference").map((asset) => asset.url);
+  const [image, ...rest] = [...primary, ...references];
+  return { image, refImages: rest.length ? rest : undefined };
+}

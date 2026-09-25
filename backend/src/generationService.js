@@ -7,7 +7,7 @@ const Asset = require("./models/asset");
 const { uploadObject, buildAssetKey, variantKeyFor, publicUrlFor } = require("./storage/r2");
 const { createThumbnail, THUMB_EXTENSION } = require("./storage/thumbnail");
 const { toPublicAsset } = require("./generations");
-const { emitToUser } = require("./socket");
+const { emitToUser, emitToTenant } = require("./socket");
 const { logAudit } = require("./auditLog");
 
 const EXTENSION_BY_MIME = {
@@ -77,8 +77,12 @@ async function recordGeneration({
   /** Which AI provider actually served this run — "gemini" by default, since every call site predates multi-provider routing except the ones that now pass it explicitly. */
   provider,
 }) {
+  // By owner as well as tenant: a colleague may be able to *read* this thread
+  // (org.conversations.read) but never add to it. The routes refuse that up
+  // front with isOwnConversation, before anything is charged — this is the
+  // backstop for any path that forgets to.
   const conversation = existingConversationId
-    ? await Conversation.findOne({ _id: existingConversationId, tenantId: tenant._id })
+    ? await Conversation.findOne({ _id: existingConversationId, tenantId: tenant._id, userId: user._id })
     : await Conversation.create({
         tenantId: tenant._id,
         userId: user._id,
@@ -170,6 +174,11 @@ async function recordGeneration({
     outputs: outputAssets.map((entry) => toPublicAsset(entry.snapshot)),
     text: outputText,
   });
+
+  // And a bare ping to the rest of the organization, so a colleague's open
+  // History can fetch it — through its own scoped request, since whether they
+  // may see this at all is theirs to be checked for, not ours to assume.
+  emitToTenant(tenant._id, "history:changed", { kind: "added" });
 
   logAudit({
     tenantId: tenant._id,
@@ -366,4 +375,21 @@ async function resolveInlineImage(value) {
   return null;
 }
 
-module.exports = { recordGeneration, parseDataUri, fetchAsInlineImage, resolveInlineImage };
+/**
+ * Whether `dbUser` may add a turn to `conversationId` — true for no id (a new
+ * conversation), otherwise only if it is theirs.
+ *
+ * Asked before a run is charged or queued, so a request naming someone
+ * else's thread fails with nothing spent. Without it the check would come
+ * only in recordGeneration, after the provider call: the sender would be
+ * billed for an image that then could not be saved anywhere.
+ */
+async function isOwnConversation(dbUser, conversationId) {
+  if (!conversationId) return true;
+  if (!mongoose.isValidObjectId(conversationId)) return false;
+  return Boolean(
+    await Conversation.exists({ _id: conversationId, tenantId: dbUser.tenantId, userId: dbUser._id })
+  );
+}
+
+module.exports = { recordGeneration, parseDataUri, fetchAsInlineImage, resolveInlineImage, isOwnConversation };

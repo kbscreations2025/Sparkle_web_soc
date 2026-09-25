@@ -1,5 +1,5 @@
 const { enqueueJob, toPublicJob } = require("../queue");
-const { parseDataUri } = require("../generationService");
+const { parseDataUri, isOwnConversation } = require("../generationService");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const credit = require("../services/credits");
 
@@ -39,6 +39,18 @@ function parseImages(value) {
  */
 async function queueGeneration(req, res, { type, tool, request, payload, preview, message }) {
   const { dbUser } = req;
+
+  // Before the hold: a turn on someone else's conversation is refused with
+  // nothing charged. Reading a colleague's chat is allowed (with
+  // org.conversations.read); adding to it never is.
+  const conversationId = payload?.conversationId ?? request?.conversationId ?? req.body?.conversationId ?? null;
+  if (!(await isOwnConversation(dbUser, conversationId))) {
+    return res.status(403).json({
+      status: "error",
+      message: "This chat belongs to someone else — you can view it but not continue it.",
+      code: "forbidden",
+    });
+  }
 
   /*
    * Paid for before it is queued, never after. A job that reaches the queue

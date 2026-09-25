@@ -7,11 +7,12 @@ import { ImagePlus, Upload } from "lucide-react";
 import { ChatMessages } from "@/components/studio/ChatMessages";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
+import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
 import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
 import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
 import { ToolHeader } from "@/components/studio/ToolHeader";
-import type { ChatMsg } from "@/components/studio/chat";
+import { turnImages, type ChatMsg } from "@/components/studio/chat";
 import {
   chatEdit,
   fetchConversationForTool,
@@ -58,6 +59,8 @@ export default function ChatToEditPage() {
   const [busy, setBusy] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [error, setError] = useState("");
+  /** A colleague's chat reopened to read — no composer, and `send` refuses. */
+  const [readOnly, setReadOnly] = useState<{ ownerName: string | null } | null>(null);
 
   // An annotated *photo* goes back into whichever slot holds the base image:
   // the pending one before the first send, the annotated-copy slot after it.
@@ -85,14 +88,16 @@ export default function ChatToEditPage() {
 
     let cancelled = false;
     (async () => {
-      const generations = await fetchConversationForTool(resumeId, "chat_to_edit");
-      if (cancelled || !generations) return;
+      const thread = await fetchConversationForTool(resumeId, "chat_to_edit");
+      if (cancelled || !thread) return;
+      const { generations } = thread;
+      setReadOnly(thread.readOnly ? { ownerName: thread.ownerName } : null);
 
-      const resumedHistory: ChatMsg[] = generations.flatMap((turn, index) => {
-        const startImage = index === 0 ? turn.inputAssets.find((a) => a.role === "uploaded")?.url : undefined;
-        const refImages = turn.inputAssets.filter((a) => a.role === "reference").map((a) => a.url);
+      const resumedHistory: ChatMsg[] = generations.flatMap((turn) => {
         return [
-          { id: `${turn.id}-user`, role: "user" as const, content: turn.userPrompt || "Edit this image", image: startImage, refImages: refImages.length ? refImages : undefined },
+          // Every turn with the image it edited — the upload on the first,
+          // the version being changed on each after — plus its references.
+          { id: `${turn.id}-user`, role: "user" as const, content: turn.userPrompt || "Edit this image", ...turnImages(turn.inputAssets) },
           { id: `${turn.id}-assistant`, role: "assistant" as const, content: "Updated", image: turn.outputAssets[0]?.url },
         ];
       });
@@ -108,8 +113,9 @@ export default function ChatToEditPage() {
 
       // The stage paints instantly from the R2 URL above; swapped for the
       // data URI the backend actually requires once it's ready, since the
-      // next edit sends whatever `currentImage` currently holds.
-      if (resumedImage) {
+      // next edit sends whatever `currentImage` currently holds. Not needed
+      // for a read-only thread, which never sends an edit.
+      if (resumedImage && !thread.readOnly) {
         urlToDataUrl(resumedImage)
           .then((dataUrl) => setCurrentImage((current) => (current === resumedImage ? dataUrl : current)))
           .catch((err) => console.error("could not prepare resumed image for editing:", err));
@@ -137,6 +143,7 @@ export default function ChatToEditPage() {
     setHistory([]);
     setChatInput("");
     setError("");
+    setReadOnly(null);
     conversationId.current = null;
     parentGenerationId.current = null;
   }
@@ -157,19 +164,19 @@ export default function ChatToEditPage() {
    */
   async function send(instructionOverride?: string) {
     const baseImage = currentImage ?? pendingImage;
-    if (!baseImage) return;
+    if (!baseImage || readOnly) return;
 
     const instruction = (instructionOverride ?? chatInput).trim() || "Enhance this image.";
     const refsThisTurn = annotatedPhoto ? [annotatedPhoto, ...referenceImages] : referenceImages;
-    const isFirstTurn = !currentImage;
 
     const userMsg: ChatMsg = {
       id: crypto.randomUUID(),
       role: "user",
       content: instruction,
-      // The base image is only shown as "attached" on the turn that staged
-      // it; later turns are edits of what's already on screen.
-      image: isFirstTurn ? baseImage : undefined,
+      // Every turn shows the image it edits: the staged photo on the first,
+      // the current version on each after — so a request is never read
+      // without knowing which picture it was about.
+      image: baseImage,
       refImages: refsThisTurn.length ? refsThisTurn : undefined,
     };
     setHistory((current) => [...current, userMsg]);
@@ -259,12 +266,17 @@ export default function ChatToEditPage() {
               history={history}
               busy={busy}
               onSelectResult={(src) => setSelectedView(src)}
-              onRetry={retry}
-              hints={history.length === 0 ? (currentImage || pendingImage ? EDIT_HINTS : START_HINTS) : undefined}
+              onRetry={readOnly ? undefined : retry}
+              hints={
+                !readOnly && history.length === 0 ? (currentImage || pendingImage ? EDIT_HINTS : START_HINTS) : undefined
+              }
               onHint={(hint) => (currentImage || pendingImage ? send(hint) : undefined)}
             />
 
             <div className="shrink-0 border-t border-white/[0.06] p-3">
+              {readOnly ? (
+                <ReadOnlyChatNotice ownerName={readOnly.ownerName} />
+              ) : (
               <ChatInputBar
                 value={chatInput}
                 onChange={setChatInput}
@@ -286,6 +298,7 @@ export default function ChatToEditPage() {
                     : "Attach a jewellery photo below, then describe your first edit…"
                 }
               />
+              )}
             </div>
           </>
         }
@@ -300,7 +313,7 @@ export default function ChatToEditPage() {
                 // Hidden while the annotation toolbar occupies the same corner.
                 downloadName={annotating ? undefined : "edited.jpg"}
                 onExpand={annotating ? undefined : setLightboxSrc}
-                onAnnotate={annotating ? undefined : (src) => setAnnotating({ src, target: "stage" })}
+                onAnnotate={annotating || readOnly ? undefined : (src) => setAnnotating({ src, target: "stage" })}
               />
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center">

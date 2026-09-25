@@ -42,7 +42,8 @@ export function ChatMessages({
   selectedSrc?: string | null;
   /** Called with a past assistant turn's image when its thumbnail is clicked. */
   onSelectResult: (src: string) => void;
-  onRetry: (msg: ChatMsg) => void;
+  /** Omitted on a read-only thread, which hides the retry button. */
+  onRetry?: (msg: ChatMsg) => void;
   /** Quick-start or refinement suggestions. Whether they still apply is the caller's call. */
   hints?: string[];
   hintsLabel?: string;
@@ -97,9 +98,55 @@ function Thumb({ src, className, sizes }: { src: string; className: string; size
   );
 }
 
-/** Tile sizes shared by results and their placeholders, so the two never disagree. */
-const TILE_MULTI = "h-11 w-11 sm:h-12 sm:w-12";
-const TILE_SINGLE = "h-14 w-14 sm:h-16 sm:w-16";
+/**
+ * The one thumbnail size in a thread — what you sent, what came back, its
+ * placeholder, a reference. One size, so a thread reads as a steady column
+ * of pictures rather than a mix of large and small ones, and kept small
+ * because the stage beside it is where an image is actually looked at.
+ */
+const TILE = "h-11 w-11 sm:h-12 sm:w-12";
+const TILE_SIZES = "48px";
+
+/**
+ * One image in a thread: click to put it on the stage, hover for a download
+ * button in its corner. The same control on both sides of the thread, so
+ * what you sent can be saved exactly like what came back.
+ */
+function ThumbTile({
+  src,
+  filename,
+  selected = false,
+  onOpen,
+}: {
+  src: string;
+  filename: string;
+  selected?: boolean;
+  onOpen: (src: string) => void;
+}) {
+  return (
+    <div className="group/tile relative">
+      <button
+        type="button"
+        onClick={() => onOpen(src)}
+        className={cn(
+          "block overflow-hidden rounded-md border transition-colors",
+          selected ? "border-gold/60" : "border-transparent hover:border-gold/30"
+        )}
+      >
+        <Thumb src={src} className={TILE} sizes={TILE_SIZES} />
+      </button>
+      <button
+        type="button"
+        onClick={() => downloadImage(src, filename)}
+        title="Download"
+        aria-label="Download"
+        className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white/[0.12] bg-surface-float text-faint opacity-0 transition-opacity hover:text-gold focus-visible:opacity-100 group-hover/tile:opacity-100"
+      >
+        <Download size={9} />
+      </button>
+    </div>
+  );
+}
 
 function UserBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) => void }) {
   const images = [...(msg.image ? [msg.image] : []), ...(msg.refImages ?? [])];
@@ -110,13 +157,12 @@ function UserBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) => vo
         {images.length > 0 && (
           <div className="flex flex-wrap justify-end gap-1">
             {images.map((src, i) => (
-              <button key={i} type="button" onClick={() => onOpen(src)}>
-                <Thumb
-                  src={src}
-                  className={i === 0 && msg.image ? "h-9 w-9" : "h-7 w-7"}
-                  sizes={i === 0 && msg.image ? "36px" : "28px"}
-                />
-              </button>
+              <ThumbTile
+                key={i}
+                src={src}
+                filename={i === 0 && msg.image ? "input.jpg" : `reference-${i + (msg.image ? 0 : 1)}.jpg`}
+                onOpen={onOpen}
+              />
             ))}
           </div>
         )}
@@ -149,30 +195,13 @@ function AssistantBubble({
       <div className="max-w-[85%] space-y-1 rounded-xl rounded-bl-sm border border-white/10 bg-white/[0.04] p-1.5">
         <div className="flex flex-wrap gap-1">
           {images.map((src, index) => (
-            <div key={`${src}-${index}`} className="group/tile relative">
-              <button
-                type="button"
-                onClick={() => onOpen(src)}
-                className={cn(
-                  "block overflow-hidden rounded-md border transition-colors",
-                  src === selectedSrc ? "border-gold/60" : "border-transparent hover:border-gold/30"
-                )}
-              >
-                <Thumb
-                  src={src}
-                  className={images.length > 1 ? TILE_MULTI : TILE_SINGLE}
-                  sizes={images.length > 1 ? "48px" : "64px"}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadImage(src, `result-${index + 1}.jpg`)}
-                title="Download"
-                className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white/[0.12] bg-surface-float text-faint opacity-0 transition-opacity hover:text-gold group-hover/tile:opacity-100"
-              >
-                <Download size={9} />
-              </button>
-            </div>
+            <ThumbTile
+              key={`${src}-${index}`}
+              src={src}
+              filename={`result-${index + 1}.jpg`}
+              selected={src === selectedSrc}
+              onOpen={onOpen}
+            />
           ))}
         </div>
 
@@ -227,9 +256,7 @@ function SkeletonBubble({
         <div className="flex flex-wrap gap-1">
           {Array.from({ length: tiles }, (_, index) => {
             const src = arrived[index];
-            const size = tiles > 1 ? TILE_MULTI : TILE_SINGLE;
-
-            if (!src) return <div key={index} className={cn("animate-pulse rounded-md bg-white/[0.09]", size)} />;
+            if (!src) return <div key={index} className={cn("animate-pulse rounded-md bg-white/[0.09]", TILE)} />;
 
             return (
               <button
@@ -238,7 +265,7 @@ function SkeletonBubble({
                 onClick={() => onOpen?.(src)}
                 className="block overflow-hidden rounded-md border border-transparent transition-colors hover:border-gold/30"
               >
-                <Thumb src={src} className={size} sizes={tiles > 1 ? "48px" : "64px"} />
+                <Thumb src={src} className={TILE} sizes={TILE_SIZES} />
               </button>
             );
           })}
@@ -248,11 +275,12 @@ function SkeletonBubble({
   );
 }
 
-function ErrorBubble({ msg, onRetry }: { msg: ChatMsg; onRetry: (msg: ChatMsg) => void }) {
+function ErrorBubble({ msg, onRetry }: { msg: ChatMsg; onRetry?: (msg: ChatMsg) => void }) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] space-y-1.5 rounded-xl rounded-bl-sm border border-error/25 bg-error/[0.08] px-2.5 py-1.5">
         <p className="text-[11px] leading-snug text-error">{msg.content}</p>
+        {onRetry && (
         <button
           type="button"
           onClick={() => onRetry(msg)}
@@ -263,6 +291,7 @@ function ErrorBubble({ msg, onRetry }: { msg: ChatMsg; onRetry: (msg: ChatMsg) =
         >
           <RotateCcw size={10} /> Edit & retry
         </button>
+        )}
       </div>
     </div>
   );

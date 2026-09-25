@@ -31,6 +31,13 @@ const AUDIT_ACTIONS = [
   // ── generations ──
   "generation.completed",
   "generation.failed",
+  // Someone deleting a colleague's result (org.results.delete). Deleting
+  // their own is not logged.
+  "generation.deleted",
+  // ── conversations ──
+  // Someone opening a colleague's chat read-only (org.conversations.read).
+  // Their own chats are not logged — that is just using the app.
+  "conversation.viewed",
   // ── background jobs ──
   "job.queued",
   "job.cancelled",
@@ -50,6 +57,7 @@ const TARGET_TYPES = [
   "user",
   "aiProvider",
   "generation",
+  "conversation",
   "session",
   "job",
   // A generated Lifestyle model. Not a "generation": it produces a reusable

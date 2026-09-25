@@ -10,12 +10,13 @@ import { ModelSelector } from "@/components/studio/ModelSelector";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatMessages } from "@/components/studio/ChatMessages";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
+import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
 import { SpellCheckedTextarea } from "@/components/studio/SpellCheckedTextarea";
 import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
 import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
 import { ToolHeader } from "@/components/studio/ToolHeader";
-import type { ChatMsg } from "@/components/studio/chat";
+import { turnImages, type ChatMsg } from "@/components/studio/chat";
 import { cleanImage, refineImage, fetchConversationForTool, resolveModelId, toModelOptions } from "@/lib/api";
 import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
@@ -57,9 +58,19 @@ type Job = {
   conversationId?: string | null;
   generationId?: string | null;
   history: ChatMsg[];
+  /**
+   * A colleague's thread reopened from History to read. Per photo, not per
+   * page: the viewer can still upload and clean their own alongside it.
+   */
+  readOnly?: { ownerName: string | null };
 };
 
-type ModelOption = { id: string; label: string; quality: string; description: string; badge: string };
+/** The first turn of a cleaning thread: the instruction, with the photo it was about. */
+function openingTurn(id: string, original: string, content: string): ChatMsg {
+  return { id, role: "user", content, image: original || undefined };
+}
+
+type ModelOption ={ id: string; label: string; quality: string; description: string; badge: string };
 
 /**
  * The Image Cleaning workspace: upload, clean, then refine in chat. Shared by
@@ -133,8 +144,10 @@ export function CleaningWorkspace<TModel extends string>({
 
     let cancelled = false;
     (async () => {
-      const generations = await fetchConversationForTool(conversationId, "cleaning");
-      if (cancelled || !generations) return;
+      const thread = await fetchConversationForTool(conversationId, "cleaning");
+      if (cancelled || !thread) return;
+      const { generations } = thread;
+      const readOnly = thread.readOnly ? { ownerName: thread.ownerName } : undefined;
 
       const [first] = generations;
       const original = first.inputAssets.find((a) => a.role === "uploaded")?.url ?? first.inputAssets[0]?.url ?? "";
@@ -145,24 +158,29 @@ export function CleaningWorkspace<TModel extends string>({
       // not just the follow-ups — so resuming reads like the conversation
       // actually happened, not like it started mid-way through.
       const history: ChatMsg[] = generations.flatMap((turn, index) => [
-        {
-          id: `${turn.id}-user`,
-          role: "user" as const,
-          content: turn.userPrompt || (index === 0 ? "Clean this image" : "Refine this"),
-        },
+        index === 0
+          ? openingTurn(`${turn.id}-user`, original, turn.userPrompt || "Clean this image")
+          : {
+              id: `${turn.id}-user`,
+              role: "user" as const,
+              content: turn.userPrompt || "Refine this",
+              // The version this refinement worked on, plus its references.
+              ...turnImages(turn.inputAssets),
+            },
         { id: `${turn.id}-assistant`, role: "assistant" as const, content: "Updated", image: turn.outputAssets[0]?.url },
       ]);
 
       setJobs([
         {
           id: conversationId,
-          name: "Resumed photo",
+          name: readOnly ? `${readOnly.ownerName || "Colleague"}'s photo` : "Resumed photo",
           original,
           cleaned,
           status: "done",
           conversationId,
           generationId: last.id,
           history,
+          readOnly,
         },
       ]);
       setSelectedId(conversationId);
@@ -171,8 +189,9 @@ export function CleaningWorkspace<TModel extends string>({
 
       // The stage paints instantly from the R2 URL above; swapped for the
       // data URI the backend actually requires once it's ready, since a
-      // refine call sends whatever `cleaned` currently holds.
-      if (cleaned) {
+      // refine call sends whatever `cleaned` currently holds. A read-only
+      // thread is never refined, so it keeps the url and skips the download.
+      if (cleaned && !readOnly) {
         urlToDataUrl(cleaned)
           .then((dataUrl) => updateJob(conversationId, { cleaned: dataUrl }))
           .catch((err) => console.error("could not prepare resumed image for editing:", err));
@@ -218,11 +237,11 @@ export function CleaningWorkspace<TModel extends string>({
             preview: null,
             conversationId,
             generationId,
-            // Empty, not seeded with the result: the initial clean already
-            // shows in the big viewer, so the thread starts blank and the
-            // suggestion hints (which only appear on an empty thread) are
-            // visible right away rather than after the first refinement.
-            history: [],
+            // The thread keeps its opening turn (the photo that was sent) and
+            // is not given the result: the clean already shows in the big
+            // viewer, and the suggestion hints — offered until the first
+            // answer lands in the thread — stay visible right away rather
+            // than after the first refinement.
           });
         } else {
           updateJob(pending.localJobId, { cleaned: outputUrl, preview: null, generationId });
@@ -299,7 +318,9 @@ export function CleaningWorkspace<TModel extends string>({
       original: item.dataUrl,
       cleaned: null,
       status: "queued",
-      history: [],
+      // Opens with what was sent, photo included, so the thread shows the
+      // before as well as the after.
+      history: [openingTurn(item.id, item.dataUrl, customPrompt.trim() && useCustomPrompt ? customPrompt.trim() : "Clean this image")],
     }));
     setJobs(queued);
     setSelectedId(queued[0]?.id ?? null);
@@ -361,13 +382,15 @@ export function CleaningWorkspace<TModel extends string>({
    */
   async function handleRefine(text: string) {
     const job = jobs.find((row) => row.id === selectedId);
-    if (!job?.cleaned || !text.trim()) return;
+    if (!job?.cleaned || job.readOnly || !text.trim()) return;
 
     const refsThisTurn = annotatedPhoto ? [annotatedPhoto, ...referenceImages] : referenceImages;
     appendMessage(job.id, {
       id: crypto.randomUUID(),
       role: "user",
       content: text.trim(),
+      // The version this turn changes, so each request shows what it was about.
+      image: job.cleaned,
       refImages: refsThisTurn.length ? refsThisTurn : undefined,
     });
     setChatInput("");
@@ -550,12 +573,19 @@ export function CleaningWorkspace<TModel extends string>({
                 busy={refining || generatingSelected}
                 busyImages={selected?.preview ? [selected.preview] : undefined}
                 onSelectResult={setSelectedView}
-                onRetry={retry}
-                hints={selected?.cleaned && selected.history.length === 0 ? REFINE_SUGGESTIONS : undefined}
+                onRetry={selected?.readOnly ? undefined : retry}
+                hints={
+                  !selected?.readOnly && selected?.cleaned && !selected.history.some((msg) => msg.role === "assistant")
+                    ? REFINE_SUGGESTIONS
+                    : undefined
+                }
                 onHint={(hint) => handleRefine(hint)}
               />
 
               <div className="shrink-0 border-t border-white/[0.06] p-3">
+                {selected?.readOnly ? (
+                  <ReadOnlyChatNotice ownerName={selected.readOnly.ownerName} />
+                ) : (
                 <ChatInputBar
                   value={chatInput}
                   onChange={setChatInput}
@@ -571,6 +601,7 @@ export function CleaningWorkspace<TModel extends string>({
                   onModelChange={setModel}
                   placeholder={selected?.cleaned ? "Describe a change…" : "Waiting for the first result…"}
                 />
+                )}
               </div>
             </>
           }
@@ -587,7 +618,9 @@ export function CleaningWorkspace<TModel extends string>({
                 // Hidden while the annotation toolbar occupies the same corner.
                 onExpand={annotating ? undefined : setLightboxSrc}
                 onAnnotate={
-                  annotating || !selected?.cleaned ? undefined : (src) => setAnnotating({ src, target: "stage" })
+                  annotating || !selected?.cleaned || selected.readOnly
+                    ? undefined
+                    : (src) => setAnnotating({ src, target: "stage" })
                 }
               />
 

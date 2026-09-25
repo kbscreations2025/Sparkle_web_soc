@@ -4,7 +4,6 @@ const { hasPermission } = require("../permissions");
 const { handle, bad, isId } = require("./_shared");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const credit = require("../services/credits");
-const AuditLog = require("../models/auditLog");
 const CreditAccount = require("../models/creditAccount");
 const CreditLedger = require("../models/creditLedger");
 const Tenant = require("../models/tenant");
@@ -402,47 +401,52 @@ router.get(
   })
 );
 
-/** The four movements an administrator can make. */
-const CREDIT_AUDIT_ACTIONS = ["credits.granted", "credits.revoked", "credits.distributed", "credits.reclaimed"];
-
 /**
- * Who moved this organization's credits, and when.
+ * Every organization's statement in one list, newest first — the audit log
+ * page's "Credit movements" view. Optional `tenantId` (repeatable) narrows it
+ * to chosen organizations.
  *
- * The ledger beside it says where credits *went* — every hold, settle and
- * refund, most of them the worker's doing. This says who decided, which the
- * ledger cannot: an entry reading "revoke 5,000" names no one.
- *
- * It lives here rather than on `/api/audit-log` because that route scopes to
- * the caller's own tenant by design and refuses a client-supplied tenant
- * filter outright — the rule that keeps one company's history out of
- * another's. Reading across tenants is the super admin console's job, and
- * this router is already behind `requireSuperAdmin`.
+ * Paged by a `createdAt_id` cursor rather than an offset: holds and settles
+ * land constantly while someone scrolls, and an offset would shift under them
+ * and repeat rows. Behind `requireSuperAdmin` like the rest of this section,
+ * since it reads across tenants.
  */
 router.get(
-  "/tenants/:id/audit",
+  "/ledger",
   handle(async (req, res) => {
-    if (!isId(req.params.id)) return bad(res, "invalid organization id");
-    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const tenantIds = [].concat(req.query.tenantId || []).filter(isId);
 
-    const rows = await AuditLog.find({
-      tenantId: req.params.id,
-      action: { $in: CREDIT_AUDIT_ACTIONS },
-    })
-      .sort({ createdAt: -1 })
-      .limit(limit)
+    const filter = {};
+    if (tenantIds.length) filter.tenantId = { $in: tenantIds };
+
+    if (req.query.before) {
+      const [iso, id] = String(req.query.before).split("_");
+      const at = new Date(iso);
+      if (Number.isNaN(at.getTime()) || !isId(id)) return bad(res, "invalid cursor");
+      filter.$or = [{ createdAt: { $lt: at } }, { createdAt: at, _id: { $lt: id } }];
+    }
+
+    const rows = await CreditLedger.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1)
+      .populate("userId", "name email")
+      .populate("tenantId", "name")
       .exec();
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const last = page[page.length - 1];
 
     res.json({
       status: "success",
-      entries: rows.map((row) => ({
-        id: row._id,
-        action: row.action,
-        status: row.status,
-        actorName: row.actorName,
-        message: row.message,
-        amount: row.metadata?.amount ?? null,
-        createdAt: row.createdAt,
+      entries: page.map((entry) => ({
+        ...toEntry(entry),
+        holder: entry.userId ? entry.userId.name || entry.userId.email : "Organization pool",
+        tenant: entry.tenantId?.name ?? null,
       })),
+      hasMore,
+      nextCursor: hasMore && last ? `${last.createdAt.toISOString()}_${last._id}` : null,
     });
   })
 );

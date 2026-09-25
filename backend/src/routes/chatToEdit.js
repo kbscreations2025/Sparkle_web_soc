@@ -3,7 +3,7 @@ const { requireAuth, requirePermission } = require("../middleware/auth");
 const { buildChatEditPrompt } = require("../prompts");
 const { resolveModel, qualityFor, labelFor } = require("../gemini");
 const { routeGeminiCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
-const { recordGeneration, parseDataUri } = require("../generationService");
+const { recordGeneration, parseDataUri, isOwnConversation } = require("../generationService");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const credit = require("../services/credits");
 
@@ -39,6 +39,15 @@ router.post("/", async (req, res) => {
 
     if (!instruction?.trim()) {
       return res.status(400).json({ status: "error", message: "instruction is required", code: "invalid" });
+    }
+
+    // Before anything is charged — see isOwnConversation.
+    if (!(await isOwnConversation(dbUser, requestedConversationId))) {
+      return res.status(403).json({
+        status: "error",
+        message: "This chat belongs to someone else — you can view it but not continue it.",
+        code: "forbidden",
+      });
     }
 
     const parsedBase = parseDataUri(image);

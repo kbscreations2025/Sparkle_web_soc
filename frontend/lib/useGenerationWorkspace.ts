@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import type { ChatMsg } from "@/components/studio/chat";
+import { turnImages, type ChatMsg } from "@/components/studio/chat";
 import { fetchConversationForTool, type ApiResult, type QueuedResult } from "@/lib/api";
 import { urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
@@ -60,6 +60,11 @@ export function useGenerationWorkspace({
   const [chatInput, setChatInput] = useState("");
   const [refining, setRefining] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  /**
+   * Set when the reopened thread is a colleague's, opened to read. The page
+   * drops its composer; `refine` refuses too, and so does the server.
+   */
+  const [readOnly, setReadOnly] = useState<{ ownerName: string | null } | null>(null);
 
   const attach = useAttachments({ onError: setError });
 
@@ -89,14 +94,16 @@ export function useGenerationWorkspace({
     let cancelled = false;
 
     (async () => {
-      const generations = await fetchConversationForTool(resumeConversationId, tool);
-      if (cancelled || !generations) return;
+      const thread = await fetchConversationForTool(resumeConversationId, tool);
+      if (cancelled || !thread) return;
+      const { generations } = thread;
 
       const resumed: ChatMsg[] = generations.flatMap((turn, index) => [
         {
           id: `${turn.id}-user`,
           role: "user" as const,
           content: turn.userPrompt || (index === 0 ? resumeLabel : "Refine this"),
+          ...turnImages(turn.inputAssets),
         },
         {
           id: `${turn.id}-assistant`,
@@ -116,6 +123,7 @@ export function useGenerationWorkspace({
       setRequestedCount(lastImages.length);
       setSelectedView(lastImages[0] ?? null);
       setStatus("done");
+      setReadOnly(thread.readOnly ? { ownerName: thread.ownerName } : null);
       conversationId.current = resumeConversationId;
       parentGenerationId.current = last.id;
       onResumeRef.current?.({ model: last.model ?? null });
@@ -204,7 +212,23 @@ export function useGenerationWorkspace({
    * following the job — is the same for every tool.
    */
   const generate = useCallback(
-    async (send: () => Promise<ApiResult<QueuedResult>>, { count, prompt }: { count: number; prompt: string }) => {
+    async (
+      send: () => Promise<ApiResult<QueuedResult>>,
+      {
+        count,
+        prompt,
+        images: sentImages = [],
+      }: {
+        count: number;
+        prompt: string;
+        /**
+         * What the run was given — the sketch, the photo, the reference, the
+         * pieces — shown on the opening turn so the thread has the before as
+         * well as the after. The first is shown large, the rest small.
+         */
+        images?: string[];
+      }
+    ) => {
       setError("");
       setStatus("generating");
       setImages([]);
@@ -213,7 +237,16 @@ export function useGenerationWorkspace({
       setSelectedView(null);
       setChatInput("");
       setRequestedCount(count);
-      setHistory([{ id: crypto.randomUUID(), role: "user", content: prompt || "Generate a design" }]);
+      const [firstImage, ...otherImages] = sentImages.filter(Boolean);
+      setHistory([
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: prompt || "Generate a design",
+          image: firstImage,
+          refImages: otherImages.length ? otherImages : undefined,
+        },
+      ]);
 
       const result = await send();
       if (result.status === "queued" && result.job) {
@@ -241,7 +274,7 @@ export function useGenerationWorkspace({
     async (text: string) => {
       const trimmed = text.trim();
       const base = selectedView ?? images[0];
-      if (!base || refining) return;
+      if (!base || refining || readOnly) return;
       if (!trimmed && !attach.annotatedPhoto && attach.referenceImages.length === 0) return;
 
       const instruction = trimmed || "Apply the changes I marked on the image.";
@@ -254,6 +287,8 @@ export function useGenerationWorkspace({
           id: crypto.randomUUID(),
           role: "user",
           content: instruction,
+          // The image this turn changes — the picked result, or its marked-up copy.
+          image: source,
           refImages: references.length ? references : undefined,
         },
       ]);
@@ -319,7 +354,7 @@ export function useGenerationWorkspace({
         setRefining(false);
       }
     },
-    [attach, creditGuard, images, onRefine, refining, selectedView, track]
+    [attach, creditGuard, images, onRefine, readOnly, refining, selectedView, track]
   );
 
   const reset = useCallback(() => {
@@ -332,6 +367,7 @@ export function useGenerationWorkspace({
     setError("");
     setHistory([]);
     setChatInput("");
+    setReadOnly(null);
     attach.reset();
     conversationId.current = null;
     parentGenerationId.current = null;
@@ -370,6 +406,8 @@ export function useGenerationWorkspace({
     refining,
     lightboxSrc,
     setLightboxSrc,
+    /** Non-null for a colleague's thread opened to read: no composer. */
+    readOnly,
     attach,
     // actions
     generate,

@@ -106,6 +106,8 @@ export default function LifeStylePage() {
         prompt:
           `Place ${jewelry.length > 1 ? `these ${jewelry.length} pieces` : "this piece"} on the model — ` +
           `${chosenPlacement?.label ?? "on the model"}, ${scene.label}`,
+        // The piece leads; the model it goes on follows, small.
+        images: [...jewelry.map((item) => item.dataUrl), library.choice.src],
       }
     );
   }

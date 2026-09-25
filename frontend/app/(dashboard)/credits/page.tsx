@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Coins, Minus, Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronDown, Coins, Minus, Plus, RefreshCw, Search, X } from "lucide-react";
 import {
   distributeCredits,
   fetchCreditTenant,
@@ -15,20 +15,20 @@ import {
   type updateMember,
   type CreditMember,
   type CreditTenantSummary,
+  type Member,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 import { MemberRows } from "@/components/admin/MemberRows";
 import { CreditAmountDialog } from "@/components/admin/CreditAmountDialog";
-import { CreditLogs } from "@/components/admin/CreditLogs";
 import { cn } from "@/lib/utils";
 
 
 /**
  * Credits: who holds them, and the console for issuing them.
  *
- * Platform staff only â€” a customer cannot reach this however privileged they
+ * Platform staff only — a customer cannot reach this however privileged they
  * are inside their own organization, because issuing credit to yourself is
  * not an organizational action. The server enforces the same rule; this
  * check only decides what to render.
@@ -44,7 +44,7 @@ export default function CreditsPage() {
    * A dispatcher, and deliberately hook-free beyond `useAuth`.
    *
    * The two views have different state, and choosing between them with an
-   * early return *above* their hooks is what React's rules forbid â€” the
+   * early return *above* their hooks is what React's rules forbid — the
    * hook count would change the moment `user` arrived and the branch
    * flipped. Separate components keep each one's hooks unconditional.
    */
@@ -64,7 +64,7 @@ export default function CreditsPage() {
 
 /**
  * Across every organization: what each holds, and the console for issuing
- * more. The central super admin only â€” issuing credit from nothing is the
+ * more. The central super admin only — issuing credit from nothing is the
  * one act that stays with whoever carries the cost.
  */
 function StaffCredits() {
@@ -112,7 +112,7 @@ function StaffCredits() {
         )}
 
         {tenants === null ? (
-          <p className="py-10 text-center text-sm text-faint">Loadingâ€¦</p>
+          <p className="py-10 text-center text-sm text-faint">Loading…</p>
         ) : tenants.length === 0 ? (
           <p className="py-10 text-center text-sm text-faint">No organizations yet.</p>
         ) : (
@@ -158,7 +158,7 @@ function StaffCredits() {
         )}
 
         <p className="text-[11px] leading-relaxed text-faint">
-          A run is charged to the person who made it, and someone with no credits cannot generate â€” nothing falls back
+          A run is charged to the person who made it, and someone with no credits cannot generate — nothing falls back
           to the organization pool yet. Grant to a member directly to unblock them.
         </p>
       </div>
@@ -172,9 +172,52 @@ function StaffCredits() {
  * The one difference from the staff view is what the buttons do: an admin
  * *shares out* what the organization already holds, they do not create it.
  * So the pool has no grant control, and every hand-out is checked against
- * what is in the pool â€” an organization that has run out has to ask
+ * what is in the pool — an organization that has run out has to ask
  * platform staff for more.
  */
+/** The audit log's filter field, so the two bars are the same control. */
+const FILTER_FIELD =
+  "h-[30px] rounded-lg border border-white/10 bg-white/[0.06] px-2.5 text-[11px] text-cream placeholder:text-faint outline-none focus:border-gold/40";
+
+/**
+ * A native select dressed as the audit log's dropdown buttons. Native, not a
+ * custom popover: two short fixed lists, and on a phone the OS picker is the
+ * better control anyway.
+ */
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: [value: string, label: string][];
+}) {
+  return (
+    <div className="relative min-w-0 flex-1 sm:flex-none">
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={label}
+        className={cn(
+          FILTER_FIELD,
+          "w-full cursor-pointer appearance-none pr-7 sm:w-auto",
+          value && "border-gold/30 text-cream"
+        )}
+      >
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={optionValue} value={optionValue}>
+            {optionLabel}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-faint" />
+    </div>
+  );
+}
+
 function MyOrgCredits() {
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchMyOrgCredits>> | null>(null);
   const [roster, setRoster] = useState<Awaited<ReturnType<typeof fetchOrgMembers>> | null>(null);
@@ -187,6 +230,9 @@ function MyOrgCredits() {
     balance: number;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   /*
    * Two requests: the pool and balances, and the roster with the grant
@@ -196,7 +242,7 @@ function MyOrgCredits() {
    */
   const load = useCallback(async () => {
     // Independent requests, so they go together rather than one after the
-    // other â€” this is time-to-first-paint on the page's only content.
+    // other — this is time-to-first-paint on the page's only content.
     const [res, people] = await Promise.all([fetchMyOrgCredits(), fetchOrgMembers()]);
 
     if (res.status !== "success") {
@@ -216,7 +262,7 @@ function MyOrgCredits() {
    *
    * The refusals are the interesting part: the server rejects an edit to
    * the admin's own row, and any grant they do not hold themselves. The UI
-   * disables both, so arriving here means something was out of date â€” the
+   * disables both, so arriving here means something was out of date — the
    * reason is surfaced and the roster re-read, rather than leaving a
    * checkbox showing a state the server never accepted.
    */
@@ -248,20 +294,24 @@ function MyOrgCredits() {
   if (!data || data.status !== "success") {
     return (
       <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-faint">{error || "Loadingâ€¦"}</p>
+        <p className="text-sm text-faint">{error || "Loading…"}</p>
       </div>
     );
   }
 
   const shortfall = data.pool.available === 0;
 
+  const needle = query.trim().toLowerCase();
+  const filtering = Boolean(needle || roleFilter || statusFilter);
+  const matches = (member: Member) =>
+    (!roleFilter || member.role === roleFilter) &&
+    (!statusFilter || member.status === statusFilter) &&
+    (!needle || `${member.name ?? ""} ${member.email}`.toLowerCase().includes(needle));
+  const shownCount = roster ? roster.members.filter(matches).length : 0;
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-4xl space-y-4">
-        <header className="flex items-center gap-2">
-          <Coins size={18} className="text-gold/70" />
-          <h1 className="text-sm font-semibold text-cream">{data.tenant.name} Â· credits</h1>
-        </header>
 
         {error && (
           <p className="rounded-lg border border-error/20 bg-error/[0.08] px-3 py-2 text-xs text-error">{error}</p>
@@ -270,12 +320,16 @@ function MyOrgCredits() {
         {/* The pool is the budget every hand-out comes out of, so it leads
             the page rather than sitting in the table with the people. */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-surface-raised p-4">
-          <div>
-            {/* Named, not "Organization pool" â€” an admin who belongs to more
-                than one organization needs to see which one's budget this
-                is, and the generic label reads the same in all of them. */}
-            <p className="text-xs font-medium text-cream">{data.tenant.name} pool</p>
-            <p className="text-[11px] text-faint">What you have left to share out</p>
+          {/* The organization's name lives here rather than in a page header
+              above — one card instead of a title and a card, so the member
+              list starts higher. Named, not "Organization pool": an admin in
+              more than one organization needs to see whose budget this is. */}
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Coins size={18} className="shrink-0 text-gold/70" />
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold text-cream">{data.tenant.name}</h1>
+              <p className="text-[11px] text-faint">Credit pool · what you have left to share out</p>
+            </div>
           </div>
           <div className="flex items-center gap-5">
             <div className="text-right">
@@ -291,24 +345,84 @@ function MyOrgCredits() {
         {shortfall && (
           <p className="rounded-lg border border-gold/20 bg-gold/[0.06] px-3 py-2 text-[11px] leading-relaxed text-gold/90">
             The pool is empty, so there is nothing to share out. Credits are issued to an organization by platform
-            staff â€” ask them to top the pool up.
+            staff — ask them to top the pool up.
           </p>
         )}
-        {/* The console's own member table â€” the component itself, not a
+        {/* The console's own member table — the component itself, not a
             copy of its markup. Reusing MemberRows is what makes the
             permissions editor available here at no extra cost, and means
             the two rosters can never drift apart. */}
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
-            Members Â· {data.members.length}
-          </p>
+        <div className="space-y-2">
+          {/* The audit log's filter bar, field for field: one raised strip,
+              search taking the slack, the count on the right. On a phone the
+              search gets its own line and the two selects share the next. */}
+          {roster ? (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-surface-raised/60 p-1.5">
+              <div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1">
+                <Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-faint" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search name or email"
+                  aria-label="Search members"
+                  className={cn(FILTER_FIELD, "w-full pl-7")}
+                />
+              </div>
+              <FilterSelect
+                label="Filter by role"
+                value={roleFilter}
+                onChange={setRoleFilter}
+                options={[
+                  ["", "Any role"],
+                  ["admin", "Admin"],
+                  ["user", "User"],
+                ]}
+              />
+              <FilterSelect
+                label="Filter by status"
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  ["", "Any status"],
+                  ["active", "Active"],
+                  ["invited", "Invited"],
+                  ["suspended", "Suspended"],
+                  ["removed", "Removed"],
+                ]}
+              />
+              {filtering && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    setRoleFilter("");
+                    setStatusFilter("");
+                  }}
+                  aria-label="Clear filters"
+                  title="Clear filters"
+                  className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-muted transition-colors hover:border-white/[0.18] hover:text-cream"
+                >
+                  <X size={12} />
+                </button>
+              )}
+              <span className="ml-auto whitespace-nowrap px-1 text-[11px] text-faint tabular-nums">
+                {filtering ? `${shownCount} of ${roster.members.length}` : roster.members.length} members
+              </span>
+            </div>
+          ) : (
+            <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
+              Members · {data.members.length}
+            </p>
+          )}
 
           {roster ? (
             <MemberRows
               members={roster.members}
+              visible={matches}
               groups={roster.groups}
               /* Only what this admin holds; the rest render locked. The
-                 server refuses them too â€” this just avoids a dead end. */
+                 server refuses them too — this just avoids a dead end. */
               assignableGrants={roster.assignableGrants}
               /* Their own row is shown but not editable. */
               selfId={roster.selfId}
@@ -349,7 +463,7 @@ function MyOrgCredits() {
       </div>
 
       {/* The amount is typed here, not decided by the button that opened
-          this â€” and the dialog prints the resulting balance, because
+          this — and the dialog prints the resulting balance, because
           "giving 5,000" does not say whether they end on 5,000 or 5,000
           more. Capped at the pool when giving, at their own unspent
           balance when taking back. */}
@@ -371,7 +485,6 @@ function MyOrgCredits() {
 function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => void }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchCreditTenant>> | null>(null);
   // Bumped after a grant or revoke, so the logs re-read along with the balances.
-  const [logsToken, setLogsToken] = useState(0);
   const [error, setError] = useState("");
   const [pending, setPending] = useState<{
     userId: string | null;
@@ -385,7 +498,6 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
     const detail = await fetchCreditTenant(tenantId);
     if (detail.status === "success") setData(detail);
     else setError(detail.message || "Could not load that organization.");
-    setLogsToken((value) => value + 1);
   }, [tenantId]);
 
   useEffect(() => {
@@ -412,7 +524,7 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
   if (!data || data.status !== "success") {
     return (
       <div className="flex-1 overflow-y-auto px-8 py-8">
-        <p className="text-sm text-faint">{error || "Loadingâ€¦"}</p>
+        <p className="text-sm text-faint">{error || "Loading…"}</p>
       </div>
     );
   }
@@ -456,7 +568,6 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
           )}
         </div>
 
-        <CreditLogs tenantId={tenantId} reloadToken={logsToken} />
       </div>
 
       <ConfirmDialog
@@ -575,7 +686,7 @@ function MemberRow({
         <p className="truncate text-xs font-medium text-cream">{member.name}</p>
         <p className="truncate text-[11px] text-faint">
           {member.email}
-          {member.status !== "active" && <span className="ml-1.5 text-warning">Â· {member.status}</span>}
+          {member.status !== "active" && <span className="ml-1.5 text-warning">· {member.status}</span>}
         </p>
       </div>
       <div className="flex items-center gap-4">

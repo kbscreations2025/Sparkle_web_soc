@@ -8,6 +8,7 @@ import { StudioSplitLayout } from "./StudioSplitLayout";
 import { AnnotationOverlay } from "./AnnotationOverlay";
 import { AnnotationLayer } from "./AnnotationLayer";
 import { ToolHeader } from "./ToolHeader";
+import { ReadOnlyChatNotice } from "./ReadOnlyChatNotice";
 import type { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 
 /**
@@ -69,6 +70,7 @@ export function GenerationResults<TModel extends string>({
     refine,
     reset,
     retry,
+    readOnly,
   } = workspace;
 
   const { annotating, setAnnotating } = attach;
@@ -110,12 +112,16 @@ export function GenerationResults<TModel extends string>({
               busyImages={liveImages}
               selectedSrc={displayImg}
               onSelectResult={setSelectedView}
-              onRetry={retry}
-              hints={displayImg && !history.some((msg) => msg.role === "assistant") ? hints : undefined}
+              // A colleague's thread is for reading: nothing here may send a turn.
+              onRetry={readOnly ? undefined : retry}
+              hints={!readOnly && displayImg && !history.some((msg) => msg.role === "assistant") ? hints : undefined}
               onHint={(hint) => refine(hint)}
             />
 
             <div className="shrink-0 border-t border-white/[0.06] p-3">
+              {readOnly ? (
+                <ReadOnlyChatNotice ownerName={readOnly.ownerName} />
+              ) : (
               <ChatInputBar
                 value={chatInput}
                 onChange={setChatInput}
@@ -133,6 +139,7 @@ export function GenerationResults<TModel extends string>({
                 onQualityChange={onQualityChange}
                 placeholder={displayImg ? "Describe a change…" : "Waiting for the first result…"}
               />
+              )}
             </div>
           </>
         }
@@ -150,7 +157,8 @@ export function GenerationResults<TModel extends string>({
               emptyLabel="Nothing yet"
               downloadName={downloadName}
               onExpand={annotating ? undefined : setLightboxSrc}
-              onAnnotate={annotating || !displayImg ? undefined : (src) => setAnnotating({ src, target: "stage" })}
+              // Marking up an image only makes sense as the start of a turn.
+              onAnnotate={readOnly || annotating || !displayImg ? undefined : (src) => setAnnotating({ src, target: "stage" })}
             />
 
             {annotating && annotating.target === "stage" && (

@@ -1,7 +1,7 @@
 const { Queue, QueueEvents } = require("bullmq");
 const config = require("./config");
 const { createRedisConnection, throttledLogger } = require("./redis");
-const { emitToUser } = require("./socket");
+const { emitToUser, emitToTenant } = require("./socket");
 const { LANE_IDS, laneFor, laneConfig } = require("./jobs/lanes");
 const Job = require("./models/job");
 
@@ -219,6 +219,15 @@ function startLaneEventsBridge(laneId) {
       }
 
       emitToUser(job.userId, "job:updated", payload);
+
+      /*
+       * A finished run is new History for the whole organization. Sent here,
+       * in the API process, and not only from recordGeneration: in production
+       * the worker is its own process with no websockets, so an emit from
+       * there reaches nobody. A bare ping — each page fetches what its own
+       * scope allows (see emitToTenant).
+       */
+      if (job.status === "completed") emitToTenant(job.tenantId, "history:changed", { kind: "added" });
     } catch (err) {
       // A missed push costs the client a live update, nothing more: it still
       // reconciles from GET /api/jobs on its next load.
