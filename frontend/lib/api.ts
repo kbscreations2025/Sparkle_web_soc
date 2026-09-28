@@ -568,32 +568,6 @@ export type SparkleModelId = CleaningModelId;
 export const DEFAULT_SPARKLE_MODEL = DEFAULT_CLEANING_MODEL;
 
 /**
- * A separate one-model list for the "Dust & Scratches" workspace — it runs
- * the exact same cleaning prompt as `CLEANING_MODELS` (the backend builds
- * that prompt itself; the model id is all that changes), just always on
- * OpenAI's `gpt-image-1` rather than Gemini. Kept apart from `CLEANING_MODELS`
- * so the Default workspace's model picker (and Chat to Edit's, since it
- * shares that list) is entirely unaffected.
- */
-export const GPT_CLEANING_MODELS = [
-  {
-    id: "gpt-image-1",
-    label: "Sparkle GPT Image",
-    quality: "high",
-    // gpt-image-1's quality is a compute tier, not a resolution — see the
-    // note on OPENAI_QUALITIES in backend/src/openai.js. Only the Dust &
-    // Scratches workspace offers this model, and that workspace is cleaning,
-    // which has no picker, so the list is here for completeness.
-    qualities: ["high", "medium", "low"],
-    description: "OpenAI's image model · same studio-clean prompt",
-    badge: "GPT",
-  },
-] as const;
-
-export type GptCleaningModelId = (typeof GPT_CLEANING_MODELS)[number]["id"];
-export const DEFAULT_GPT_CLEANING_MODEL: GptCleaningModelId = "gpt-image-1";
-
-/**
  * Shared shape a model dropdown expects — built once from a models list
  * rather than in every page. The explicit return type matters: without it,
  * TS widens `entry.id`'s literal union to plain `string`, which is what let
@@ -740,7 +714,7 @@ export function cancelJob(id: string) {
 export function cleanImage(body: {
   /** Data URI. Compressed in the browser before it gets here. */
   image: string;
-  /** A `CLEANING_MODELS` or `GPT_CLEANING_MODELS` id — the backend resolves which provider it belongs to. */
+  /** A `CLEANING_MODELS` id — the backend resolves which provider it belongs to. */
   model: string;
   /** Replaces the built-in cleaning prompt entirely when given. */
   customPrompt?: string;

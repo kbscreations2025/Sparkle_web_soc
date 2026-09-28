@@ -219,22 +219,16 @@ export const TOOL_WORKSPACE_PATHS: Record<string, string> = {
 };
 
 /**
- * Both cleaning workspaces record their generations under the same `tool:
- * "cleaning"` bucket, so the tool id alone can't tell a GPT-run conversation
- * from a Gemini one — only the recorded model label can.
- */
-const CLEANING_GPT_MODEL_LABEL = "Sparkle GPT Image";
-const CLEANING_GPT_WORKSPACE = "/cleaning/dust-scratches";
-
-/**
  * Which workspace reopens this run, or undefined if that tool has none yet.
  *
- * `modelLabel` is optional and only matters for cleaning; passing it is what
- * sends a GPT run back to the workspace that produced it instead of the
- * Gemini one.
+ * `modelLabel` is accepted but unused: it used to pick between cleaning's two
+ * workspaces (Default's Gemini models vs. the Dust & Scratches GPT-only one,
+ * since both recorded under the same `tool: "cleaning"` bucket). With Dust &
+ * Scratches removed, every cleaning run — including one made there, back
+ * when it existed — reopens in Default; the parameter stays so call sites
+ * that pass a model label for other tools don't need to change.
  */
-export function workspacePathFor(tool: string, modelLabel?: string | null) {
-  if (tool === "cleaning" && modelLabel === CLEANING_GPT_MODEL_LABEL) return CLEANING_GPT_WORKSPACE;
+export function workspacePathFor(tool: string, _modelLabel?: string | null) {
   return TOOL_WORKSPACE_PATHS[tool];
 }
 

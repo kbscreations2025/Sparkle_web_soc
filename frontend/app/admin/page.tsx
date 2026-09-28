@@ -596,12 +596,18 @@ function GrantPanel({
       <label className="block space-y-1">
         <span className="text-[10px] font-medium uppercase tracking-widest text-faint">Credits</span>
         <input
-          type="number"
-          min={1}
-          step={100}
-          value={amount}
+          // Text, not type="number": no spinner arrows, no "e"/"-"/"." slipping
+          // through. Anything that isn't a digit is dropped as it's typed.
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          autoComplete="off"
+          value={amount > 0 ? String(amount) : ""}
           autoFocus
-          onChange={(event) => setAmount(Math.max(0, Math.round(Number(event.target.value) || 0)))}
+          onChange={(event) => {
+            const digits = event.target.value.replace(/\D/g, "").slice(0, 9);
+            setAmount(digits ? Number(digits) : 0);
+          }}
           className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-right text-sm tabular-nums text-cream focus:border-gold/30 focus:outline-none"
         />
       </label>
