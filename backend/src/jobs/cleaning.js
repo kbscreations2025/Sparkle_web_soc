@@ -1,4 +1,4 @@
-const { IMAGE_CLEANING_PROMPT, buildReferenceNote } = require("../prompts");
+const { IMAGE_CLEANING_PROMPT, NEW_CLEANING_PROMPT, buildReferenceNote } = require("../prompts");
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
 const { createLivePreview } = require("../storage/thumbnail");
@@ -8,18 +8,32 @@ const User = require("../models/user");
 const CLEANING_JOB = "cleaning.generate";
 
 /**
- * A first-pass run sends the built-in prompt unless the user wrote their own,
- * which replaces it entirely rather than being appended to it — the wording
- * that preserves the jewellery's exact design lives only in the built-in
- * prompt, so "replace" (not "add to") is deliberate: mixing the two would let
- * a custom prompt silently fight the preservation instructions.
+ * The built-in prompt for a first-pass run, keyed by which cleaning mode's
+ * page sent the request — Default and New Cleaning are the same workspace,
+ * same models, same "Write my own" override, differing only in which of
+ * these a plain "Clean this image" resolves to. An unrecognised key falls
+ * back to Default rather than failing the run.
+ */
+const BUILT_IN_PROMPTS = {
+  default: IMAGE_CLEANING_PROMPT,
+  new: NEW_CLEANING_PROMPT,
+};
+
+/**
+ * A first-pass run sends the built-in prompt for its variant unless the user
+ * wrote their own, which replaces it entirely rather than being appended to
+ * it — the wording that preserves the jewellery's exact design lives only in
+ * the built-in prompt, so "replace" (not "add to") is deliberate: mixing the
+ * two would let a custom prompt silently fight the preservation instructions.
  *
  * A refinement is never the raw instruction either — it's wrapped so the
  * model is told which image it's editing and what to leave alone. Any
  * reference images ride along as visual inspiration only, same as Chat to
- * Edit — never something to copy into the result wholesale.
+ * Edit — never something to copy into the result wholesale. The variant
+ * plays no part here: once a thread exists, a refinement is the same
+ * instruction wrapper regardless of which mode started it.
  */
-function buildPrompt({ isRefinement, instruction, customPrompt, referenceCount = 0 }) {
+function buildPrompt({ isRefinement, instruction, customPrompt, variant, referenceCount = 0 }) {
   if (isRefinement) {
     return (
       `Modify this jewelry photograph (the first image) as follows: ${instruction}. ` +
@@ -28,7 +42,7 @@ function buildPrompt({ isRefinement, instruction, customPrompt, referenceCount =
       buildReferenceNote(referenceCount)
     );
   }
-  return customPrompt?.trim() || IMAGE_CLEANING_PROMPT;
+  return customPrompt?.trim() || BUILT_IN_PROMPTS[variant] || IMAGE_CLEANING_PROMPT;
 }
 
 /**
@@ -44,7 +58,7 @@ function buildPrompt({ isRefinement, instruction, customPrompt, referenceCount =
  * `{ mimeType, base64 }` by the route, so the worker never re-parses a data URI.
  */
 async function runCleaningJob({ job, data, setProgress, withProgress }) {
-  const { image, references = [], requestedModel, isRefinement, instruction, customPrompt } = data;
+  const { image, references = [], requestedModel, isRefinement, instruction, customPrompt, variant } = data;
 
   // The worker has no request context, so the actor is re-loaded from the job.
   // `.lean()` is deliberately NOT used: recordGeneration reads `user.name`/
@@ -63,6 +77,7 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
     isRefinement,
     instruction,
     customPrompt,
+    variant,
     referenceCount: references.length,
   });
 

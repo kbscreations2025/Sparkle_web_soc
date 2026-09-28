@@ -362,6 +362,9 @@ function toHistoryItem(generation, dbUser) {
     userName: generation.userName,
     createdAt: generation.createdAt,
     outputs: (generation.response?.outputAssets || []).map(toPublicAsset),
+    // The image(s) the run was given, so a text-out tool's tile can show what
+    // the answer is about instead of just the words.
+    inputAssets: (generation.request?.inputAssets || []).map(toPublicAsset),
     // What a text-out tool produced. Null for every tool that makes pictures,
     // so a tile renders images when it has them and the answer when it
     // doesn't — one shape either way.
@@ -442,6 +445,9 @@ router.get("/conversations/:id", async (req, res) => {
       quality: g.request?.params?.quality || null,
       inputAssets: (g.request?.inputAssets || []).map(toPublicAsset),
       outputAssets: (g.response?.outputAssets || []).map(toPublicAsset),
+      // What a text-out tool produced — absent from `outputAssets`, which is
+      // only ever pictures.
+      text: g.response?.text || null,
     })),
   });
 });

@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import Image from "next/image";
 import { Check, Copy, Loader2, ScanText, Upload, X } from "lucide-react";
 import { JobProgressBar } from "@/components/studio/JobProgressBar";
 import { ToolHeader } from "@/components/studio/ToolHeader";
-import { imageToText } from "@/lib/api";
+import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
+import { fetchConversationForTool, imageToText } from "@/lib/api";
 import { compressImage, makeThumbnail } from "@/lib/image";
 import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
@@ -38,8 +40,36 @@ export default function ImageToTextPage() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [dragging, setDragging] = useState(false);
+  /** A colleague's read (or the viewer's own, reopened) opened to look back at — no composer, no re-run. */
+  const [readOnly, setReadOnly] = useState<{ ownerName: string | null } | null>(null);
 
   const fileInput = useRef<HTMLInputElement>(null);
+  const searchParams = useSearchParams();
+
+  // Arriving from History with ?conversationId=... reopens that reading
+  // instead of starting blank — fetched once per id, since the id never
+  // changes for the life of this page.
+  useEffect(() => {
+    const resumeId = searchParams.get("conversationId");
+    if (!resumeId) return;
+
+    let cancelled = false;
+    (async () => {
+      const thread = await fetchConversationForTool(resumeId, "image_to_text");
+      if (cancelled || !thread) return;
+
+      const turn = thread.generations[thread.generations.length - 1];
+      setReadOnly({ ownerName: thread.ownerName });
+      setPhoto(turn.inputAssets[0]?.url ?? null);
+      setPrompt(turn.text || "");
+      setStatus("done");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resumes once for this page's lifetime; re-running on searchParams identity changes would refetch on every unrelated navigation
+  }, []);
   /**
    * The run this page is following. State rather than a ref because the
    * progress bar renders from it — a ref write would not re-render, so the
@@ -118,6 +148,7 @@ export default function ImageToTextPage() {
     setStatus("idle");
     setError("");
     setJobId(null);
+    setReadOnly(null);
   }
 
   const reading = status === "reading";
@@ -126,6 +157,11 @@ export default function ImageToTextPage() {
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       {status !== "idle" && <ToolHeader onReset={reset} resetLabel="New photo" />}
       <ErrorBanner message={error} />
+      {readOnly && (
+        <div className="px-4 pt-4 md:px-8 md:pt-6">
+          <ReadOnlyChatNotice ownerName={readOnly.ownerName} />
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
         <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-2">
@@ -146,14 +182,16 @@ export default function ImageToTextPage() {
                 <div className="relative aspect-[4/3] w-full">
                   <Image src={photo} alt="Photo to describe" fill sizes="(max-width: 1024px) 100vw, 480px" className="object-contain" />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setPhoto(null)}
-                  aria-label="Remove photo"
-                  className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-colors hover:bg-black/75"
-                >
-                  <X size={14} />
-                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setPhoto(null)}
+                    aria-label="Remove photo"
+                    className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-colors hover:bg-black/75"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
             ) : (
               <button
@@ -182,13 +220,15 @@ export default function ImageToTextPage() {
               </button>
             )}
 
-            <RunButton
-              onClick={handleRead}
-              disabled={!photo || reading}
-              icon={reading ? <Loader2 size={14} className="animate-spin" /> : <ScanText size={14} />}
-            >
-              {reading ? "Reading the photo…" : "Describe this piece"}
-            </RunButton>
+            {!readOnly && (
+              <RunButton
+                onClick={handleRead}
+                disabled={!photo || reading}
+                icon={reading ? <Loader2 size={14} className="animate-spin" /> : <ScanText size={14} />}
+              >
+                {reading ? "Reading the photo…" : "Describe this piece"}
+              </RunButton>
+            )}
 
             {reading && job && (
               <div className="space-y-1.5">
@@ -221,7 +261,7 @@ export default function ImageToTextPage() {
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              readOnly={reading}
+              readOnly={reading || Boolean(readOnly)}
               placeholder={reading ? "Reading…" : "The description will appear here."}
               className="min-h-64 flex-1 resize-none bg-transparent px-3 py-3 text-[13px] leading-relaxed text-cream placeholder:text-faint focus:outline-none"
             />

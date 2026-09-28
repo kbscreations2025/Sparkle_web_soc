@@ -9,6 +9,9 @@ const router = express.Router();
 
 router.use(requireAuth, requirePermission("tool.cleaning.run"));
 
+/** Which built-in prompt a first-pass run falls back to — see jobs/cleaning.js. */
+const VARIANTS = ["default", "new"];
+
 /**
  * Accepts a cleaning run and hands it to the queue.
  *
@@ -37,10 +40,14 @@ router.post("/", async (req, res) => {
     conversationId,
     parentGenerationId,
     preview,
+    variant,
   } = req.body || {};
 
   const isRefinement = Boolean(refineImage && instruction);
   const sourceImage = isRefinement ? refineImage : image;
+  // Unknown or absent falls back to "default" rather than refusing the
+  // request — the same behaviour as the job's own BUILT_IN_PROMPTS lookup.
+  const resolvedVariant = VARIANTS.includes(variant) ? variant : "default";
 
   if (!sourceImage) {
     return res.status(400).json({ status: "error", message: "no image provided", code: "invalid" });
@@ -73,6 +80,7 @@ router.post("/", async (req, res) => {
       isRefinement,
       instruction: isRefinement ? instruction : null,
       customPrompt: customPrompt?.trim() || null,
+      variant: isRefinement ? null : resolvedVariant,
       referenceCount: parsedReferences.length,
       conversationId: conversationId || null,
     },
@@ -84,6 +92,7 @@ router.post("/", async (req, res) => {
       isRefinement,
       instruction,
       customPrompt,
+      variant: resolvedVariant,
       conversationId,
       parentGenerationId,
     },

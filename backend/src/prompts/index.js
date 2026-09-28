@@ -5,12 +5,14 @@
  * To add one: create `myTool.js` exporting a const, then re-export it here.
  */
 const { IMAGE_CLEANING_PROMPT } = require("./imageCleaning");
+const { NEW_CLEANING_PROMPT } = require("./newCleaning");
 const { SCALE_NOTE, ANATOMY_NOTE, buildChatEditPrompt } = require("./chatToEdit");
 const { buildReferenceNote } = require("./shared");
 const { buildTextToImagePrompt, buildTextToImageRefinePrompt } = require("./textToImage");
 
 module.exports = {
   IMAGE_CLEANING_PROMPT,
+  NEW_CLEANING_PROMPT,
   SCALE_NOTE,
   ANATOMY_NOTE,
   buildChatEditPrompt,

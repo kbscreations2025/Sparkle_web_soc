@@ -38,9 +38,11 @@ const MODES: CleaningMode[] = [
   {
     id: "new-cleaning",
     label: "New Cleaning",
-    description: "The next cleaning mode — details to come",
+    // TODO: describe what actually distinguishes this mode once its prompt
+    // (backend/src/prompts/imageCleaning.js → NEW_CLEANING_PROMPT) is written.
+    description: "A different retouch style — same workspace, its own instructions",
     icon: Eraser,
-    comingSoon: true,
+    href: "/cleaning/new",
   },
 ];
 

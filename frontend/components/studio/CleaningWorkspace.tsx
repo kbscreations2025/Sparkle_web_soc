@@ -74,19 +74,23 @@ type ModelOption ={ id: string; label: string; quality: string; description: str
 
 /**
  * The Image Cleaning workspace: upload, clean, then refine in chat. Shared by
- * every cleaning-flavoured tool page — the Default workspace and any preset
- * mode built the same way — parametrized only by which model(s) it offers,
- * so a preset that always runs on a specific model (e.g. GPT) is a different
- * `modelOptions`/`defaultModel`, not a different copy of this component.
- * The prompt itself is never a prop: the backend builds the same cleaning
- * instructions for every model, from `customPrompt` or its own default.
+ * every cleaning-flavoured tool page — Default, New Cleaning, and any future
+ * mode built the same way — parametrized only by which model(s) it offers and
+ * which built-in prompt it falls back to, so a preset page is a different
+ * `modelOptions`/`defaultModel`/`promptVariant`, not a different copy of this
+ * component. The prompt text itself is never a prop, only that variant key:
+ * the backend still builds every cleaning instruction, from `customPrompt` or
+ * whichever built-in prompt the key names (see backend/src/jobs/cleaning.js).
  */
 export function CleaningWorkspace<TModel extends string>({
   modelOptions,
   defaultModel,
+  promptVariant = "default",
 }: {
   modelOptions: readonly (ModelOption & { id: TModel })[];
   defaultModel: TModel;
+  /** Which built-in prompt "Default" instructions resolve to — see above. */
+  promptVariant?: "default" | "new";
 }) {
   const { user } = useAuth();
 
@@ -332,7 +336,7 @@ export function CleaningWorkspace<TModel extends string>({
           model,
           // So the queue rail can show this photo rather than a bare spinner.
           preview: await makeThumbnail(item.dataUrl),
-          ...(useCustomPrompt && customPrompt.trim() && { customPrompt: customPrompt.trim() }),
+          ...(useCustomPrompt && customPrompt.trim() ? { customPrompt: customPrompt.trim() } : { variant: promptVariant }),
         });
 
         if (result.status === "queued" && result.job) {
@@ -516,8 +520,12 @@ export function CleaningWorkspace<TModel extends string>({
                 />
               ) : (
                 <p className="text-[11px] text-faint">
-                  Uses the standard jewellery retouch — preserves the design exactly and only fixes
-                  the photography.
+                  {/* TODO: describe New Cleaning's own instructions once NEW_CLEANING_PROMPT is
+                      written — this line is what "Default" (the built-in-prompt option) shows
+                      as its description on this page. */}
+                  {promptVariant === "new"
+                    ? "Uses this mode's own retouch instructions."
+                    : "Uses the standard jewellery retouch — preserves the design exactly and only fixes the photography."}
                 </p>
               )}
             </section>

@@ -387,7 +387,23 @@ export function HistoryLightbox({
                     </a>
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-white/15 bg-surface-raised p-4 md:p-5">
+                  <div className="flex flex-col gap-3 rounded-lg border border-white/15 bg-surface-raised p-4 md:flex-row md:p-5">
+                    {/* What the text is about — the image the run was given,
+                        not the words it produced. Absent for a run recorded
+                        before input assets were saved, or a tool with no
+                        image input. */}
+                    {item.inputAssets && item.inputAssets.length > 0 && (
+                      <div className="flex shrink-0 flex-row gap-2 md:flex-col">
+                        {item.inputAssets.map((asset) => (
+                          <div
+                            key={asset.assetId}
+                            className="h-24 w-24 shrink-0 overflow-hidden rounded-md border border-white/10 md:h-32 md:w-32"
+                          >
+                            <AssetThumb output={asset} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted">
                       {item.text?.trim() || "No text was recorded for this run."}
                     </p>

@@ -718,6 +718,12 @@ export function cleanImage(body: {
   model: string;
   /** Replaces the built-in cleaning prompt entirely when given. */
   customPrompt?: string;
+  /**
+   * Which built-in prompt a plain "Clean this image" resolves to — "default"
+   * or "new", one per cleaning mode's page. Ignored once `customPrompt` is
+   * set, and irrelevant to a refinement, which never reads either.
+   */
+  variant?: "default" | "new";
   /** Set to keep a retry in the same thread as the run it follows. */
   conversationId?: string | null;
   /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
@@ -1345,6 +1351,8 @@ export type HistoryItem = {
   userName: string;
   createdAt: string;
   outputs: HistoryOutput[];
+  /** The image(s) the run was given — lets a text-out tool's tile show what the answer is about. */
+  inputAssets?: HistoryOutput[];
   /** What a text-out tool produced. Null for every tool that makes pictures. */
   text?: string | null;
   /**
@@ -1364,6 +1372,8 @@ export type ConversationTurn = {
   quality?: string | null;
   inputAssets: ConversationAsset[];
   outputAssets: ConversationAsset[];
+  /** What a text-out tool produced. Null for every tool that makes pictures. */
+  text?: string | null;
 };
 
 /**
