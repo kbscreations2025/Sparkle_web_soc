@@ -132,6 +132,7 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     poseInstruction,
     shotType,
     sceneInstruction,
+    aspectRatio,
     description,
     model: requestedModel,
     quality: requestedQuality,
@@ -217,6 +218,7 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     description: description || "",
     shotType: shotType || "",
     sceneInstruction: sceneInstruction || "",
+    aspectRatio: aspectRatio || "",
   };
 
   return queueGeneration(req, res, {
@@ -237,6 +239,9 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
       // The model first, the pieces after — the order both prompts describe.
       sourceImages: [baseModel, ...jewelryList],
       jewelryCount: jewelryList.length,
+      // The frame shape the user actually picked — sent to the provider
+      // directly (see `generationRunner`), not left to the prompt text alone.
+      aspectRatio: options.aspectRatio || null,
       options,
       userPrompt: description || null,
       // One composite per run, however many references went in.

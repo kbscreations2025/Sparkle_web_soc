@@ -952,6 +952,16 @@ export function generateLifestyleModel(body: {
  * Exactly one of `modelNumber` (a preset), `modelId` (one from the library)
  * or `modelImage` (a fresh upload) names who wears it.
  */
+/** `w`/`h` draw the shape on the chip, same convention as `VIDEO_ASPECTS`. */
+export const LIFESTYLE_ASPECTS = [
+  { id: "4:5", label: "4:5", w: 12, h: 15 },
+  { id: "9:16", label: "9:16", w: 9, h: 16 },
+  { id: "1:1", label: "1:1", w: 14, h: 14 },
+  { id: "16:9", label: "16:9", w: 16, h: 9 },
+] as const;
+export type LifestyleAspectId = (typeof LIFESTYLE_ASPECTS)[number]["id"];
+export const DEFAULT_LIFESTYLE_ASPECT: LifestyleAspectId = "4:5";
+
 export function lifestyle(body: {
   modelNumber?: number;
   modelId?: string;
@@ -962,6 +972,8 @@ export function lifestyle(body: {
   poseInstruction?: string;
   shotType?: string;
   sceneInstruction?: string;
+  /** The shot's frame shape, e.g. "4:5" — a user choice, not left to the model. */
+  aspectRatio?: string;
   description?: string;
   model: SparkleModelId;
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */

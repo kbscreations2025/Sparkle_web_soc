@@ -21,15 +21,40 @@ const ANATOMY_NOTE = `ANATOMY — CRITICAL, DO NOT SKIP: The model is a single o
  */
 const REALISM_NOTE = `REALISM — CRITICAL: This must read as an authentic photograph captured on a real DSLR/mirrorless camera with a fast prime lens, never as a CGI render or an AI-generated image. Skin must show natural, believable texture — visible pores, fine hairs, subtle natural asymmetry and imperfections — never smoothed to a plastic, waxy, or airbrushed finish. Avoid oversaturated colors, artificial HDR glow, or an unnaturally perfect "beauty filter" sheen. Light must behave physically: soft natural falloff, believable shadows, realistic specular highlights on skin and metal. The final image should be indistinguishable from a professionally shot, unedited lifestyle or editorial photograph.`;
 
+/**
+ * Without this, a model shows the jewelry and the scene at equal weight —
+ * every petal as crisp as the stones — which reads as a flat product-catalog
+ * composite rather than a photograph someone actually stood behind a camera
+ * for. Repeated on every prompt that places jewelry into a scene, same as
+ * ANATOMY_NOTE and REALISM_NOTE above.
+ */
+const FOCUS_NOTE = `FOCUS HIERARCHY — CRITICAL: The jewelry is the single sharpest, most in-focus element in the entire frame — every facet, stone, and metal edge must be tack-sharp. Everything else exists only to make the shot feel real and alive, never to compete with the piece: shoot with a shallow depth of field (wide aperture, e.g. f/1.4–f/2.8) so the model's skin falls into gentle, natural focus and anything further back — flowers, foliage, furniture, drapery, other people, the wider environment — falls into soft, natural bokeh, exactly as a real lens would render it. The background must read as a genuine physical location caught candidly by the camera, not an arrangement staged and rendered for the shot — natural imperfections, uneven lighting, believable depth, never symmetrical, over-tidy, or suspiciously perfect. Anything in the background stays secondary and out-of-focus enough that the eye is never pulled away from the jewelry.`;
+
 /** Used only when the client sends no explicit shot type — see `shotType` below. */
-const DEFAULT_SHOT_TYPE = "close-up portrait";
+const DEFAULT_SHOT_TYPE = "close-up macro shot, the camera moved in tight enough that the jewelry fills a large part of the frame";
 const DEFAULT_SET_SHOT_TYPE = "three-quarter editorial shot, framed to keep every piece in the set clearly visible";
+
+/**
+ * Said once already at the top of the prompt, alongside every other
+ * instruction — and said again here, alone, as the very last thing the model
+ * reads. A design that drifted in an earlier turn is corrected against these
+ * originals every time, but the fidelity rules compete for attention with
+ * placement, pose and scene instructions above them; repeating the one
+ * non-negotiable rule at the end is what keeps it from getting lost in that
+ * list.
+ */
+const FIDELITY_REMINDER = `REMINDER — the jewelry's shape, stone count, cut, color, metal, and proportions must come out identical to the reference photo(s). Do not simplify, restyle, or reinterpret the design in any way.`;
 /**
  * Used only if the client sends no scene at all — in normal use the client
  * always resolves one of its theme options (including "Surprise Me") first.
  */
 const DEFAULT_SCENE =
   "A softly diffused, elegant neutral setting with warm ambient light that flatters the jewelry without overpowering it — never a flat white or black backdrop.";
+
+/** The frame shape line for the PHOTOGRAPHY block — absent when the client sent none. */
+function aspectLine(aspectRatio) {
+  return aspectRatio ? `- Frame: ${aspectRatio} aspect ratio. Compose and crop for this exact frame shape.` : "";
+}
 
 function placementToJewelryType(placement) {
   const p = (placement || "").toLowerCase();
@@ -127,7 +152,7 @@ PLACEMENT BY KIND — read the reference, then follow the matching rule:
  * @param sceneInstruction Literal background + lighting description chosen client-side from
  *   the Scene/Theme step (or resolved from "Surprise Me" before the request was sent).
  */
-function buildLifestylePrompt({ placement, poseInstruction, description, shotType, sceneInstruction }) {
+function buildLifestylePrompt({ placement, poseInstruction, description, shotType, sceneInstruction, aspectRatio }) {
   const jewelryType = placementToJewelryType(placement);
 
   return `Photorealistic image editing. Place the ${jewelryType} from the reference jewelry image onto the female model.
@@ -141,15 +166,19 @@ JEWELRY FIDELITY — NON-NEGOTIABLE:
 ${jewelrySpecificRules(jewelryType, placement)}
 ${ANATOMY_NOTE}
 ${REALISM_NOTE}
+${FOCUS_NOTE}
 PHOTOGRAPHY:
 - Shot type: ${shotType || DEFAULT_SHOT_TYPE} with 85mm f/1.4 lens.
 - Scene: ${sceneInstruction || DEFAULT_SCENE}
+${aspectLine(aspectRatio)}
 - Color harmony: the background tones and light's color temperature must complement the jewelry's metal color and gemstone hues, so the piece reads as naturally photographed in this environment — never composited or pasted on top of it.
 - Do NOT change the model's face, ethnicity, body proportions, or identity.
 
 PLACEMENT INSTRUCTION: ${placement}
 ${poseInstruction ? `POSE: ${poseInstruction}` : ""}
-${description?.trim() ? `ADDITIONAL NOTES: ${description}` : ""}`;
+${description?.trim() ? `ADDITIONAL NOTES: ${description}` : ""}
+
+${FIDELITY_REMINDER}`;
 }
 
 /**
@@ -160,7 +189,7 @@ ${description?.trim() ? `ADDITIONAL NOTES: ${description}` : ""}`;
  * pose is chosen: a tight macro crop can't show a ring, necklace and earrings
  * at once. An explicitly chosen pose still overrides it.
  */
-function buildLifestyleSetPrompt({ count, placement, poseInstruction, description, shotType, sceneInstruction }) {
+function buildLifestyleSetPrompt({ count, placement, poseInstruction, description, shotType, sceneInstruction, aspectRatio }) {
   const ringFinger = targetFingerFor(placement, "ring finger");
 
   return `Photorealistic image editing. The model is shown in the FIRST image. The following ${count} images are each a SEPARATE piece of jewelry from one matching set. Place EVERY one of these ${count} jewelry pieces onto the same female model in a single photograph — she wears the complete set together.
@@ -183,13 +212,17 @@ STRICT — do NOT add any jewelry that was not provided in these ${count} images
 
 ${ANATOMY_NOTE}
 ${REALISM_NOTE}
+${FOCUS_NOTE}
 PHOTOGRAPHY:
 - Shot type: ${shotType || DEFAULT_SET_SHOT_TYPE} with 85mm f/1.4 lens.
 - Scene: ${sceneInstruction || DEFAULT_SCENE}
+${aspectLine(aspectRatio)}
 - Color harmony: the background tones and light's color temperature must complement the jewelry's metal color and gemstone hues, so the set reads as naturally photographed in this environment — never composited or pasted on top of it.
 - Do NOT change the model's face, ethnicity, body proportions, or identity.
 ${poseInstruction ? `POSE: ${poseInstruction}` : ""}
-${description?.trim() ? `ADDITIONAL NOTES: ${description}` : ""}`;
+${description?.trim() ? `ADDITIONAL NOTES: ${description}` : ""}
+
+${FIDELITY_REMINDER}`;
 }
 
 /**
@@ -353,6 +386,8 @@ function buildLifestyleModelPrompt(attrs = {}, notes) {
 module.exports = {
   ANATOMY_NOTE,
   REALISM_NOTE,
+  FOCUS_NOTE,
+  FIDELITY_REMINDER,
   buildLifestylePrompt,
   buildLifestyleSetPrompt,
   buildLifestyleRefinePrompt,

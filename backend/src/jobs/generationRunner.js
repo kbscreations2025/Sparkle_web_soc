@@ -161,6 +161,7 @@ async function runGenerationJob({
           modelId: model,
           prompt: shot.prompt,
           quality,
+          aspectRatio: data.aspectRatio || null,
           images: shot.images.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
         });
 

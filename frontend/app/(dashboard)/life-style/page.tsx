@@ -5,17 +5,22 @@ import { Sparkles, Users } from "lucide-react";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { OptionChips } from "@/components/studio/OptionChips";
+import { AspectChips } from "@/components/studio/AspectChips";
 import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { UploadZone, type UploadItem } from "@/components/studio/UploadZone";
 import { ModelLibrary } from "@/components/studio/ModelLibrary";
+import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
 import {
   lifestyle,
   refineLifestyle,
   SPARKLE_MODELS,
   DEFAULT_SPARKLE_MODEL,
+  LIFESTYLE_ASPECTS,
+  DEFAULT_LIFESTYLE_ASPECT,
   toModelOptions,
   type SparkleModelId,
+  type LifestyleAspectId,
 } from "@/lib/api";
 import { ALL_PLACEMENTS, PLACEMENT_GROUPS, POSES, THEMES, HINTS, resolveScene } from "@/lib/lifestyleOptions";
 import { makeThumbnail } from "@/lib/image";
@@ -36,9 +41,12 @@ export default function LifeStylePage() {
 
   const library = useModelLibrary();
   const [jewelry, setJewelry] = useState<UploadItem[]>([]);
+  /** A jewellery photo opened for a closer look, or to annotate before it's placed. */
+  const [jewelryPreview, setJewelryPreview] = useState<PreviewImage | null>(null);
   const [placement, setPlacement] = useState(ALL_PLACEMENTS[0].id);
   const [pose, setPose] = useState(POSES[0].id);
   const [theme, setTheme] = useState(THEMES[0].id);
+  const [aspectRatio, setAspectRatio] = useState<LifestyleAspectId>(DEFAULT_LIFESTYLE_ASPECT);
   const [description, setDescription] = useState("");
   const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
@@ -95,6 +103,7 @@ export default function LifeStylePage() {
           poseInstruction: chosenPose?.value ?? "",
           shotType: chosenPose?.shot ?? "",
           sceneInstruction: scene.value,
+          aspectRatio,
           description,
           model,
           quality,
@@ -166,6 +175,8 @@ export default function LifeStylePage() {
           {/* Sticky on a wide screen: the left column is much taller, and the
               button should not scroll away while you are still picking. */}
           <div className="space-y-5 lg:sticky lg:top-0">
+            <AspectChips options={LIFESTYLE_ASPECTS} value={aspectRatio} onChange={setAspectRatio} />
+
             <section className="space-y-3">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-cream">
                 The jewellery{" "}
@@ -179,6 +190,8 @@ export default function LifeStylePage() {
                 items={jewelry}
                 onAdd={addJewelry}
                 onRemove={(id) => setJewelry((c) => c.filter((i) => i.id !== id))}
+                onPreview={(item) => setJewelryPreview({ src: item.dataUrl, key: item.id })}
+                compact
               />
             </section>
 
@@ -186,6 +199,7 @@ export default function LifeStylePage() {
               label="Anything else"
               value={description}
               onChange={setDescription}
+              onPasteImage={(file) => addJewelry([file])}
               placeholder="Optional — e.g. warmer light, a softer background"
               footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
@@ -196,22 +210,40 @@ export default function LifeStylePage() {
           </div>
         </div>
       </div>
+
+      <ImagePreviewLayer
+        preview={jewelryPreview}
+        onClose={() => setJewelryPreview(null)}
+        onSave={(marked, key) =>
+          setJewelry((current) => current.map((item) => (item.id === key ? { ...item, dataUrl: marked } : item)))
+        }
+        downloadName="jewellery.jpg"
+      />
     </div>
   );
 }
 
+
+/** The id `PlacementPicker` falls back to — no chip is shown for it, it's just what an unset or cancelled choice resolves to. */
+const AUTO_PLACEMENT_ID = "auto";
 
 /**
  * Placement, grouped by the kind of piece.
  *
  * A flat list of 20 is unreadable, and the groups are how someone actually
  * looks for one: they know they have a ring before they know which finger.
+ *
+ * The "Anything else" / auto group has no chip of its own — it is the
+ * silent default, not a choice someone makes on purpose. It's what `value`
+ * already starts as, and clicking a chip a second time returns to it, so
+ * there's always a way back to "let the photo decide" without a button that
+ * says so.
  */
 function PlacementPicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
   return (
     <div className="space-y-3">
       <p className="text-xs font-semibold uppercase tracking-wider text-cream">Where it goes</p>
-      {PLACEMENT_GROUPS.map((group) => (
+      {PLACEMENT_GROUPS.filter((group) => group.group !== "Anything else").map((group) => (
         <div key={group.group} className="space-y-1.5">
           <p className="text-[10px] font-medium uppercase tracking-widest text-faint">{group.group}</p>
           <div className="flex flex-wrap gap-1.5">
@@ -219,7 +251,7 @@ function PlacementPicker({ value, onChange }: { value: string; onChange: (id: st
               <button
                 key={item.id}
                 type="button"
-                onClick={() => onChange(item.id)}
+                onClick={() => onChange(item.id === value ? AUTO_PLACEMENT_ID : item.id)}
                 aria-pressed={item.id === value}
                 className={cn(
                   "min-h-8 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",

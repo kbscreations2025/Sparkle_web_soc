@@ -262,7 +262,7 @@ async function withKeyFailover(entries, attempt) {
  * Resolves with the first image part in the response; throws if none came
  * back (a text-only response, most often a declined or unsupported request).
  */
-async function generateImage({ apiKey, modelId, prompt, images, quality }) {
+async function generateImage({ apiKey, modelId, prompt, images, quality, aspectRatio }) {
   const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 150_000 } });
 
   const parts = [
@@ -270,13 +270,21 @@ async function generateImage({ apiKey, modelId, prompt, images, quality }) {
     { text: prompt },
   ];
 
+  // Only the models with `imageConfig` accept either knob — 2.5-flash-image
+  // predates it and would ignore both, same reasoning as `supportsImageSize`
+  // above. A frame shape the user actually picked, not left to the prompt
+  // text alone to (maybe) get right.
+  const imageConfig = supportsImageSize(modelId)
+    ? { imageSize: qualityFor(modelId, quality), ...(aspectRatio ? { aspectRatio } : {}) }
+    : null;
+
   const response = await withRetry(() =>
     ai.models.generateContent({
       model: modelId,
       contents: [{ role: "user", parts }],
       config: {
         responseModalities: ["IMAGE", "TEXT"],
-        ...(supportsImageSize(modelId) ? { imageConfig: { imageSize: qualityFor(modelId, quality) } } : {}),
+        ...(imageConfig ? { imageConfig } : {}),
       },
     })
   );

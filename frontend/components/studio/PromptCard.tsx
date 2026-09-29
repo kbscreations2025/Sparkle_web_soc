@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ClipboardEvent, ReactNode } from "react";
 import { SpellCheckedTextarea } from "./SpellCheckedTextarea";
 
 /**
@@ -24,6 +24,7 @@ export function PromptCard({
   footerStart,
   footerEnd,
   onIssueCount,
+  onPasteImage,
 }: {
   /** The heading above the box. A node, so a page can grey out "(optional)". */
   label: ReactNode;
@@ -40,7 +41,26 @@ export function PromptCard({
   footerStart?: ReactNode;
   footerEnd?: ReactNode;
   onIssueCount?: (count: number) => void;
+  /**
+   * Diverts a pasted image away from the text entirely, to wherever the
+   * caller wants it instead — e.g. Lifestyle's jewellery slot, so pasting a
+   * photo here doesn't silently drop an unrenderable image into the prompt
+   * text. Left unset, a pasted image behaves as plain paste always has:
+   * nothing captured, browser default.
+   */
+  onPasteImage?: (file: File) => void;
 }) {
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!onPasteImage) return;
+    const imageItem = [...event.clipboardData.items].find((item) => item.type.startsWith("image/"));
+    if (!imageItem) return; // let normal text paste through
+    const file = imageItem.getAsFile();
+    if (file) {
+      event.preventDefault();
+      onPasteImage(file);
+    }
+  }
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
@@ -55,6 +75,7 @@ export function PromptCard({
           rows={rows}
           placeholder={placeholder}
           onIssueCount={onIssueCount}
+          onPaste={onPasteImage ? handlePaste : undefined}
         />
 
         {(footerStart || footerEnd) && (

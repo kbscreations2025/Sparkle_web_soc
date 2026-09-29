@@ -154,11 +154,11 @@ async function routeProviderOperation({ tenant, provider, call }) {
  * An image out. The original shape of this function, now one of three
  * operations over the same failover policy.
  */
-async function routeProviderCall({ tenant, provider, modelId, prompt, images, quality }) {
+async function routeProviderCall({ tenant, provider, modelId, prompt, images, quality, aspectRatio }) {
   return routeProviderOperation({
     tenant,
     provider,
-    call: ({ apiKey, mod }) => mod.generateImage({ apiKey, modelId, prompt, images, quality }),
+    call: ({ apiKey, mod }) => mod.generateImage({ apiKey, modelId, prompt, images, quality, aspectRatio }),
   });
 }
 

@@ -125,6 +125,8 @@ export default function TextToSketchPage() {
           <OptionChips label="Sketch Style" options={SKETCH_STYLES} value={style} onChange={setStyle} />
           <AspectChips options={ASPECTS} value={aspect} onChange={setAspect} />
 
+          <JewelrySelectionChips builder={builder} />
+
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wider text-cream">
               Reference Photo <span className="font-normal normal-case text-faint">(optional)</span>
@@ -174,8 +176,6 @@ export default function TextToSketchPage() {
               </button>
             )}
           </div>
-
-          <JewelrySelectionChips builder={builder} />
 
           <div className="space-y-1">
             <PromptCard
