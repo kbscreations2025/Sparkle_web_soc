@@ -23,10 +23,39 @@ export const MODEL_ATTRS: { key: string; label: string; options: string[]; note?
   { key: 'skinFinish', label: 'Skin Finish', options: ['Soft matte', 'Glowing / dewy', 'Radiant', 'Natural', 'Sun-tanned'] },
   { key: 'hairStyle', label: 'Hair Style', options: ['Long straight', 'Long wavy', 'Curly', 'Short', 'Sleek bun', 'Ponytail'] },
   { key: 'hairColor', label: 'Hair Color', options: ['Black (Level 1)', 'Dark brown (Level 2–3)', 'Medium / light brown (Level 4–5)', 'Dark blonde (Level 6)', 'Blonde (Level 7–8)', 'Light blonde / platinum (Level 9–10)'] },
+  // Fallback only — the builder swaps this list for `OUTFITS_MALE` once
+  // "Male" is picked (see `outfitsFor`), since a wardrobe of gowns and
+  // dresses makes no sense for a male model.
   { key: 'outfit', label: 'Outfit & Styling', options: ['Classic Evening Gown', 'Off-Shoulder Gown', 'One-Shoulder Gown', 'Halter Neck Dress', 'Backless Evening Dress', 'Strapless Dress', 'Plunging V-Neck Dress', 'Boat Neck Blouse', 'Square Neck Top', 'Cowl Neck Dress', 'Silk Wrap Top', 'Turtleneck Sweater', 'Slip Dress', 'Little Black Dress', 'Tailored Blazer', 'Structured Shirt', 'Anarkali Suit', 'Bridal Ensemble', 'Kanjeevaram Drape', 'Cape Dress', 'Bodycon Dress', 'Sheath Dress', 'Kaftan', 'Jumpsuit (fitted)', 'Wrap Dress', 'Peplum Top', 'Corset Top'] },
   { key: 'age', label: 'Age', options: ['18–24', '25–34', '35–44', '45–54', '55+'] },
   { key: 'height', label: 'Height', options: ['Petite (under 5\'4")', 'Average (5\'4"–5\'7")', 'Tall (5\'8"–5\'11")', 'Very tall (6\'+)'] },
 ]
+
+/** `MODEL_ATTRS`'s own "outfit" list — worn when Gender is "Female" or unset. */
+export const OUTFITS_FEMALE = MODEL_ATTRS.find((attr) => attr.key === 'outfit')!.options
+
+/** Shown instead once "Male" is picked. */
+export const OUTFITS_MALE = [
+  'Tailored Suit',
+  'Blazer & Trousers',
+  'Dress Shirt (open collar)',
+  'Dress Shirt & Tie',
+  'Turtleneck Sweater',
+  'Henley Shirt',
+  'Polo Shirt',
+  'Bomber Jacket',
+  'Waistcoat & Shirt',
+  'Overcoat',
+  'Nehru Jacket',
+  'Kurta',
+  'Sherwani',
+  'Linen Shirt (open collar)',
+]
+
+/** Which wardrobe a builder's "outfit" chips should show for the gender picked so far. */
+export function outfitsFor(genderPicks: string[] | undefined): string[] {
+  return genderPicks?.includes('Male') ? OUTFITS_MALE : OUTFITS_FEMALE
+}
 
 /**
  * Where the piece goes — only where the answer isn't in the photograph.

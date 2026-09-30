@@ -9,7 +9,7 @@ import { Lightbox } from "./Lightbox";
 import { ConfirmDialog } from "./ToolChrome";
 import { useAuth } from "@/lib/auth-context";
 import { LIFESTYLE_PRESETS } from "@/lib/api";
-import { MODEL_ATTRS } from "@/lib/lifestyleOptions";
+import { MODEL_ATTRS, outfitsFor } from "@/lib/lifestyleOptions";
 import type { ModelLibraryState } from "@/lib/useModelLibrary";
 import { useEscapeKey } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
@@ -406,11 +406,15 @@ function ModelBuilder({
   function toggle(key: string, option: string) {
     setPicks((current) => {
       const chosen = current[key] ?? [];
-      if (SINGLE_PICK.has(key)) return { ...current, [key]: chosen[0] === option ? [] : [option] };
-      return {
-        ...current,
-        [key]: chosen.includes(option) ? chosen.filter((entry) => entry !== option) : [...chosen, option],
-      };
+      const next = SINGLE_PICK.has(key)
+        ? { ...current, [key]: chosen[0] === option ? [] : [option] }
+        : { ...current, [key]: chosen.includes(option) ? chosen.filter((entry) => entry !== option) : [...chosen, option] };
+
+      // The wardrobe is gender-specific (see `outfitsFor`) — a switch drops
+      // whatever was picked from the list that no longer applies, rather
+      // than silently sending an outfit the new gender was never shown.
+      if (key === "gender") delete next.outfit;
+      return next;
     });
   }
 
@@ -449,12 +453,6 @@ function ModelBuilder({
             placeholder="Name this model (optional)"
             className="min-h-8 w-40 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[12px] text-cream placeholder:text-faint focus:border-gold/30 focus:outline-none sm:max-w-[220px]"
           />
-          <input
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="Anything else about her look"
-            className="min-h-8 w-44 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[12px] text-cream placeholder:text-faint focus:border-gold/30 focus:outline-none sm:max-w-[320px]"
-          />
           <button
             type="button"
             onClick={build}
@@ -489,23 +487,32 @@ function ModelBuilder({
               {attr.note && <span className="ml-1.5 normal-case tracking-normal text-faint/60">{attr.note}</span>}
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {attr.options.map((option) => (
-                <Chip
-                  key={option}
-                  label={option}
-                  size="sm"
-                  active={(picks[attr.key] ?? []).includes(option)}
-                  onClick={() => toggle(attr.key, option)}
-                />
-              ))}
+              {(attr.key === "outfit" ? outfitsFor(picks[GENDER_ATTR?.key ?? "gender"]) : attr.options).map(
+                (option) => (
+                  <Chip
+                    key={option}
+                    label={option}
+                    size="sm"
+                    active={(picks[attr.key] ?? []).includes(option)}
+                    onClick={() => toggle(attr.key, option)}
+                  />
+                )
+              )}
             </div>
           </div>
         ))}
       </div>
 
-      <p className="text-[11px] text-faint">
-        It joins the queue like any other generation — you can leave this page and it will still be here.
-      </p>
+      <div className="space-y-1.5">
+        <p className="text-[10px] font-medium uppercase tracking-widest text-faint">Anything else about her look</p>
+        <textarea
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          rows={3}
+          placeholder="e.g. freckles across the nose, a small gap between the front teeth, warm undertones…"
+          className="w-full resize-none rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[12px] leading-relaxed text-cream placeholder:text-faint focus:border-gold/30 focus:outline-none"
+        />
+      </div>
     </ModelBuilderDrawer>
   );
 }

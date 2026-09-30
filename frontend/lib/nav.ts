@@ -4,6 +4,10 @@ import { useMemo } from "react";
 import { Wand2, Film, Type, PenTool, PenLine, Image as ImageIcon, ScanText, Newspaper, MessageSquare, Leaf, History, ScrollText, Gem, Package, type LucideIcon } from "lucide-react";
 import { useAuth } from "./auth-context";
 import { can } from "./permissions";
+import { NEW_CLEANING_MODELS } from "./api";
+
+/** New Cleaning/High-Res Image Generation's model labels — what a run recorded when it was made on that page's GPT models rather than Default's Gemini ones. */
+const NEW_CLEANING_MODEL_LABELS = new Set<string>(NEW_CLEANING_MODELS.map((m) => m.label));
 
 export type NavItem = {
   id: string;
@@ -221,14 +225,18 @@ export const TOOL_WORKSPACE_PATHS: Record<string, string> = {
 /**
  * Which workspace reopens this run, or undefined if that tool has none yet.
  *
- * `modelLabel` is accepted but unused: it used to pick between cleaning's two
- * workspaces (Default's Gemini models vs. the Dust & Scratches GPT-only one,
- * since both recorded under the same `tool: "cleaning"` bucket). With Dust &
- * Scratches removed, every cleaning run — including one made there, back
- * when it existed — reopens in Default; the parameter stays so call sites
- * that pass a model label for other tools don't need to change.
+ * `modelLabel` matters for `cleaning`: Default and New Cleaning/High-Res
+ * Image Generation record under the same `tool: "cleaning"` bucket but run on
+ * disjoint model lists (Default's Gemini models vs. New Cleaning's GPT ones
+ * via OpenRouter), and each only offers its own list in its model picker.
+ * Reopening a GPT-made run in Default left it stuck showing Gemini options
+ * with no way back to the model it was actually made on — so a GPT label
+ * routes back to New Cleaning instead.
  */
-export function workspacePathFor(tool: string, _modelLabel?: string | null) {
+export function workspacePathFor(tool: string, modelLabel?: string | null) {
+  if (tool === "cleaning" && modelLabel && NEW_CLEANING_MODEL_LABELS.has(modelLabel)) {
+    return "/cleaning/new";
+  }
   return TOOL_WORKSPACE_PATHS[tool];
 }
 
