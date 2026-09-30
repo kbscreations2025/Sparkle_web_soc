@@ -15,10 +15,10 @@ import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImageP
 import {
   textToSketch,
   refineOn,
-  SPARKLE_MODELS,
-  DEFAULT_SPARKLE_MODEL,
+  OPTIONAL_IMAGE_MODELS,
+  DEFAULT_OPTIONAL_IMAGE_MODEL,
   toModelOptions,
-  type SparkleModelId,
+  type OptionalImageModelId,
 } from "@/lib/api";
 import {
   ASPECTS,
@@ -36,8 +36,8 @@ import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const PERMISSION = "tool.text_to_sketch.run";
-const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
-const refineSketch = refineOn("/api/text-to-sketch");
+const MODEL_OPTIONS = toModelOptions(OPTIONAL_IMAGE_MODELS);
+const refineSketch = refineOn<string>("/api/text-to-sketch");
 
 const REFINE_HINTS = [
   "Add more shading and depth",
@@ -52,7 +52,7 @@ export default function TextToSketchPage() {
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState<SketchStyleId>("pencil");
   const [aspect, setAspect] = useState<AspectId>("square");
-  const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [model, setModel] = useState<OptionalImageModelId>(DEFAULT_OPTIONAL_IMAGE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_IMAGE_COUNT);
   /** An optional photo the design is drawn from, separate from chat attachments. */
@@ -108,7 +108,7 @@ export default function TextToSketchPage() {
         busyLabel={`Sketching ${count > 1 ? `${count} designs` : "your design"}…`}
         resetLabel="New sketch"
         downloadName="sketch.png"
-        modelLabel={SPARKLE_MODELS.find((entry) => entry.id === model)?.label}
+        modelLabel={OPTIONAL_IMAGE_MODELS.find((entry) => entry.id === model)?.label}
       />
     );
   }
@@ -187,7 +187,7 @@ export default function TextToSketchPage() {
               onPasteImage={pickReference}
               topSlot={builder.selectedCount > 0 ? <JewelrySelectionChips builder={builder} /> : undefined}
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={TEXT_COUNT_OPTIONS} />}
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
+              footerEnd={<InlineModelSelect models={OPTIONAL_IMAGE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} icon={<Wand2 size={14} />}>

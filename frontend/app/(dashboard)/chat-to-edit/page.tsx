@@ -17,10 +17,10 @@ import {
   chatEdit,
   fetchConversationForTool,
   resolveModelId,
-  SPARKLE_MODELS,
-  DEFAULT_SPARKLE_MODEL,
+  IMAGE_EDIT_MODELS,
+  DEFAULT_IMAGE_EDIT_MODEL,
   toModelOptions,
-  type SparkleModelId,
+  type ImageEditModelId,
 } from "@/lib/api";
 import { compressImage, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
@@ -32,7 +32,7 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const CHAT_TO_EDIT_PERMISSION = "tool.chat_to_edit.run";
 
-const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
+const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
 
 const START_HINTS = ["Attach a jewellery photo to begin"];
 const EDIT_HINTS = [
@@ -54,7 +54,7 @@ export default function ChatToEditPage() {
 
   const [history, setHistory] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
-  const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [busy, setBusy] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -108,7 +108,7 @@ export default function ChatToEditPage() {
       setCurrentImage(resumedImage);
       conversationId.current = resumeId;
       parentGenerationId.current = last.id;
-      const resumedModel = resolveModelId(SPARKLE_MODELS, last.model);
+      const resumedModel = resolveModelId(IMAGE_EDIT_MODELS, last.model);
       if (resumedModel) setModel(resumedModel);
 
       // The stage paints instantly from the R2 URL above; swapped for the

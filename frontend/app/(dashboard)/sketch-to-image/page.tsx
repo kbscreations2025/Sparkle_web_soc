@@ -13,10 +13,10 @@ import { SketchPad } from "@/components/studio/SketchPad";
 import {
   sketchToImage,
   refineOn,
-  SPARKLE_MODELS,
-  DEFAULT_SPARKLE_MODEL,
+  IMAGE_EDIT_MODELS,
+  DEFAULT_IMAGE_EDIT_MODEL,
   toModelOptions,
-  type SparkleModelId,
+  type ImageEditModelId,
 } from "@/lib/api";
 import { PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT } from "@/lib/jewelryConfigurator";
 import { compressImage, makeThumbnail } from "@/lib/image";
@@ -28,8 +28,8 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.sketch_to_image.run";
-const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
-const refineRender = refineOn("/api/sketch-to-image");
+const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
+const refineRender = refineOn<string>("/api/sketch-to-image");
 
 /** Several views of one piece go to the model together, so it sees the whole design. */
 const MAX_SKETCHES = 6;
@@ -46,7 +46,7 @@ export default function SketchToImagePage() {
 
   const [sketches, setSketches] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
-  const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_PHOTO_COUNT);
   const [dragging, setDragging] = useState(false);
@@ -101,7 +101,7 @@ export default function SketchToImagePage() {
         busyLabel={`Rendering ${count > 1 ? `${count} images` : "your sketch"}…`}
         resetLabel="New render"
         downloadName="render.png"
-        modelLabel={SPARKLE_MODELS.find((entry) => entry.id === model)?.label}
+        modelLabel={IMAGE_EDIT_MODELS.find((entry) => entry.id === model)?.label}
       />
     );
   }
@@ -247,7 +247,7 @@ export default function SketchToImagePage() {
               // dropping it on the uploader, just without leaving the keyboard.
               onPasteImage={(file) => accept([file])}
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={PHOTO_COUNT_OPTIONS} />}
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
+              footerEnd={<InlineModelSelect models={IMAGE_EDIT_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} disabled={sketches.length === 0} icon={<Sparkles size={14} />}>

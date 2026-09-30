@@ -60,9 +60,6 @@ const IMAGE_RULES = [
   { model: "gemini-3.1-flash-image", quality: "2K", rate: 0.101, label: "Sparkle 3.1 Flash Image — 2K" },
   { model: "gemini-3.1-flash-image", quality: "1K", rate: 0.067, label: "Sparkle 3.1 Flash Image — 1K" },
 
-  // ── Gemini 2.5 Flash Image ── one size only; see GEMINI_IMAGE_QUALITIES.
-  { model: "gemini-2.5-flash-image", quality: "1K", rate: 0.039, label: "Sparkle 2.5 Flash Image — 1K" },
-
   // ── gpt-image-1 ── quality here is a compute tier, not a resolution.
   // Rates are the 1024x1024 tier; the landscape/portrait sizes cost more,
   // and this app only ever requests the square one.

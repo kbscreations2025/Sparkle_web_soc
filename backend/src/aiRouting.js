@@ -1,8 +1,9 @@
 const Tenant = require("./models/tenant");
 const { decryptSecret } = require("./secrets");
-const gemini = require("./gemini");
-const openai = require("./openai");
-const openrouter = require("./openrouter");
+const gemini = require("./providers/gemini");
+const openai = require("./providers/openai");
+const openrouter = require("./providers/openrouter");
+const { openrouterEquivalentFor } = require("./providers/modelEquivalents");
 
 /** One entry per provider this router knows how to call — see `routeProviderCall`. */
 const PROVIDER_MODULES = { gemini, openai, openrouter };
@@ -160,15 +161,102 @@ async function routeProviderOperation({ tenant, provider, call }) {
 }
 
 /**
- * An image out. The original shape of this function, now one of three
- * operations over the same failover policy.
+ * The candidates for one image call: the requested provider's own enabled
+ * keys, plus — when the requested model has an OpenRouter equivalent (see
+ * `providers/modelEquivalents.js`) — this tenant's enabled OpenRouter keys,
+ * merged into one list and sorted by the same `priority` number a super
+ * admin already sets. That's what lets an OpenRouter key sit at priority 4
+ * behind two Gemini keys and an OpenAI key and actually be tried in that
+ * order, rather than only ever competing with other OpenRouter rows.
+ *
+ * A row belonging to neither the requested provider nor OpenRouter is left
+ * out; an OpenRouter row is left out too when the requested model has no
+ * known OpenRouter id — trying it would only ever fail, so it's dropped
+ * instead of attempted.
+ */
+function imageCandidatesFor(tenant, provider, modelId) {
+  const equivalent = provider === "openrouter" ? modelId : openrouterEquivalentFor(provider, modelId);
+
+  return tenant
+    .routableProviders() // every enabled key, already sorted by priority
+    .filter((entry) => entry.provider === provider || entry.provider === "openrouter")
+    .map((entry) => {
+      if (entry.provider === provider) return { entry, mod: PROVIDER_MODULES[provider], modelId };
+      if (!equivalent) return null; // an OpenRouter row, but this model has no OpenRouter id
+      return { entry, mod: openrouter, modelId: equivalent };
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Tries each image candidate in order, moving to the next on a transient or
+ * key-specific error — same policy every provider module's own
+ * `withKeyFailover` already applies, generalized here because candidates can
+ * now span more than one module (a Gemini row and an OpenRouter row are not
+ * the same module's problem to classify).
+ */
+async function tryImageCandidates(candidates, attempt) {
+  let lastErr;
+  for (let i = 0; i < candidates.length; i++) {
+    try {
+      return await attempt(candidates[i]);
+    } catch (err) {
+      lastErr = err;
+      const isLastCandidate = i === candidates.length - 1;
+      const { code, retryable } = candidates[i].mod.classifyError(err);
+      if (isLastCandidate || !(retryable || code === 401 || code === 403)) throw err;
+      console.warn(
+        `[aiRouting] candidate ${i + 1}/${candidates.length} (${candidates[i].entry.provider}) failed — trying the next one`
+      );
+    }
+  }
+  throw lastErr; // unreachable when candidates is non-empty; keeps the type honest for an empty array
+}
+
+/**
+ * An image out. Unlike `routeProviderOperation` (still used by text/video,
+ * neither of which OpenRouter serves), this builds its own candidate list so
+ * it can mix providers — see `imageCandidatesFor`.
  */
 async function routeProviderCall({ tenant, provider, modelId, prompt, images, quality, aspectRatio }) {
-  return routeProviderOperation({
-    tenant,
-    provider,
-    call: ({ apiKey, mod }) => mod.generateImage({ apiKey, modelId, prompt, images, quality, aspectRatio }),
-  });
+  const candidates = imageCandidatesFor(tenant, provider, modelId);
+  if (candidates.length === 0) {
+    throw new NoProviderError(`This organization has no ${PROVIDER_LABELS[provider]} key configured. Ask a super admin to add one.`);
+  }
+
+  let usedEntry;
+  let output;
+  try {
+    output = await tryImageCandidates(candidates, async ({ entry, mod, modelId: resolvedModelId }) => {
+      const withCredential = await Tenant.loadProvider(tenant._id, entry._id);
+      const apiKey = decryptSecret(withCredential.credential, { provider: entry.provider });
+
+      try {
+        const result = await mod.generateImage({
+          apiKey,
+          modelId: resolvedModelId,
+          prompt,
+          images,
+          quality: mod.qualityFor(resolvedModelId, quality),
+          aspectRatio,
+        });
+        tenant.recordProviderSuccess(entry._id);
+        usedEntry = entry;
+        return result;
+      } catch (err) {
+        tenant.recordProviderFailure(entry._id, mod.classifyError(err).code);
+        throw err;
+      }
+    });
+  } finally {
+    try {
+      await tenant.save();
+    } catch (err) {
+      console.error("could not record provider health:", err.message);
+    }
+  }
+
+  return { output, providerId: usedEntry._id };
 }
 
 /**

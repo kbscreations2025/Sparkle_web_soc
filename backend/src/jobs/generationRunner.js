@@ -219,7 +219,7 @@ async function runGenerationJob({
    * generation exists and its outputs are stored — so the document can
    * point at both. `saved.outputs` is in the same order as `delivered`.
    */
-  const extra = (await persist?.({ saved, delivered, data, dbUser, tenant })) ?? {};
+  const extra = (await persist?.({ saved, delivered, data, dbUser, tenant, provider, model, modelLabel })) ?? {};
 
   return {
     ...toResult(saved, { model, modelLabel, provider }),

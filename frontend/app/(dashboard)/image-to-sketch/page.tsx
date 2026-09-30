@@ -12,10 +12,10 @@ import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImageP
 import {
   imageToSketch,
   refineOn,
-  SPARKLE_MODELS,
-  DEFAULT_SPARKLE_MODEL,
+  IMAGE_EDIT_MODELS,
+  DEFAULT_IMAGE_EDIT_MODEL,
   toModelOptions,
-  type SparkleModelId,
+  type ImageEditModelId,
 } from "@/lib/api";
 import {
   SKETCH_STYLES,
@@ -32,8 +32,8 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.image_to_sketch.run";
-const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
-const refineSketch = refineOn("/api/image-to-sketch");
+const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
+const refineSketch = refineOn<string>("/api/image-to-sketch");
 
 const REFINE_HINTS = [
   "Add more shading and depth",
@@ -47,7 +47,7 @@ export default function ImageToSketchPage() {
 
   const [photo, setPhoto] = useState<string | null>(null);
   const [style, setStyle] = useState<SketchStyleId>("pencil");
-  const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_PHOTO_COUNT);
   const [dragging, setDragging] = useState(false);
@@ -96,7 +96,7 @@ export default function ImageToSketchPage() {
         busyLabel={`Sketching ${count > 1 ? `${count} versions` : "your photo"}…`}
         resetLabel="New sketch"
         downloadName="sketch.png"
-        modelLabel={SPARKLE_MODELS.find((entry) => entry.id === model)?.label}
+        modelLabel={IMAGE_EDIT_MODELS.find((entry) => entry.id === model)?.label}
       />
     );
   }
@@ -172,7 +172,7 @@ export default function ImageToSketchPage() {
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-surface-raised px-3 py-2.5">
             <ImageCountSelector count={count} onChange={setCount} options={PHOTO_COUNT_OPTIONS} />
 
-            <InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />
+            <InlineModelSelect models={IMAGE_EDIT_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />
           </div>
 
           <RunButton onClick={handleGenerate} disabled={!photo} icon={<PenLine size={14} />}>

@@ -9,6 +9,8 @@ type Model = {
   qualities?: readonly string[];
   /** Shown as the option's second line — see `InlineDropdown`. */
   description?: string;
+  /** Which provider serves this model — see `InlineDropdown`'s `group`. */
+  provider?: string;
 };
 
 /**
@@ -61,6 +63,7 @@ export function InlineModelSelect<TModel extends string>({
           value: model.id,
           label: model.label,
           hint: model.description,
+          group: model.provider,
         }))}
         triggerClassName="max-w-[150px] sm:max-w-[170px]"
         panelClassName="w-[210px]"

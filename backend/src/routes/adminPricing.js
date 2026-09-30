@@ -4,8 +4,8 @@ const config = require("../config");
 const { requireAuth, requireSuperAdmin } = require("../middleware/auth");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const { GENERATION_TOOLS } = require("../generations");
-const gemini = require("../gemini");
-const openai = require("../openai");
+const gemini = require("../providers/gemini");
+const openai = require("../providers/openai");
 const Tenant = require("../models/tenant");
 const CreditPricingRule = require("../models/creditPricingRule");
 

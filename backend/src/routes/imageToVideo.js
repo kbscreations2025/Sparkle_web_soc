@@ -15,7 +15,7 @@ const {
   MAX_VIEWS,
   REFERENCE_MODE,
 } = require("../prompts/video");
-const gemini = require("../gemini");
+const gemini = require("../providers/gemini");
 
 const router = express.Router();
 

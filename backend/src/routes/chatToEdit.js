@@ -1,8 +1,7 @@
 const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { buildChatEditPrompt } = require("../prompts");
-const { resolveModel, qualityFor, labelFor } = require("../gemini");
-const { routeGeminiCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
+const { resolveProviderModel, routeProviderCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
 const { recordGeneration, parseDataUri, isOwnConversation } = require("../generationService");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const credit = require("../services/credits");
@@ -17,13 +16,19 @@ router.use(requireAuth, requirePermission("tool.chat_to_edit.run"));
  * Image Cleaning there's no "default" prompt — every turn is instruction-
  * driven, so `instruction` is required.
  *
- * Uses the same three Gemini models as Image Cleaning (see gemini.js) rather
- * than a separate model map: the reference app this was ported from mapped
- * the same display label to a different real model per tool, which meant
- * picking "Sparkle 2.5 Flash" meant something different depending which tool
- * you were in. One shared map avoids reproducing that.
+ * Uses the same Gemini models as Image Cleaning, plus its own OpenAI option
+ * (see frontend/lib/api.ts's CHAT_TO_EDIT_MODELS) — one shared map per model
+ * id rather than a separate one per tool, the same reasoning that keeps
+ * "Sparkle 2.5 Flash" meaning the same real model everywhere it's offered.
+ * `resolveProviderModel` is what tells a Gemini id from an OpenAI one; this
+ * route no longer assumes every request is Gemini's.
  */
 router.post("/", async (req, res) => {
+  // Read in the catch's audit log below — declared here, not destructured
+  // from `resolveProviderModel`'s result, so a failure before that line runs
+  // still has a provider to report instead of hitting the TDZ on a `const`
+  // that was never reached.
+  let resolvedProvider = "gemini";
   try {
     const { dbUser } = req;
     const {
@@ -60,8 +65,8 @@ router.post("/", async (req, res) => {
     // shouldn't sink an otherwise-good edit.
     const parsedReferences = Array.isArray(referenceImages) ? referenceImages.map(parseDataUri).filter(Boolean) : [];
 
-    const model = resolveModel(requestedModel);
-    const quality = qualityFor(model, requestedQuality);
+    const { provider, model, quality, modelLabel } = resolveProviderModel(requestedModel, requestedQuality);
+    resolvedProvider = provider;
 
     const tenant = await loadTenantOrThrow(dbUser);
 
@@ -113,8 +118,9 @@ router.post("/", async (req, res) => {
     let output;
     let providerId;
     try {
-      ({ output, providerId } = await routeGeminiCall({
+      ({ output, providerId } = await routeProviderCall({
         tenant,
+        provider,
         modelId: model,
         prompt,
         quality,
@@ -143,7 +149,7 @@ router.post("/", async (req, res) => {
         conversationId: requestedConversationId,
         parentGenerationId,
         model,
-        modelLabel: labelFor(model),
+        modelLabel,
         quality,
         prompt,
         // Shown in the UI/history, kept separate from `prompt` so the
@@ -157,6 +163,7 @@ router.post("/", async (req, res) => {
         ],
         outputImages: [{ image: output, role: "generated" }],
         providerId,
+        provider,
       });
       conversationId = saved.conversationId;
       generationId = saved.generationId;
@@ -189,9 +196,9 @@ router.post("/", async (req, res) => {
       status: "failure",
       targetType: "generation",
       message: err.message || "generation failed",
-      metadata: { tool: "chat_to_edit", provider: "gemini", requestedModel: req.body?.model || null },
+      metadata: { tool: "chat_to_edit", provider: resolvedProvider, requestedModel: req.body?.model || null },
     });
-    sendGenerationError(res, err, "chat-to-edit");
+    sendGenerationError(res, err, "chat-to-edit", resolvedProvider);
   }
 });
 

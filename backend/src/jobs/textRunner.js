@@ -1,6 +1,6 @@
 const { routeTextCall, loadTenantOrThrow } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
-const gemini = require("../gemini");
+const gemini = require("../providers/gemini");
 const User = require("../models/user");
 
 /**

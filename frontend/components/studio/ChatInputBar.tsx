@@ -47,6 +47,7 @@ export function ChatInputBar<TModel extends string>({
     label: string;
     quality?: string;
     qualities?: readonly string[];
+    provider?: string;
   }[];
   modelValue: TModel;
   onModelChange: (value: TModel) => void;
@@ -127,7 +128,7 @@ export function ChatInputBar<TModel extends string>({
             value={modelValue}
             onChange={onModelChange}
             disabled={busy}
-            options={modelOptions.map((option) => ({ value: option.value, label: option.label }))}
+            options={modelOptions.map((option) => ({ value: option.value, label: option.label, group: option.provider }))}
             triggerClassName="max-w-[150px] sm:max-w-[170px]"
             panelClassName="w-[190px]"
           />

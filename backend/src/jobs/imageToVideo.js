@@ -8,7 +8,7 @@ const {
   MAX_REFERENCE_IMAGES,
   REFERENCE_MODE,
 } = require("../prompts/video");
-const gemini = require("../gemini");
+const gemini = require("../providers/gemini");
 const User = require("../models/user");
 
 const IMAGE_TO_VIDEO_JOB = "imageToVideo.generate";

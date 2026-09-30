@@ -506,6 +506,7 @@ export const CLEANING_MODELS = [
   {
     id: "gemini-3-pro-image",
     label: "Sparkle 3 Pro Image",
+    provider: "Gemini",
     quality: "4K",
     qualities: ["4K", "2K", "1K"],
     description: "Highest fidelity · complex detail",
@@ -514,18 +515,11 @@ export const CLEANING_MODELS = [
   {
     id: "gemini-3.1-flash-image",
     label: "Sparkle 3.1 Flash Image",
+    provider: "Gemini",
     quality: "4K",
     qualities: ["4K", "2K", "1K"],
     description: "Optimised for speed · high volume",
     badge: "Fast",
-  },
-  {
-    id: "gemini-2.5-flash-image",
-    label: "Sparkle 2.5 Flash Image",
-    quality: "1K",
-    qualities: ["1K"],
-    description: "Budget-friendly · quick turnaround",
-    badge: "Budget",
   },
 ] as const;
 
@@ -539,6 +533,7 @@ export const NEW_CLEANING_MODELS = [
   {
     id: "openai/gpt-image-2",
     label: "Sparkle GPT Image 2",
+    provider: "OpenRouter",
     quality: "high",
     qualities: ["high", "medium", "low"],
     description: "OpenAI's latest image model · via OpenRouter",
@@ -547,6 +542,7 @@ export const NEW_CLEANING_MODELS = [
   {
     id: "openai/gpt-image-1",
     label: "Sparkle GPT Image",
+    provider: "OpenRouter",
     quality: "high",
     qualities: ["high", "medium", "low"],
     description: "OpenAI's prior image model · via OpenRouter",
@@ -570,7 +566,14 @@ export const DEFAULT_NEW_CLEANING_MODEL: NewCleaningModelId = "openai/gpt-image-
  * shows), which is always the first and best entry in `qualities`.
  */
 export function qualitiesFor(modelId: string): readonly string[] {
-  return CLEANING_MODELS.find((m) => m.id === modelId)?.qualities ?? ["1K"];
+  // Searches both extra-model lists, not just `CLEANING_MODELS`: each adds an
+  // id the other doesn't have (`gpt-image-1` native OpenAI vs. `gpt-image-2`
+  // via OpenRouter), so a lookup that only checked one would miss the other.
+  return (
+    IMAGE_EDIT_MODELS.find((m) => m.id === modelId)?.qualities ??
+    OPTIONAL_IMAGE_MODELS.find((m) => m.id === modelId)?.qualities ??
+    ["1K"]
+  );
 }
 
 /** The size a freshly-picked model starts on — its best. */
@@ -596,16 +599,76 @@ export type SparkleModelId = CleaningModelId;
 export const DEFAULT_SPARKLE_MODEL = DEFAULT_CLEANING_MODEL;
 
 /**
+ * The model list for every tool that always hands the model at least one
+ * input photo — Chat to Edit, Sketch to Image, Image to Sketch, Lifestyle,
+ * Campaign Kit. The Gemini models plus OpenAI's, routed through OpenAI
+ * directly (not via OpenRouter, unlike New Cleaning's GPT options) since the
+ * backend's own `openai` provider module already exists and only needs an
+ * image to edit, which every one of these tools always has.
+ *
+ * Deliberately not folded into `SPARKLE_MODELS`: native OpenAI (`gpt-image-1`
+ * called directly, not via OpenRouter) only exposes an edit endpoint, so a
+ * tool with no guaranteed input photo can't use it. Text to Image and Text to
+ * Sketch still get a GPT option — see `OPTIONAL_IMAGE_MODELS` below — just
+ * OpenRouter's `gpt-image-2`, which (unlike native OpenAI) has a real
+ * text-only mode as well as an edit one.
+ */
+export const IMAGE_EDIT_MODELS = [
+  {
+    id: "gpt-image-1",
+    label: "Sparkle GPT Image",
+    provider: "OpenAI",
+    quality: "high",
+    qualities: ["high", "medium", "low"],
+    description: "OpenAI's image model",
+    badge: "Alternate",
+  },
+  ...CLEANING_MODELS,
+] as const;
+export type ImageEditModelId = (typeof IMAGE_EDIT_MODELS)[number]["id"];
+export const DEFAULT_IMAGE_EDIT_MODEL: ImageEditModelId = DEFAULT_CLEANING_MODEL;
+
+/**
+ * The model list for tools whose input photo is optional or absent — Text to
+ * Image (never has one) and Text to Sketch (an optional reference). The
+ * Gemini models plus OpenRouter's `gpt-image-2`. Unlike `IMAGE_EDIT_MODELS`'s
+ * OpenAI option, this one has to go through OpenRouter rather than native
+ * OpenAI: native OpenAI's `images.edit` always requires an image, but
+ * OpenRouter's `images/generations` endpoint has a genuine text-only mode
+ * too (confirmed against its own Playground export — no `input_references`
+ * field at all when there's no image to send, and the field present when
+ * there is one), so it can serve either of these tools whether or not a
+ * photo came along.
+ */
+export const OPTIONAL_IMAGE_MODELS = [
+  {
+    id: "openai/gpt-image-2",
+    label: "Sparkle GPT Image 2",
+    // Shown as "OpenAI" like every other GPT option in the app, even though
+    // this one happens to be routed through OpenRouter under the hood — the
+    // picker groups by who made the model, not by which pipe reaches it.
+    provider: "OpenAI",
+    quality: "high",
+    qualities: ["high", "medium", "low"],
+    description: "OpenAI's latest image model · via OpenRouter",
+    badge: "Alternate",
+  },
+  ...CLEANING_MODELS,
+] as const;
+export type OptionalImageModelId = (typeof OPTIONAL_IMAGE_MODELS)[number]["id"];
+export const DEFAULT_OPTIONAL_IMAGE_MODEL: OptionalImageModelId = DEFAULT_CLEANING_MODEL;
+
+/**
  * Shared shape a model dropdown expects — built once from a models list
  * rather than in every page. The explicit return type matters: without it,
  * TS widens `entry.id`'s literal union to plain `string`, which is what let
  * a caller's `onModelChange` mismatch its own state setter's type.
  */
 export function toModelOptions<
-  T extends { id: string; label: string; quality: string; qualities?: readonly string[] },
+  T extends { id: string; label: string; quality: string; qualities?: readonly string[]; provider?: string },
 >(
   models: readonly T[]
-): { value: T["id"]; label: string; quality: string; qualities: readonly string[] }[] {
+): { value: T["id"]; label: string; quality: string; qualities: readonly string[]; provider?: string }[] {
   return models.map((entry) => ({
     value: entry.id,
     label: entry.label,
@@ -613,6 +676,7 @@ export function toModelOptions<
     // Defaulted rather than optional so a consumer can count the options
     // without a null check; a model with one size is a list of one.
     qualities: entry.qualities ?? [entry.quality],
+    provider: entry.provider,
   }));
 }
 
@@ -786,7 +850,8 @@ export function chatEdit(body: {
   instruction: string;
   /** What the UI shows for this turn. Falls back to `instruction` server-side if omitted. */
   displayPrompt?: string;
-  model: SparkleModelId;
+  /** An `IMAGE_EDIT_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
   quality?: string;
   conversationId?: string | null;
@@ -809,7 +874,8 @@ export function chatEdit(body: {
 export function textToImage(body: {
   /** Free text plus whatever the jewelry builder assembled, already joined. */
   prompt: string;
-  model: SparkleModelId;
+  /** An `OPTIONAL_IMAGE_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
   quality?: string;
   style: string;
@@ -861,7 +927,7 @@ export function refineOn<TModel extends string = SparkleModelId>(path: string) {
 }
 
 /** A follow-up on a Text to Image result. */
-export const refineTextToImage = refineOn("/api/text-to-image");
+export const refineTextToImage = refineOn<string>("/api/text-to-image");
 
 /** A follow-up on a cleaned image. Accepts the GPT model ids too. */
 export const refineImage = refineOn<string>("/api/cleaning");
@@ -869,7 +935,8 @@ export const refineImage = refineOn<string>("/api/cleaning");
 /** A written brief drawn as a sketch, optionally starting from a reference photo. */
 export function textToSketch(body: {
   prompt: string;
-  model: SparkleModelId;
+  /** An `OPTIONAL_IMAGE_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
   quality?: string;
   style: string;
@@ -886,7 +953,8 @@ export function sketchToImage(body: {
   /** Every view of the piece, as data URIs — they go to the model together. */
   images: string[];
   description?: string;
-  model: SparkleModelId;
+  /** An `IMAGE_EDIT_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
   quality?: string;
   count: number;
@@ -899,7 +967,8 @@ export function sketchToImage(body: {
 export function imageToSketch(body: {
   image: string;
   style: string;
-  model: SparkleModelId;
+  /** An `IMAGE_EDIT_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
   quality?: string;
   count: number;
@@ -1003,7 +1072,8 @@ export function lifestyle(body: {
   /** The shot's frame shape, e.g. "4:5" — a user choice, not left to the model. */
   aspectRatio?: string;
   description?: string;
-  model: SparkleModelId;
+  /** An `IMAGE_EDIT_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
   quality?: string;
   preview?: string | null;
@@ -1018,7 +1088,7 @@ export function lifestyle(body: {
  * re-sent on every turn as the ground truth for the design, so a stone lost
  * on an earlier turn is corrected rather than inherited.
  */
-export function refineLifestyle(body: RefineBody & { jewelryImages?: string[] }) {
+export function refineLifestyle(body: RefineBody<string> & { jewelryImages?: string[] }) {
   return apiRequest<QueuedResult>("/api/lifestyle", { method: "POST", body: JSON.stringify(body) });
 }
 
@@ -1272,7 +1342,8 @@ export function campaignKit(body: {
   poses?: string[];
   studioProps?: string[];
   aspect: string;
-  model: SparkleModelId;
+  /** An `IMAGE_EDIT_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
   quality?: string;
   preview?: string | null;
@@ -1281,7 +1352,7 @@ export function campaignKit(body: {
 }
 
 /** Retouching one shot of a kit. `shotLabel` tells the backend whether a person is in it. */
-export const refineCampaignKit = (body: RefineBody & { shotLabel?: string }) =>
+export const refineCampaignKit = (body: RefineBody<string> & { shotLabel?: string }) =>
   apiRequest<QueuedResult>("/api/marketing-kit/campaign", { method: "POST", body: JSON.stringify(body) });
 
 export function listMarketingKits(

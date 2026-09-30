@@ -352,7 +352,7 @@ registerJobHandler(CAMPAIGN_KIT_JOB, (context) => {
      */
     persist: context.data.isRefinement
       ? undefined
-      : ({ saved, delivered, data, dbUser }) => {
+      : ({ saved, delivered, data, dbUser, provider, model, modelLabel }) => {
           const [modelImage, ...jewelry] = data.sourceImages;
 
           return saveKit({
@@ -365,7 +365,7 @@ registerJobHandler(CAMPAIGN_KIT_JOB, (context) => {
                 dbUser,
                 kitId,
                 generationId: saved.generationId,
-                model: { provider: "gemini", modelId: saved.model ?? null, modelLabel: null },
+                model: { provider, modelId: model, modelLabel },
                 modelImage,
                 sourceImages: jewelry,
                 // Index-aligned with `delivered`: a shot that failed is

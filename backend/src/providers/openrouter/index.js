@@ -1,19 +1,29 @@
 /**
  * OpenRouter fronts many providers behind one OpenAI-compatible API and one
- * key. This app only draws on it for GPT's newest image-generation models —
- * everything else still goes through gemini.js/openai.js directly — so the
- * list here is deliberately narrow rather than OpenRouter's full catalogue.
+ * key. This app draws on it two ways: as its own selectable models (GPT's
+ * newest image models, picked directly on New Cleaning) and as a fallback
+ * that can serve a Gemini/OpenAI model when that provider's own keys are
+ * missing or exhausted (see aiRouting.js's `imageCandidatesFor` and
+ * `providers/modelEquivalents.js`) — so the Gemini-equivalent ids below are
+ * reachable even though nothing lets a user pick them directly yet.
+ *
  * Ids are OpenRouter's own `<provider>/<model>` naming.
  */
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-const OPENROUTER_MODELS = ["openai/gpt-image-2", "openai/gpt-image-1"];
+/** OpenRouter's own image endpoint has two distinct shapes depending on which underlying model is asked for it — see `generateImage`. */
+const GPT_STYLE_MODELS = ["openai/gpt-image-2", "openai/gpt-image-1"];
+const GEMINI_STYLE_MODELS = ["google/gemini-3-pro-image", "google/gemini-3.1-flash-image"];
+
+const OPENROUTER_MODELS = [...GPT_STYLE_MODELS, ...GEMINI_STYLE_MODELS];
 const DEFAULT_OPENROUTER_MODEL = OPENROUTER_MODELS[0];
 
 /** The "Sparkle" label the frontend shows — see frontend/lib/api.ts's NEW_CLEANING_MODELS. */
 const OPENROUTER_MODEL_LABELS = {
   "openai/gpt-image-2": "Sparkle GPT Image 2",
   "openai/gpt-image-1": "Sparkle GPT Image",
+  "google/gemini-3-pro-image": "Sparkle 3 Pro Image",
+  "google/gemini-3.1-flash-image": "Sparkle 3.1 Flash Image",
 };
 
 function labelFor(modelId) {
@@ -21,14 +31,17 @@ function labelFor(modelId) {
 }
 
 /** gpt-image-2/1's quality axis over OpenRouter's images endpoint — same vocabulary as OpenAI's own (see openai.js). Best first. */
-const OPENROUTER_QUALITIES = ["high", "medium", "low"];
+const GPT_QUALITIES = ["high", "medium", "low"];
+/** The Gemini-style models' axis is a resolution, same vocabulary the Gemini provider module itself uses — confirmed from OpenRouter's own Playground export, not assumed. */
+const GEMINI_QUALITIES = ["4K", "2K", "1K"];
 
-function qualitiesFor() {
-  return OPENROUTER_QUALITIES;
+function qualitiesFor(modelId) {
+  return GEMINI_STYLE_MODELS.includes(modelId) ? GEMINI_QUALITIES : GPT_QUALITIES;
 }
 
 function qualityFor(modelId, requested) {
-  return OPENROUTER_QUALITIES.includes(requested) ? requested : OPENROUTER_QUALITIES[0];
+  const allowed = qualitiesFor(modelId);
+  return allowed.includes(requested) ? requested : allowed[0];
 }
 
 function isKnownModel(modelId) {
@@ -109,31 +122,46 @@ async function withKeyFailover(entries, attempt) {
 }
 
 /**
- * One call to gpt-image-2/1 through OpenRouter's `images/generations`
+ * One call to any of OpenRouter's image models through its `images/generations`
  * endpoint. Editing an existing photo goes through `input_references` — an
  * array of `{ type: "image_url", image_url: { url } }`, confirmed against
- * OpenRouter's own Playground export for this exact model — not a bare
- * `image` field (that's silently ignored: an earlier version of this file
- * sent that and got back an unrelated redesign) and not OpenAI's own
- * `images.edit` multipart contract (OpenRouter doesn't expose that route for
- * this model). A data URI works as the reference's `url` same as a hosted one.
+ * OpenRouter's own Playground export — not a bare `image` field (that's
+ * silently ignored: an earlier version of this file sent that and got back
+ * an unrelated redesign) and not OpenAI's own `images.edit` multipart
+ * contract (OpenRouter doesn't expose that route for these models). A data
+ * URI works as the reference's `url` same as a hosted one. Shared by both
+ * model families below — only the rest of the body differs.
  */
 async function generateImage({ apiKey, modelId, prompt, images, quality, aspectRatio }) {
-  const body = {
-    model: modelId,
-    prompt,
-    aspect_ratio: aspectRatio || "1:1",
-    quality: qualityFor(modelId, quality),
-    background: "auto",
-    ...(images?.length
-      ? {
-          input_references: images.map(({ mimeType, base64 }) => ({
-            type: "image_url",
-            image_url: { url: `data:${mimeType};base64,${base64}` },
-          })),
-        }
-      : {}),
-  };
+  const inputReferences = images?.length
+    ? {
+        input_references: images.map(({ mimeType, base64 }) => ({
+          type: "image_url",
+          image_url: { url: `data:${mimeType};base64,${base64}` },
+        })),
+      }
+    : {};
+
+  // The two families take genuinely different parameters — confirmed from
+  // OpenRouter's own Playground export for each, not assumed from one
+  // shape carrying over to the other. GPT's has a compute-tier `quality`
+  // plus `background`; Gemini's has a `resolution` and neither of those.
+  const body = GEMINI_STYLE_MODELS.includes(modelId)
+    ? {
+        model: modelId,
+        prompt,
+        resolution: qualityFor(modelId, quality),
+        aspect_ratio: aspectRatio || "1:1",
+        ...inputReferences,
+      }
+    : {
+        model: modelId,
+        prompt,
+        aspect_ratio: aspectRatio || "1:1",
+        quality: qualityFor(modelId, quality),
+        background: "auto",
+        ...inputReferences,
+      };
 
   const response = await withRetry(async () => {
     const res = await fetch(`${OPENROUTER_BASE_URL}/images/generations`, {

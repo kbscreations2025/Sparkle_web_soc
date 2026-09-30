@@ -11,6 +11,14 @@ export type InlineOption<T extends string> = {
   label: string;
   /** A second line under the label — what the option is for. */
   hint?: string;
+  /**
+   * Which provider this option belongs to — e.g. "Gemini", "OpenRouter". A
+   * header for the group renders above the first option carrying a new one,
+   * so a list spanning providers reads as sections instead of one flat list
+   * with no indication of what's serving which model. Options with no group
+   * (or a list where nothing sets one) render exactly as before this existed.
+   */
+  group?: string;
 };
 
 /**
@@ -101,10 +109,20 @@ export function InlineDropdown<T extends string>({
               panelClassName
             )}
           >
-            {options.map((option) => {
+            {options.map((option, index) => {
               const isSelected = option.value === value;
+              // A header renders once, right before the first option of a
+              // new group — not once per option — so consecutive options in
+              // the same group sit together under one label.
+              const showGroupHeader = option.group && option.group !== options[index - 1]?.group;
+
               return (
                 <li key={option.value}>
+                  {showGroupHeader && (
+                    <p className="px-2.5 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-wider text-faint first:pt-1">
+                      {option.group}
+                    </p>
+                  )}
                   <button
                     type="button"
                     role="option"

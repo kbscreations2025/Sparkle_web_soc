@@ -17,11 +17,11 @@ import {
   campaignKit,
   fetchMarketingKit,
   refineCampaignKit,
-  SPARKLE_MODELS,
-  DEFAULT_SPARKLE_MODEL,
+  IMAGE_EDIT_MODELS,
+  DEFAULT_IMAGE_EDIT_MODEL,
   toModelOptions,
   type MarketingKit,
-  type SparkleModelId,
+  type ImageEditModelId,
 } from "@/lib/api";
 import { BOX_STYLE_OPTIONS, POSE_OPTIONS, STUDIO_PROP_OPTIONS, CAMPAIGN_ASPECTS } from "@/lib/campaignOptions";
 import { makeThumbnail } from "@/lib/image";
@@ -34,7 +34,7 @@ import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const PERMISSION = "tool.marketing_kit.run";
-const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
+const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
 
 const HINTS = [
   "Warm the lighting a little",
@@ -90,7 +90,7 @@ function CampaignKitWorkspace() {
   const [pose, setPose] = useState<string>(POSE_OPTIONS[0].id);
   const [box, setBox] = useState<string>(BOX_STYLE_OPTIONS[0].id);
   const [prop, setProp] = useState<string>(STUDIO_PROP_OPTIONS[0].id);
-  const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
   const [quality, setQuality] = useModelQuality(model);
 
   const onRefine = useCallback((body: RefineRequest) => refineCampaignKit({ ...body, model, quality }), [model, quality]);
@@ -167,7 +167,7 @@ function CampaignKitWorkspace() {
         busyLabel="Shooting the kit…"
         resetLabel="New kit"
         downloadName="campaign-shot.png"
-        modelLabel={SPARKLE_MODELS.find((entry) => entry.id === model)?.label}
+        modelLabel={IMAGE_EDIT_MODELS.find((entry) => entry.id === model)?.label}
       />
     );
   }
@@ -230,7 +230,7 @@ function CampaignKitWorkspace() {
               // text — same as dropping it on the uploader, just without
               // leaving the keyboard.
               onPasteImage={(file) => addJewelry([file])}
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
+              footerEnd={<InlineModelSelect models={IMAGE_EDIT_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} disabled={!ready} icon={<Newspaper size={14} />}>

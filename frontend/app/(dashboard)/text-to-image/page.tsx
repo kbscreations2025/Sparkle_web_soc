@@ -15,10 +15,10 @@ import {
   textToImage,
   refineTextToImage,
   resolveModelId,
-  SPARKLE_MODELS,
-  DEFAULT_SPARKLE_MODEL,
+  OPTIONAL_IMAGE_MODELS,
+  DEFAULT_OPTIONAL_IMAGE_MODEL,
   toModelOptions,
-  type SparkleModelId,
+  type OptionalImageModelId,
 } from "@/lib/api";
 import {
   ASPECTS,
@@ -35,7 +35,7 @@ import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const PERMISSION = "tool.text_to_image.run";
-const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
+const MODEL_OPTIONS = toModelOptions(OPTIONAL_IMAGE_MODELS);
 
 const REFINE_HINTS = [
   "Change metal to rose gold",
@@ -50,7 +50,7 @@ export default function TextToImagePage() {
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState<StyleId>("product-studio");
   const [aspect, setAspect] = useState<AspectId>("square");
-  const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [model, setModel] = useState<OptionalImageModelId>(DEFAULT_OPTIONAL_IMAGE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_IMAGE_COUNT);
   const [spellIssueCount, setSpellIssueCount] = useState(0);
@@ -63,7 +63,7 @@ export default function TextToImagePage() {
     // so a refinement continues on the same model rather than silently
     // switching to this page's default.
     onResume: ({ model: resumed }) => {
-      const id = resolveModelId(SPARKLE_MODELS, resumed);
+      const id = resolveModelId(OPTIONAL_IMAGE_MODELS, resumed);
       if (id) setModel(id);
     },
   });
@@ -96,7 +96,7 @@ export default function TextToImagePage() {
         busyLabel={`Generating ${count > 1 ? `${count} images` : "image"}…`}
         resetLabel="New image"
         downloadName="generated.png"
-        modelLabel={SPARKLE_MODELS.find((entry) => entry.id === model)?.label}
+        modelLabel={OPTIONAL_IMAGE_MODELS.find((entry) => entry.id === model)?.label}
       />
     );
   }
@@ -132,7 +132,7 @@ export default function TextToImagePage() {
                 )
               }
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={TEXT_COUNT_OPTIONS} />}
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
+              footerEnd={<InlineModelSelect models={OPTIONAL_IMAGE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} icon={<Wand2 size={14} />}>

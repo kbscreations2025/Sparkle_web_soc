@@ -6,7 +6,7 @@ const { GoogleGenAI } = require("@google/genai");
  * model id — no alias table, unlike a provider that also has to carry legacy
  * names forward.
  */
-const GEMINI_MODELS = ["gemini-3-pro-image", "gemini-3.1-flash-image", "gemini-2.5-flash-image"];
+const GEMINI_MODELS = ["gemini-3-pro-image", "gemini-3.1-flash-image"];
 const DEFAULT_GEMINI_MODEL = GEMINI_MODELS[0];
 
 /**
@@ -75,7 +75,6 @@ const BLOCKED_FINISH_REASONS = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLI
 const GEMINI_MODEL_LABELS = {
   "gemini-3-pro-image": "Sparkle 3 Pro Image",
   "gemini-3.1-flash-image": "Sparkle 3.1 Flash Image",
-  "gemini-2.5-flash-image": "Sparkle 2.5 Flash Image",
 };
 
 function labelFor(modelId) {
@@ -86,18 +85,14 @@ function labelFor(modelId) {
  * The output sizes each image model accepts, best first — the first entry is
  * what a run gets when the caller names nothing.
  *
- * Only the newer two accept an explicit size; 2.5-flash-image predates
- * `imageConfig` and is fixed at 1024x1024 regardless of what's asked for, so
- * it is listed with its one real option rather than being offered a choice it
- * would silently ignore. That distinction is what `supportsImageSize` below
- * guards: sending `imageConfig` to a model that predates it is not a no-op to
- * rely on, and the API's own default is 1K, so the field has to be sent
- * explicitly for 4K or 2K to happen at all.
+ * That distinction is what `supportsImageSize` below guards: sending
+ * `imageConfig` to a model that doesn't accept it is not a no-op to rely on,
+ * and the API's own default is 1K, so the field has to be sent explicitly for
+ * 4K or 2K to happen at all.
  */
 const GEMINI_IMAGE_QUALITIES = {
   "gemini-3-pro-image": ["4K", "2K", "1K"],
   "gemini-3.1-flash-image": ["4K", "2K", "1K"],
-  "gemini-2.5-flash-image": ["1K"],
 };
 
 /** The sizes a picker should offer for this model. Never empty. */

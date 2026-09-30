@@ -14,12 +14,12 @@ import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImageP
 import {
   lifestyle,
   refineLifestyle,
-  SPARKLE_MODELS,
-  DEFAULT_SPARKLE_MODEL,
+  IMAGE_EDIT_MODELS,
+  DEFAULT_IMAGE_EDIT_MODEL,
   LIFESTYLE_ASPECTS,
   DEFAULT_LIFESTYLE_ASPECT,
   toModelOptions,
-  type SparkleModelId,
+  type ImageEditModelId,
   type LifestyleAspectId,
 } from "@/lib/api";
 import { ALL_PLACEMENTS, PLACEMENT_GROUPS, POSES, THEMES, HINTS, resolveScene } from "@/lib/lifestyleOptions";
@@ -34,7 +34,7 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.life_style.run";
-const MODEL_OPTIONS = toModelOptions(SPARKLE_MODELS);
+const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
 
 export default function LifeStylePage() {
   const { user } = useAuth();
@@ -48,7 +48,7 @@ export default function LifeStylePage() {
   const [theme, setTheme] = useState(THEMES[0].id);
   const [aspectRatio, setAspectRatio] = useState<LifestyleAspectId>(DEFAULT_LIFESTYLE_ASPECT);
   const [description, setDescription] = useState("");
-  const [model, setModel] = useState<SparkleModelId>(DEFAULT_SPARKLE_MODEL);
+  const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
   const [quality, setQuality] = useModelQuality(model);
 
   /**
@@ -134,7 +134,7 @@ export default function LifeStylePage() {
         busyLabel="Placing the jewellery…"
         resetLabel="New shot"
         downloadName="lifestyle.png"
-        modelLabel={SPARKLE_MODELS.find((entry) => entry.id === model)?.label}
+        modelLabel={IMAGE_EDIT_MODELS.find((entry) => entry.id === model)?.label}
       />
     );
   }
@@ -201,7 +201,7 @@ export default function LifeStylePage() {
               onChange={setDescription}
               onPasteImage={(file) => addJewelry([file])}
               placeholder="Optional — e.g. warmer light, a softer background"
-              footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
+              footerEnd={<InlineModelSelect models={IMAGE_EDIT_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} disabled={!ready} icon={<Sparkles size={14} />}>
