@@ -125,8 +125,6 @@ export default function TextToSketchPage() {
           <OptionChips label="Sketch Style" options={SKETCH_STYLES} value={style} onChange={setStyle} />
           <AspectChips options={ASPECTS} value={aspect} onChange={setAspect} />
 
-          <JewelrySelectionChips builder={builder} />
-
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wider text-cream">
               Reference Photo <span className="font-normal normal-case text-faint">(optional)</span>
@@ -184,6 +182,10 @@ export default function TextToSketchPage() {
               onChange={setPrompt}
               rows={4}
               placeholder="Pick options in the Jewelry Builder, or type freely…"
+              // A pasted photo is the reference photo, not text — same as
+              // "Start from a photo", just without leaving the keyboard.
+              onPasteImage={pickReference}
+              topSlot={builder.selectedCount > 0 ? <JewelrySelectionChips builder={builder} /> : undefined}
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={TEXT_COUNT_OPTIONS} />}
               footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />

@@ -368,6 +368,99 @@ function TileAction({
   );
 }
 
+/**
+ * A step slider for an attribute whose options are a single ordered scale —
+ * Skin Tone, Hair Color, Age, Height — rather than an unordered set. Reading
+ * "where along the line" is faster than reading five same-styled chips and
+ * comparing their wording, and it makes the single-pick constraint visible
+ * instead of just enforced.
+ *
+ * Still single-pick underneath: `onChange` replaces the whole selection, the
+ * same as `toggle` already does for these keys via `SINGLE_PICK`.
+ */
+const SLIDER_ATTRS = new Set(["skinTone", "hairColor", "age", "height"]);
+
+/** Short tick captions for the sliders whose real option text is too long to sit under a dot. Keys not listed here show their option text as-is. */
+const SLIDER_TICK_LABELS: Record<string, Record<string, string>> = {
+  hairColor: {
+    "Black (Level 1)": "Black",
+    "Dark brown (Level 2–3)": "Dark brown",
+    "Medium / light brown (Level 4–5)": "Medium brown",
+    "Dark blonde (Level 6)": "Dark blonde",
+    "Blonde (Level 7–8)": "Blonde",
+    "Light blonde / platinum (Level 9–10)": "Platinum",
+  },
+  height: {
+    "Petite (under 5'4\")": "Petite",
+    "Average (5'4\"–5'7\")": "5'4\"–5'7\"",
+    "Tall (5'8\"–5'11\")": "Tall",
+    "Very tall (6'+)": "V. tall",
+  },
+};
+
+function StepSlider({
+  attrKey,
+  options,
+  value,
+  onChange,
+}: {
+  attrKey: string;
+  options: string[];
+  value?: string;
+  onChange: (option: string) => void;
+}) {
+  const labels = SLIDER_TICK_LABELS[attrKey];
+  const activeIndex = value ? options.indexOf(value) : -1;
+  const fillPct = activeIndex >= 0 ? (activeIndex / (options.length - 1)) * 100 : 0;
+
+  return (
+    <div className="pt-5">
+      <div className="relative mx-1.5 h-1">
+        <div aria-hidden className="absolute inset-0 rounded-full bg-white/10" />
+        {activeIndex >= 0 && (
+          <div
+            aria-hidden
+            className="absolute inset-y-0 left-0 rounded-full bg-gold/70"
+            style={{ width: `${fillPct}%` }}
+          />
+        )}
+        <div className="absolute inset-0 flex items-center justify-between">
+          {options.map((option, index) => {
+            const active = index === activeIndex;
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() => onChange(option)}
+                aria-pressed={active}
+                aria-label={option}
+                className={cn(
+                  "relative -mx-1.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                  active ? "border-gold bg-surface-deep" : "border-white/25 bg-white/10 hover:border-white/40"
+                )}
+              >
+                {active && (
+                  <span className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-gold/30 bg-gold/15 px-2 py-0.5 text-[10px] font-semibold text-gold">
+                    {labels?.[option] ?? option}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-2 flex justify-between gap-1">
+        {options.map((option) => (
+          <span key={option} className="flex-1 text-center text-[9px] leading-tight text-faint">
+            {labels?.[option] ?? option}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Gender sits in the drawer's header; everything else in the grid below it. */
 const GENDER_ATTR = MODEL_ATTRS.find((attr) => attr.key === "gender");
 const BODY_ATTRS = MODEL_ATTRS.filter((attr) => attr.key !== "gender");
@@ -379,7 +472,7 @@ const BODY_ATTRS = MODEL_ATTRS.filter((attr) => attr.key !== "gender");
  * thirty, and hair colour only six, but "Light blonde / platinum (Level
  * 9–10)" wraps to three lines in a quarter-width column.
  */
-const FULL_WIDTH_ATTRS = new Set(["outfit", "hairColor"]);
+const FULL_WIDTH_ATTRS = new Set(["outfit", "hairColor", "skinTone"]);
 
 /**
  * Describe a person, get a model.
@@ -401,7 +494,7 @@ function ModelBuilder({
   const [notes, setNotes] = useState("");
   const [name, setName] = useState("");
 
-  const SINGLE_PICK = new Set(["gender", "age"]);
+  const SINGLE_PICK = new Set(["gender", "age", "skinTone", "hairColor", "height"]);
 
   function toggle(key: string, option: string) {
     setPicks((current) => {
@@ -476,29 +569,38 @@ function ModelBuilder({
        * The one long list (the wardrobe) keeps the full width to itself and
        * wraps there.
        */}
-      <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
         {BODY_ATTRS.map((attr) => (
           <div
             key={attr.key}
-            className={cn("space-y-1.5", FULL_WIDTH_ATTRS.has(attr.key) && "sm:col-span-2 lg:col-span-4")}
+            className={cn("space-y-1.5", FULL_WIDTH_ATTRS.has(attr.key) && "sm:col-span-2")}
           >
             <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
               {attr.label}
               {attr.note && <span className="ml-1.5 normal-case tracking-normal text-faint/60">{attr.note}</span>}
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              {(attr.key === "outfit" ? outfitsFor(picks[GENDER_ATTR?.key ?? "gender"]) : attr.options).map(
-                (option) => (
-                  <Chip
-                    key={option}
-                    label={option}
-                    size="sm"
-                    active={(picks[attr.key] ?? []).includes(option)}
-                    onClick={() => toggle(attr.key, option)}
-                  />
-                )
-              )}
-            </div>
+            {SLIDER_ATTRS.has(attr.key) ? (
+              <StepSlider
+                attrKey={attr.key}
+                options={attr.options}
+                value={picks[attr.key]?.[0]}
+                onChange={(option) => toggle(attr.key, option)}
+              />
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {(attr.key === "outfit" ? outfitsFor(picks[GENDER_ATTR?.key ?? "gender"]) : attr.options).map(
+                  (option) => (
+                    <Chip
+                      key={option}
+                      label={option}
+                      size="sm"
+                      active={(picks[attr.key] ?? []).includes(option)}
+                      onClick={() => toggle(attr.key, option)}
+                    />
+                  )
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

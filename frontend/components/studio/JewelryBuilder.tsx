@@ -148,36 +148,37 @@ export function JewelryBuilder({
 /**
  * What the builder currently spells out, as removable chips.
  *
- * Shown beside the description rather than in the panel: the panel is where
- * choices are made, this is where the resulting brief is checked at a glance.
+ * Lives inside the description box (as `PromptCard`'s `topSlot`) rather than
+ * its own section elsewhere on the page: this is a preview of what the
+ * builder is about to join into that text, not a separate decision, so it
+ * sits with the box whose content it explains.
  */
 export function JewelrySelectionChips({ builder }: { builder: JewelryBuilderController }) {
   const { selections, groups, toggle, selectedCount } = builder;
   if (selectedCount === 0) return null;
 
   return (
-    <div className="space-y-1.5">
-      <p className="text-xs font-semibold uppercase tracking-wider text-cream">Selected</p>
-      <div className="flex flex-wrap gap-1.5">
-        {groups.map((group) =>
-          selections[group.key] ? (
-            <span
-              key={group.key}
-              className="flex items-center gap-1 rounded-full border border-gold/20 bg-gold/[0.07] px-2 py-1 text-[10px] text-gold/80"
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[9px] font-medium uppercase tracking-wide text-faint">Selected</span>
+      {groups.map((group) =>
+        selections[group.key] ? (
+          <span
+            key={group.key}
+            title={group.label}
+            className="flex items-center gap-1 rounded-full border border-gold/20 bg-gold/[0.07] px-2 py-1 text-[10px] text-gold/80"
+          >
+            {selections[group.key]}
+            <button
+              type="button"
+              onClick={() => toggle(group.key, selections[group.key])}
+              aria-label={`Remove ${group.label}`}
+              className="ml-0.5 transition-colors hover:text-gold"
             >
-              <span className="text-faint">{group.label}:</span> {selections[group.key]}
-              <button
-                type="button"
-                onClick={() => toggle(group.key, selections[group.key])}
-                aria-label={`Remove ${group.label}`}
-                className="ml-0.5 transition-colors hover:text-gold"
-              >
-                <X size={9} />
-              </button>
-            </span>
-          ) : null
-        )}
-      </div>
+              <X size={9} />
+            </button>
+          </span>
+        ) : null
+      )}
     </div>
   );
 }

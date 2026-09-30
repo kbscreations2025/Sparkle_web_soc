@@ -25,6 +25,7 @@ export function PromptCard({
   footerEnd,
   onIssueCount,
   onPasteImage,
+  topSlot,
 }: {
   /** The heading above the box. A node, so a page can grey out "(optional)". */
   label: ReactNode;
@@ -34,6 +35,14 @@ export function PromptCard({
   rows?: number;
   /** Sits opposite the heading — e.g. Text to Image's spelling count. */
   aside?: ReactNode;
+  /**
+   * Sits inside the box, above the textarea — e.g. the Jewelry Builder's
+   * picked-so-far chips, which describe what the textarea will be joined
+   * with rather than something typed into it. Kept inside this box rather
+   * than as its own section elsewhere on the page, since it's the box's
+   * content, not a separate decision.
+   */
+  topSlot?: ReactNode;
   /**
    * The row under the textarea: `footerStart` sits left, `footerEnd` right.
    * Omit both for a box with no settings of its own.
@@ -69,6 +78,8 @@ export function PromptCard({
       </div>
 
       <div className="rounded-xl border border-white/[0.08] bg-surface-raised transition-colors focus-within:border-gold/30">
+        {topSlot && <div className="border-b border-white/[0.06] px-3 py-2">{topSlot}</div>}
+
         <SpellCheckedTextarea
           value={value}
           onChange={onChange}

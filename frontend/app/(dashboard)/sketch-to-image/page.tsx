@@ -243,6 +243,9 @@ export default function SketchToImagePage() {
               value={notes}
               onChange={setNotes}
               placeholder="Metal, stone types, finish — anything the sketch doesn't show…"
+              // A pasted photo is another sketch view, not text — same as
+              // dropping it on the uploader, just without leaving the keyboard.
+              onPasteImage={(file) => accept([file])}
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={PHOTO_COUNT_OPTIONS} />}
               footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />

@@ -531,7 +531,12 @@ export default function ImageToVideoPage() {
               label="Anything else"
               value={description}
               onChange={setDescription}
-              placeholder="Optional â€” extra direction for the motion"
+              placeholder="Optional — extra direction for the motion"
+              // A pasted photo is another view of the piece, not text — same
+              // as dropping it on the uploader, just without leaving the
+              // keyboard. Diverted before it can land in the prompt as an
+              // unrenderable image.
+              onPasteImage={(file) => acceptExtras([file])}
             />
 
             <RunButton

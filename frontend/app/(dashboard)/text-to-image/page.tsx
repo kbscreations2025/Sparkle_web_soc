@@ -112,7 +112,6 @@ export default function TextToImagePage() {
         <div className="flex-1 space-y-5 px-4 py-5 sm:px-6 md:overflow-y-auto md:px-4">
           <OptionChips label="Visual Style" options={STYLES} value={style} onChange={setStyle} />
           <AspectChips options={ASPECTS} value={aspect} onChange={setAspect} />
-          <JewelrySelectionChips builder={builder} />
 
           <div className="space-y-1">
             <PromptCard
@@ -124,6 +123,7 @@ export default function TextToImagePage() {
               // desktop and above on a phone.
               placeholder="Pick options in the Jewelry Builder, or type freely…"
               onIssueCount={setSpellIssueCount}
+              topSlot={builder.selectedCount > 0 ? <JewelrySelectionChips builder={builder} /> : undefined}
               aside={
                 spellIssueCount > 0 && (
                   <span className="shrink-0 text-[10px] text-red-400/70">

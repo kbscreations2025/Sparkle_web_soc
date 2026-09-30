@@ -12,6 +12,7 @@ import { OptionChips } from "@/components/studio/OptionChips";
 import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { UploadZone, type UploadItem } from "@/components/studio/UploadZone";
+import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
 import {
   campaignKit,
   fetchMarketingKit,
@@ -82,6 +83,8 @@ function CampaignKitWorkspace() {
 
   const library = useModelLibrary();
   const [jewelry, setJewelry] = useState<UploadItem[]>([]);
+  /** A jewellery photo opened for a closer look — same affordance Lifestyle's upload gives. */
+  const [jewelryPreview, setJewelryPreview] = useState<PreviewImage | null>(null);
   const [description, setDescription] = useState("");
   const [aspect, setAspect] = useState<string>(CAMPAIGN_ASPECTS[0].id);
   const [pose, setPose] = useState<string>(POSE_OPTIONS[0].id);
@@ -211,6 +214,8 @@ function CampaignKitWorkspace() {
                 items={jewelry}
                 onAdd={addJewelry}
                 onRemove={(id) => setJewelry((current) => current.filter((item) => item.id !== id))}
+                onPreview={(item) => setJewelryPreview({ src: item.dataUrl, key: item.id })}
+                compact
               />
             </section>
 
@@ -221,6 +226,10 @@ function CampaignKitWorkspace() {
               value={description}
               onChange={setDescription}
               placeholder="Optional — applied to all four shots"
+              // A pasted photo is another piece of jewellery to shoot, not
+              // text — same as dropping it on the uploader, just without
+              // leaving the keyboard.
+              onPasteImage={(file) => addJewelry([file])}
               footerEnd={<InlineModelSelect models={SPARKLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
@@ -230,6 +239,14 @@ function CampaignKitWorkspace() {
           </div>
         </div>
       </div>
+
+      <ImagePreviewLayer
+        preview={jewelryPreview}
+        onClose={() => setJewelryPreview(null)}
+        onSave={(marked, key) =>
+          setJewelry((current) => current.map((item) => (item.id === key ? { ...item, dataUrl: marked } : item)))
+        }
+      />
     </div>
   );
 }
