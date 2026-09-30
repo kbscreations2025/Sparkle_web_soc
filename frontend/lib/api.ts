@@ -530,6 +530,34 @@ export const CLEANING_MODELS = [
 ] as const;
 
 /**
+ * New Cleaning's models — OpenRouter's GPT image models instead of Gemini.
+ * Kept separate from `CLEANING_MODELS` since Default keeps its Gemini list
+ * unchanged; only New Cleaning routes through OpenRouter. Ids match
+ * `OPENROUTER_MODELS` in backend/src/openrouter.js.
+ */
+export const NEW_CLEANING_MODELS = [
+  {
+    id: "openai/gpt-image-2",
+    label: "Sparkle GPT Image 2",
+    quality: "high",
+    qualities: ["high", "medium", "low"],
+    description: "OpenAI's latest image model · via OpenRouter",
+    badge: "Best quality",
+  },
+  {
+    id: "openai/gpt-image-1",
+    label: "Sparkle GPT Image",
+    quality: "high",
+    qualities: ["high", "medium", "low"],
+    description: "OpenAI's prior image model · via OpenRouter",
+    badge: "Fast",
+  },
+] as const;
+
+export type NewCleaningModelId = (typeof NEW_CLEANING_MODELS)[number]["id"];
+export const DEFAULT_NEW_CLEANING_MODEL: NewCleaningModelId = "openai/gpt-image-2";
+
+/**
  * The sizes a model can actually be run at, and the one it defaults to.
  *
  * `qualities` mirrors `GEMINI_IMAGE_QUALITIES` in backend/src/gemini.js — one

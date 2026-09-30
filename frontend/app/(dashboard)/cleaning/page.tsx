@@ -29,20 +29,18 @@ type CleaningMode = {
  */
 const MODES: CleaningMode[] = [
   {
+    id: "new-cleaning",
+    label: "High-Res Image Generation",
+    description: "GPT's latest image model via OpenRouter — same workspace, its own instructions",
+    icon: Eraser,
+    href: "/cleaning/new",
+  },
+  {
     id: "default",
     label: "Default",
     description: "The standard retouch — upload, clean, then ask for changes",
     icon: Sparkles,
     href: "/cleaning/default",
-  },
-  {
-    id: "new-cleaning",
-    label: "New Cleaning",
-    // TODO: describe what actually distinguishes this mode once its prompt
-    // (backend/src/prompts/imageCleaning.js → NEW_CLEANING_PROMPT) is written.
-    description: "A different retouch style — same workspace, its own instructions",
-    icon: Eraser,
-    href: "/cleaning/new",
   },
 ];
 

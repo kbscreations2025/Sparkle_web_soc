@@ -13,7 +13,7 @@ const NAV_LABEL_BY_HREF: Record<string, string> = Object.fromEntries(
 /** One level below a tool's own href — pages `useNavItems` doesn't know about. */
 const SUB_LABELS: Record<string, string> = {
   "/cleaning/default": "Default",
-  "/cleaning/new": "New Cleaning",
+  "/cleaning/new": "High-Res Image Generation",
 };
 
 /** Dashboard → tool → sub-page, derived from the current route. */

@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const { encryptSecret, fingerprintSecret, fingerprintMatches, hintSecret } = require("../secrets");
 
-const PROVIDERS = ["openai", "gemini", "replicate", "fal", "stability", "bfl", "custom"];
+const PROVIDERS = ["openai", "gemini", "openrouter", "replicate", "fal", "stability", "bfl", "custom"];
 const TENANT_STATUSES = ["active", "trial", "suspended", "archived"];
 
 const credentialSchema = new mongoose.Schema(

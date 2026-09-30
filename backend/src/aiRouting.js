@@ -2,10 +2,11 @@ const Tenant = require("./models/tenant");
 const { decryptSecret } = require("./secrets");
 const gemini = require("./gemini");
 const openai = require("./openai");
+const openrouter = require("./openrouter");
 
 /** One entry per provider this router knows how to call — see `routeProviderCall`. */
-const PROVIDER_MODULES = { gemini, openai };
-const PROVIDER_LABELS = { gemini: "Gemini", openai: "OpenAI" };
+const PROVIDER_MODULES = { gemini, openai, openrouter };
+const PROVIDER_LABELS = { gemini: "Gemini", openai: "OpenAI", openrouter: "OpenRouter" };
 
 /** Thrown when a tenant has no usable key for the requested provider. */
 class NoProviderError extends Error {
@@ -47,6 +48,14 @@ function resolveProviderModel(requestedModel, requestedQuality) {
       model: requestedModel,
       quality: openai.qualityFor(requestedModel, requestedQuality),
       modelLabel: openai.labelFor(requestedModel),
+    };
+  }
+  if (openrouter.isKnownModel(requestedModel)) {
+    return {
+      provider: "openrouter",
+      model: requestedModel,
+      quality: openrouter.qualityFor(requestedModel, requestedQuality),
+      modelLabel: openrouter.labelFor(requestedModel),
     };
   }
   const model = gemini.resolveModel(requestedModel);

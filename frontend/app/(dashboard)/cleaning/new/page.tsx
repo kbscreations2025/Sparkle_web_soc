@@ -1,16 +1,20 @@
 "use client";
 
 import { CleaningWorkspace } from "@/components/studio/CleaningWorkspace";
-import { CLEANING_MODELS, DEFAULT_CLEANING_MODEL } from "@/lib/api";
+import { NEW_CLEANING_MODELS, DEFAULT_NEW_CLEANING_MODEL } from "@/lib/api";
 
 /**
- * Same workspace as Default — same models, same "Write my own" override —
- * with one difference: a plain "Clean this image" resolves to a different
- * built-in prompt (NEW_CLEANING_PROMPT, see backend/src/prompts/imageCleaning.js)
- * rather than Default's. That's the whole point of a second mode.
+ * Same workspace as Default, same "Write my own" override, with two
+ * differences: a plain "Clean this image" resolves to a different built-in
+ * prompt (NEW_CLEANING_PROMPT, see backend/src/prompts/imageCleaning.js), and
+ * it runs on OpenRouter's GPT image models instead of Gemini's.
  */
 export default function CleaningNewPage() {
   return (
-    <CleaningWorkspace modelOptions={CLEANING_MODELS} defaultModel={DEFAULT_CLEANING_MODEL} promptVariant="new" />
+    <CleaningWorkspace
+      modelOptions={NEW_CLEANING_MODELS}
+      defaultModel={DEFAULT_NEW_CLEANING_MODEL}
+      promptVariant="new"
+    />
   );
 }
