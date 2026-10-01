@@ -66,6 +66,18 @@ const IMAGE_RULES = [
   { model: "gpt-image-1", quality: "high", rate: 0.167, label: "Sparkle GPT Image — high" },
   { model: "gpt-image-1", quality: "medium", rate: 0.042, label: "Sparkle GPT Image — medium" },
   { model: "gpt-image-1", quality: "low", rate: 0.011, label: "Sparkle GPT Image — low" },
+
+  // ── Through OpenRouter, picked directly on New Cleaning ──
+  // Billed under OpenRouter's own id, so they need rules of their own. GPT
+  // Image 1 is OpenAI's list price passed through. GPT Image 2 has no
+  // published per-image price to quote here, so it starts at GPT Image 1's
+  // rates — revise from the first OpenRouter invoice.
+  { model: "openai/gpt-image-1", quality: "high", rate: 0.167, label: "Sparkle GPT Image (OpenRouter) — high" },
+  { model: "openai/gpt-image-1", quality: "medium", rate: 0.042, label: "Sparkle GPT Image (OpenRouter) — medium" },
+  { model: "openai/gpt-image-1", quality: "low", rate: 0.011, label: "Sparkle GPT Image (OpenRouter) — low" },
+  { model: "openai/gpt-image-2", quality: "high", rate: 0.167, label: "Sparkle GPT Image 2 — high" },
+  { model: "openai/gpt-image-2", quality: "medium", rate: 0.042, label: "Sparkle GPT Image 2 — medium" },
+  { model: "openai/gpt-image-2", quality: "low", rate: 0.011, label: "Sparkle GPT Image 2 — low" },
 ];
 
 /**

@@ -11,6 +11,9 @@ import { Select } from "@/components/ui/Select";
 
 const ROLES = ["user", "admin"];
 const STATUSES = ["invited", "active", "suspended", "removed"];
+/** Built once rather than per row per render — the table can be long. */
+const ROLE_OPTIONS = ROLES.map((role) => ({ value: role, label: role.toUpperCase() }));
+const STATUS_OPTIONS = STATUSES.map((status) => ({ value: status, label: status.toUpperCase() }));
 
 const SCOPE_HELP: Record<DataScope["kind"], string> = {
   own: "Only their own generated history.",
@@ -301,7 +304,7 @@ function MemberRow({
 
   return (
     <>
-      <tr className={cn("border-t border-white/5 align-middle transition-colors hover:bg-white/[0.03]", open && "bg-white/[0.03]")}>
+      <tr className={cn("border-t border-white/5 align-middle transition-colors hover:bg-gold/[0.04]", open && "bg-white/[0.03]")}>
         <td className={cn(CELL, "hidden text-faint tabular-nums sm:table-cell")}>{index}</td>
 
         <td className={cn(CELL, "max-w-[150px] sm:max-w-[240px]")}>
@@ -341,7 +344,7 @@ function MemberRow({
             onChange={(role) => onPatch({ role })}
             disabled={readOnly}
             ariaLabel={`Role label for ${member.email}`}
-            options={ROLES.map((role) => ({ value: role, label: role.toUpperCase() }))}
+            options={ROLE_OPTIONS}
             className="rounded border border-white/10 bg-white/[0.06] px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cream outline-none focus:border-gold/40 disabled:opacity-70"
           />
         </td>
@@ -352,7 +355,7 @@ function MemberRow({
             onChange={(status) => onPatch({ status })}
             disabled={readOnly}
             ariaLabel={`Account status for ${member.email}`}
-            options={STATUSES.map((status) => ({ value: status, label: status.toUpperCase() }))}
+            options={STATUS_OPTIONS}
             className={cn(
               "rounded border px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide outline-none disabled:opacity-70",
               STATUS_TONE[member.status] ?? STATUS_TONE.removed
@@ -512,17 +515,6 @@ function MemberRow({
             </div>
 
             <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
-              {/* Only the organization-wide section is withheld — its
-                  credits, its audit trail, its people. How far someone sees
-                  into colleagues' work is the data scope below, and any
-                  member can be given one. */}
-              {!isAdmin && (
-                <p className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-faint">
-                  Change the role to <span className="text-cream">admin</span> to also offer the organization-wide
-                  permissions — its credits, its audit log and managing colleagues.
-                </p>
-              )}
-
               {groups.map((group) => {
                 /*
                  * Organization-level permissions are for admins only.
@@ -574,7 +566,15 @@ function MemberRow({
                         </label>
                       )}
                     </div>
-                    <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">
+                    {/* Two columns on phones for short names (the tools); the
+                        organization permissions have long names, so they keep
+                        the full width. */}
+                    <div
+                      className={cn(
+                        "grid gap-1 lg:grid-cols-3",
+                        rest.some((item) => item.hint) ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2"
+                      )}
+                    >
                       {rest.map(({ grant, label, hint }) => {
                         // Lockable for two different reasons, and the title
                         // says which: it is your own row, or it is a
@@ -606,7 +606,9 @@ function MemberRow({
                             />
                             <span className="min-w-0">
                               <span className="block text-[12px] text-cream">{label}</span>
-                              {hint && <span className="block text-[10px] text-faint">{hint}</span>}
+                              {/* Names only on phones — the label's title
+                                  carries the description as a hover tooltip. */}
+                              {hint && <span className="hidden text-[10px] text-faint sm:block">{hint}</span>}
                             </span>
                           </label>
                         );

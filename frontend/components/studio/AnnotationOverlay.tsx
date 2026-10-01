@@ -83,8 +83,10 @@ export function AnnotationOverlay({
   const imageRef = useRef<HTMLImageElement | null>(null);
 
   const [tool, setTool] = useState<Tool>("pen");
+  /** Open when the overlay opens; folds away on the first stroke — see the shape canvas. */
+  const [toolbarOpen, setToolbarOpen] = useState(true);
   const [color, setColor] = useState(defaultColor);
-  const [strokeWidth, setStrokeWidth] = useState(6);
+  const [strokeWidth, setStrokeWidth] = useState(3);
 
   /**
    * Shapes stay as objects so they can be picked up and resized later; only
@@ -599,7 +601,12 @@ export function AnnotationOverlay({
             ref={shapeCanvasRef}
             width={size.width}
             height={size.height}
-            onPointerDown={handlePointerDown}
+            onPointerDown={(event) => {
+              // The first mark folds the toolbar away so it stops covering
+              // the piece; the tool icon left behind brings it back.
+              setToolbarOpen(false);
+              handlePointerDown(event);
+            }}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
@@ -646,6 +653,8 @@ export function AnnotationOverlay({
         onConfirm={attach}
         confirmLabel={attachLabel}
         onClose={onClose}
+        collapsed={!toolbarOpen}
+        onExpand={() => setToolbarOpen(true)}
       />
     </div>
   );

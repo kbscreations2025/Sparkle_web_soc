@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
  * drift the first screenful of content slides under it.
  */
 export const NAV_HEIGHT = "h-12 md:h-14 lg:h-16";
-const NAV_OFFSET = "pt-14 md:pt-16";
+const NAV_OFFSET = "pt-12 md:pt-14 lg:pt-16";
 
 /**
  * The frame both shells share — the dashboard and the super-admin console.

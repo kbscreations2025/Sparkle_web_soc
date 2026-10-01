@@ -16,6 +16,7 @@ import { Modal } from "@/components/admin/Modal";
 import { CELL, HEAD_ROW, TABLE_FRAME, NESTED_TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
 import { Select } from "@/components/ui/Select";
+import { TableFilterBar } from "@/components/admin/TableFilterBar";
 
 const FIELD =
   "w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-cream placeholder:text-faint outline-none focus:border-gold/40";
@@ -30,6 +31,7 @@ export default function ApiKeysPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [orgQuery, setOrgQuery] = useState("");
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [providers, setProviders] = useState<Record<string, AiProvider[]>>({});
@@ -117,17 +119,14 @@ export default function ApiKeysPage() {
     return Math.max(...existing.map((entry) => entry.priority)) + 1;
   }
 
+  const orgNeedle = orgQuery.trim().toLowerCase();
+  const visibleOrgs = orgNeedle
+    ? organizations.filter((org) => `${org.name} ${org.slug}`.toLowerCase().includes(orgNeedle))
+    : organizations;
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-6xl space-y-5">
-        <header className="space-y-1">
-          <h1 className="font-serif text-2xl text-cream md:text-3xl">API Keys</h1>
-          <p className="max-w-2xl text-sm text-muted">
-            Expand an organization to manage its AI provider keys. Keys are encrypted at rest — only a
-            short hint is ever shown here.
-          </p>
-        </header>
-
         {error && (
           <p className="rounded-lg border border-error/20 bg-error/[0.08] px-3 py-2 text-xs text-error">
             {error}
@@ -141,7 +140,16 @@ export default function ApiKeysPage() {
         ) : organizations.length === 0 ? (
           <p className="text-sm text-muted">No organizations yet.</p>
         ) : (
-          <div className={TABLE_FRAME}>
+          <div>
+          <TableFilterBar
+            query={orgQuery}
+            onQuery={setOrgQuery}
+            placeholder="Search organizations"
+            onReset={() => setOrgQuery("")}
+            canReset={Boolean(orgNeedle)}
+            count={`${orgNeedle ? `${visibleOrgs.length}/` : ""}${organizations.length} orgs`}
+          />
+          <div className={cn(TABLE_FRAME, "rounded-t-none")}>
             <table className="w-full min-w-[760px] border-collapse">
               <thead>
                 <tr className={HEAD_ROW}>
@@ -153,7 +161,14 @@ export default function ApiKeysPage() {
                 </tr>
               </thead>
               <tbody>
-                {organizations.map((org) => {
+                {visibleOrgs.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className={cn(CELL, "text-center text-faint")}>
+                      No organizations match that search.
+                    </td>
+                  </tr>
+                )}
+                {visibleOrgs.map((org) => {
                   const isOpen = openId === org.id;
                   return (
                     <Fragment key={org.id}>
@@ -212,6 +227,7 @@ export default function ApiKeysPage() {
                 })}
               </tbody>
             </table>
+          </div>
           </div>
         )}
       </div>
@@ -558,7 +574,7 @@ function AddKeyForm({
             value={provider}
             onChange={setProvider}
             options={providerNames.map((name) => ({ value: name, label: name }))}
-            className={cn(FIELD, "w-full")}
+            className={FIELD}
           />
         </Field>
 

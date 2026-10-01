@@ -1,8 +1,8 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, Building2, CheckCircle2, ChevronDown, Coins, History, ListFilter, Loader2, Search, CalendarRange, SlidersHorizontal, UserRound, X } from "lucide-react";
+import { AlertCircle, Building2, CheckCircle2, ChevronDown, Coins, History, ListFilter, Loader2, RotateCcw, Search, CalendarRange, SlidersHorizontal, UserRound, X } from "lucide-react";
 import {
   listAuditLog,
   getAuditFacets,
@@ -91,7 +91,7 @@ function humanizeAction(action: string) {
 /** The area an action belongs to — `auth.login_success` → "auth". */
 const areaOf = (action: string) => action.split(".")[0];
 
-/** `jobType` / `job_type` / `before.creditsPerUnit` → "Job type" / "Before Â· credits per unit". */
+/** `jobType` / `job_type` / `before.creditsPerUnit` → "Job type" / "Before · credits per unit". */
 function humanizeKey(key: string) {
   const words = key
     .split(".")
@@ -101,7 +101,7 @@ function humanizeKey(key: string) {
         .replace(/_/g, " ")
         .toLowerCase()
     )
-    .join(" Â· ");
+    .join(" · ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
@@ -134,7 +134,7 @@ function formatValue(value: unknown): string {
  *
  * Nested objects are flattened onto dotted keys rather than rendered as
  * nested blocks: the only nesting that actually occurs is one level deep
- * (a pricing rule's `before`/`after`), and "Before Â· credits per unit" reads
+ * (a pricing rule's `before`/`after`), and "Before · credits per unit" reads
  * better in a two-column grid than an indented sub-table would.
  *
  * Nulls are kept rather than dropped — for an audit record, "this field was
@@ -163,9 +163,14 @@ function DetailField({
   wide?: boolean;
 }) {
   return (
-    <div className={cn("min-w-0", wide && "sm:col-span-2 lg:col-span-3")}>
-      <dt className="text-[9px] font-semibold uppercase tracking-wide text-faint">{label}</dt>
-      <dd className="mt-0.5 break-words text-[11px] text-muted">{formatValue(value)}</dd>
+    <div
+      className={cn(
+        "flex min-w-0 items-baseline gap-3 border-b border-white/[0.06] px-3 py-2",
+        wide && "sm:col-span-2 lg:col-span-3"
+      )}
+    >
+      <dt className="w-24 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-faint">{label}</dt>
+      <dd className="min-w-0 flex-1 break-words text-[12px] text-cream">{formatValue(value)}</dd>
     </div>
   );
 }
@@ -455,7 +460,7 @@ export default function AuditLogPage() {
          * Here each control takes the width it actually needs and the row
          * wraps when the pane is small.
          */}
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-surface-raised/60 p-1.5">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-t-xl border border-b-0 border-white/10 bg-surface-raised/60 p-1.5">
           {isSuper && <ViewToggle view={view} onChange={setView} />}
 
           {showCredits ? (
@@ -580,16 +585,17 @@ export default function AuditLogPage() {
             {loading ? "Loading.." : `${entries.length}${hasMore ? "+" : ""} entries`}
           </span>
 
-          {activeFilters > 0 && (
-            <button
-              onClick={clearFilters}
-              aria-label={`Clear ${activeFilters} filter${activeFilters === 1 ? "" : "s"}`}
-              title={`Clear ${activeFilters} filter${activeFilters === 1 ? "" : "s"}`}
-              className={ICON_BUTTON}
-            >
-              <X size={13} />
-            </button>
-          )}
+          {/* Always here, like every admin table's reset — dimmed until a
+              filter is set. */}
+          <button
+            onClick={clearFilters}
+            disabled={activeFilters === 0}
+            aria-label="Reset filters"
+            title={activeFilters > 0 ? `Reset ${activeFilters} filter${activeFilters === 1 ? "" : "s"}` : "Reset filters"}
+            className={cn(ICON_BUTTON, "disabled:cursor-default disabled:opacity-40")}
+          >
+            <RotateCcw size={12} />
+          </button>
           </>
           )}
         </div>
@@ -600,27 +606,27 @@ export default function AuditLogPage() {
         ) : loading && entries.length === 0 ? (
           <TableSkeleton />
         ) : entries.length === 0 ? (
-          <p className="text-sm text-muted">
+          <p className="-mt-3 rounded-b-xl border border-white/10 bg-surface-raised/60 px-3 py-6 text-center text-sm text-muted">
             {activeFilters > 0 ? "Nothing matches those filters." : "No activity recorded yet."}
           </p>
         ) : (
           // The wrapper holds the jump arrows still while the rows scroll.
-          <div className="relative flex min-h-0 flex-1 flex-col">
+          <div className="relative -mt-3 flex min-h-0 flex-1 flex-col">
             {/* The one scrolling region on the page. */}
             <div
               ref={scrollerRef}
-              className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
+              className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-b-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
             >
               {/* 460 rather than 900: with the tighter cells and a relative
                   timestamp the columns fit the pane without a horizontal
                   scrollbar, which was hiding the IP column entirely. */}
-              <table className="w-full min-w-[460px] border-collapse">
+              <table className="w-full sm:min-w-[460px] border-collapse">
                 <thead>
                   <tr className={HEAD_ROW}>
                     {/* Below lg the time moves inside the Action cell rather
                         than holding a column of its own — see AuditRow. */}
                     <th className={cn(STICKY_HEAD, "hidden w-[92px] lg:table-cell")}>When</th>
-                    <th className={cn(STICKY_HEAD, "w-[150px]")}>Action</th>
+                    <th className={cn(STICKY_HEAD, "w-[110px] sm:w-[150px]")}>Action</th>
                     <th className={cn(STICKY_HEAD, "hidden w-[130px] md:table-cell")}>Who</th>
                     <th className={STICKY_HEAD}>What happened</th>
                     <th className={cn(STICKY_HEAD, "hidden w-[90px] lg:table-cell")}>IP</th>
@@ -683,13 +689,13 @@ function TableSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading the audit log"
-      className="min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-surface-raised/60"
+      className="-mt-3 min-h-0 flex-1 overflow-hidden rounded-b-xl border border-white/10 bg-surface-raised/60"
     >
-      <table className="w-full min-w-[460px] border-collapse">
+      <table className="w-full sm:min-w-[460px] border-collapse">
         <thead>
           <tr className={HEAD_ROW}>
             <th className={cn(STICKY_HEAD, "hidden w-[92px] lg:table-cell")}>When</th>
-            <th className={cn(STICKY_HEAD, "w-[150px]")}>Action</th>
+            <th className={cn(STICKY_HEAD, "w-[110px] sm:w-[150px]")}>Action</th>
             <th className={cn(STICKY_HEAD, "hidden w-[130px] md:table-cell")}>Who</th>
             <th className={STICKY_HEAD}>What happened</th>
             <th className={cn(STICKY_HEAD, "hidden w-[90px] lg:table-cell")}>IP</th>
@@ -700,7 +706,7 @@ function TableSkeleton() {
             <tr key={row} className="border-t border-white/5">
               {/* Widths vary a little per column so the block reads as text
                   waiting to arrive rather than a loading graphic. */}
-              {["hidden w-[92px] lg:table-cell", "w-[150px]", "hidden md:table-cell", "", "hidden lg:table-cell"].map(
+              {["hidden w-[92px] lg:table-cell", "w-[110px] sm:w-[150px]", "hidden md:table-cell", "", "hidden lg:table-cell"].map(
                 (visibility, column) => (
                   <td key={column} className={cn(ROW_CELL, visibility)}>
                     <span
@@ -857,15 +863,15 @@ function CreditMovements({
     );
   }
   if (loading && rows.length === 0) return <TableSkeleton />;
-  if (rows.length === 0) return <p className="text-sm text-muted">No credits have moved yet.</p>;
+  if (rows.length === 0) return <p className="-mt-3 rounded-b-xl border border-white/10 bg-surface-raised/60 px-3 py-6 text-center text-sm text-muted">No credits have moved yet.</p>;
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div className="relative -mt-3 flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollerRef}
-        className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
+        className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-b-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
       >
-        <table className="w-full min-w-[460px] border-collapse">
+        <table className="w-full sm:min-w-[460px] border-collapse">
           <thead>
             <tr className={HEAD_ROW}>
               <th className={cn(STICKY_HEAD, "w-[92px]")}>When</th>
@@ -1021,7 +1027,10 @@ function AuditRow({
           {formatRelative(entry.createdAt)}
         </td>
         <td className={ROW_CELL}>
-          <span className="flex items-center gap-1.5">
+          {/* On a phone the badges drop to their own line under the action,
+              then the time under them — three short lines instead of one
+              row that pushed the message off the screen. */}
+          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
             {failed ? (
               <AlertCircle size={12} className="shrink-0 text-error" />
             ) : (
@@ -1030,6 +1039,7 @@ function AuditRow({
             <span className={cn("truncate font-medium", failed ? "text-error" : "text-cream")}>
               {humanizeAction(entry.action)}
             </span>
+            <span className="basis-full sm:hidden" aria-hidden />
             <span className="shrink-0 rounded border border-white/10 px-1 py-px text-[9px] uppercase tracking-wide text-faint">
               {areaOf(entry.action)}
             </span>
@@ -1088,12 +1098,14 @@ function AuditRow({
 
       {expanded && hasDetail && (
         <tr className="border-t border-white/5">
-          <td colSpan={5} className="bg-surface-deep/30 px-3 py-2.5">
-            <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+          <td colSpan={5} className="bg-surface-deep/30 px-2 py-2 sm:px-3 sm:py-2.5">
+            {/* A card of label → value rows, so a long entry reads as a list
+                of facts rather than a wall of small caps. */}
+            <dl className="grid overflow-hidden rounded-lg border border-white/10 bg-surface-raised sm:grid-cols-2 lg:grid-cols-3 [&>*:last-child]:border-b-0">
               {entry.targetType && (
                 <DetailField
                   label="Target"
-                  value={entry.targetType + (entry.targetId ? ` Â· ${entry.targetId}` : "")}
+                  value={entry.targetType + (entry.targetId ? ` · ${entry.targetId}` : "")}
                 />
               )}
               {detail &&
@@ -1103,12 +1115,12 @@ function AuditRow({
               {detail?.userAgent && <DetailField label="Agent" value={detail.userAgent} wide />}
 
               {loadingDetail && (
-                <p className="flex items-center gap-1.5 text-[11px] text-faint sm:col-span-2 lg:col-span-3">
+                <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-faint sm:col-span-2 lg:col-span-3">
                   <Loader2 size={11} className="animate-spin" /> Loading details…
                 </p>
               )}
               {detail?.failed && (
-                <p className="text-[11px] text-error sm:col-span-2 lg:col-span-3">
+                <p className="px-3 py-2 text-[11px] text-error sm:col-span-2 lg:col-span-3">
                   Could not load the details for this entry.
                 </p>
               )}

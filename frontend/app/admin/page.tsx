@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
-import { ChevronDown, ChevronRight, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
+import { Activity, ChevronDown, ChevronRight, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
 import {
   listOrganizations,
   createOrganization,
@@ -22,9 +22,18 @@ import {
 import { MemberRows } from "@/components/admin/MemberRows";
 import { AddMemberPanel } from "@/components/admin/AddMemberPanel";
 import { Modal } from "@/components/admin/Modal";
-import { Select } from "@/components/ui/Select";
+import { Select, type SelectOption } from "@/components/ui/Select";
+import { FilterChecklist, TableFilterBar } from "@/components/admin/TableFilterBar";
+import { useMemberFilter } from "@/components/admin/MemberFilterBar";
 import { CELL, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
+
+const ORG_STATUS_OPTIONS = [
+  { value: "active", label: "Active" },
+  { value: "trial", label: "Trial" },
+  { value: "suspended", label: "Suspended" },
+  { value: "archived", label: "Archived" },
+];
 
 const STATUS_TONE: Record<Organization["status"], string> = {
   active: "border-success/30 bg-success/10 text-success",
@@ -36,14 +45,26 @@ const STATUS_TONE: Record<Organization["status"], string> = {
 /** Common zones first; the full IANA list after, where the runtime provides one. */
 const COMMON_TIMEZONES = ["Asia/Kolkata", "Asia/Dubai", "Asia/Singapore", "Europe/London", "America/New_York", "UTC"];
 
-function timezoneOptions(current: string) {
-  let all: string[] = [];
-  try {
-    all = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.("timeZone") ?? [];
-  } catch {
-    all = [];
+/** Built once — the IANA list is ~400 zones, and every org row asks for it on every render. */
+let zoneOptions: SelectOption[] | null = null;
+
+function allZoneOptions() {
+  if (!zoneOptions) {
+    let all: string[] = [];
+    try {
+      all = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.("timeZone") ?? [];
+    } catch {
+      all = [];
+    }
+    zoneOptions = [...new Set([...COMMON_TIMEZONES, ...all])].map((zone) => ({ value: zone, label: zone }));
   }
-  return [...new Set([current, ...COMMON_TIMEZONES, ...all].filter(Boolean))];
+  return zoneOptions;
+}
+
+/** The shared list, with the org's own zone in front only when the runtime doesn't list it. */
+function timezoneOptions(current: string) {
+  const all = allZoneOptions();
+  return !current || all.some((option) => option.value === current) ? all : [{ value: current, label: current }, ...all];
 }
 
 export default function ConsolePage() {
@@ -80,6 +101,10 @@ export default function ConsolePage() {
 
   const [newName, setNewName] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [orgQuery, setOrgQuery] = useState("");
+  const [orgStatuses, setOrgStatuses] = useState<string[]>([]);
+  // One filter for whichever organization is expanded — only one is open at a time.
+  const memberFilter = useMemberFilter();
   const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -305,25 +330,17 @@ export default function ConsolePage() {
     await reloadOrgs();
   }
 
+  const orgNeedle = orgQuery.trim().toLowerCase();
+  const orgFiltering = Boolean(orgNeedle || orgStatuses.length);
+  const visibleOrgs = organizations.filter(
+    (org) =>
+      (orgStatuses.length === 0 || orgStatuses.includes(org.status)) &&
+      (!orgNeedle || `${org.name} ${org.slug}`.toLowerCase().includes(orgNeedle))
+  );
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-6xl space-y-5">
-        <header className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h1 className="font-serif text-2xl text-cream md:text-3xl">Organizations</h1>
-            <p className="max-w-2xl text-sm text-muted">
-              Expand an organization to manage its people and what each of them can do — all in one place.
-            </p>
-          </div>
-
-          <button
-            onClick={() => setShowNew((value) => !value)}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/15 px-3.5 py-2 text-xs font-semibold text-gold transition-colors hover:bg-gold/25"
-          >
-            <Plus size={14} /> New Organization
-          </button>
-        </header>
-
         {showNew && (
           <form
             onSubmit={handleCreate}
@@ -359,9 +376,46 @@ export default function ConsolePage() {
             <Loader2 size={14} className="animate-spin" /> Loading…
           </p>
         ) : organizations.length === 0 ? (
-          <p className="text-sm text-muted">No organizations yet. Create the first one above.</p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-muted">No organizations yet.</p>
+            <button
+                onClick={() => setShowNew((value) => !value)}
+                className="flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/15 px-3 text-[11px] font-semibold text-gold transition-colors hover:bg-gold/25"
+              >
+                <Plus size={13} /> New organization
+              </button>
+          </div>
         ) : (
-          <div className={TABLE_FRAME}>
+          <div>
+          <TableFilterBar
+            query={orgQuery}
+            onQuery={setOrgQuery}
+            placeholder="Search organizations"
+            onReset={() => {
+              setOrgQuery("");
+              setOrgStatuses([]);
+            }}
+            canReset={orgFiltering}
+            count={`${orgFiltering ? `${visibleOrgs.length}/` : ""}${organizations.length} orgs`}
+            trailing={
+              <button
+                onClick={() => setShowNew((value) => !value)}
+                className="flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/15 px-3 text-[11px] font-semibold text-gold transition-colors hover:bg-gold/25"
+              >
+                <Plus size={13} /> <span className="hidden sm:inline">New organization</span>
+              </button>
+            }
+          >
+            <FilterChecklist
+              label="Filter by status"
+              emptyLabel="Any status"
+              icon={<Activity size={13} />}
+              values={orgStatuses}
+              onChange={setOrgStatuses}
+              options={ORG_STATUS_OPTIONS}
+            />
+          </TableFilterBar>
+          <div className={cn(TABLE_FRAME, "rounded-t-none")}>
             <table className="w-full min-w-[760px] border-collapse">
               <thead>
                 <tr className={HEAD_ROW}>
@@ -377,7 +431,14 @@ export default function ConsolePage() {
                 </tr>
               </thead>
               <tbody>
-                {organizations.map((org) => {
+                {visibleOrgs.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className={cn(CELL, "text-center text-faint")}>
+                      No organizations match these filters.
+                    </td>
+                  </tr>
+                )}
+                {visibleOrgs.map((org) => {
                   const isOpen = openId === org.id;
                   return (
                     // Keyed on the fragment: the row and its detail row are one list item.
@@ -404,7 +465,7 @@ export default function ConsolePage() {
                         <td className={CELL} onClick={(event) => event.stopPropagation()}>
                           <Select
                             value={org.timezone}
-                            options={timezoneOptions(org.timezone).map((zone) => ({ value: zone, label: zone }))}
+                            options={timezoneOptions(org.timezone)}
                             onChange={(zone) => changeTimezone(org, zone)}
                             title="When a new day starts for this organization's daily credit allowances"
                             searchPlaceholder="Search timezones…"
@@ -499,8 +560,13 @@ export default function ConsolePage() {
                                   <Loader2 size={12} className="animate-spin" /> Loading members…
                                 </p>
                               ) : (
+                                // The same search and filters as the Credits
+                                // page, joined to the top of the table.
+                                <div className="[&>*:nth-child(2)]:rounded-t-none">
+                                {memberFilter.bar(members[org.id] ?? [])}
                                 <MemberRows
                                   members={members[org.id] ?? []}
+                                  visible={memberFilter.matches}
                                   groups={groups}
                                   onPatch={(id, patch) => handlePatchMember(org.id, id, patch)}
                                   onRemove={(member) => handleRemoveMember(org.id, member)}
@@ -514,6 +580,7 @@ export default function ConsolePage() {
                                   }
                                   dailyAllowance={{ tenantId: org.id, onSaved: () => loadMembers(org.id) }}
                                 />
+                                </div>
                               )}
                             </div>
                           </td>
@@ -524,6 +591,7 @@ export default function ConsolePage() {
                 })}
               </tbody>
             </table>
+          </div>
           </div>
         )}
       </div>

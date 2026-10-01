@@ -27,30 +27,73 @@ export type SelectOption = {
  * offset an absolutely positioned one. A search box appears once the list
  * is long enough to need one.
  */
-export function Select({
-  value,
-  options,
-  onChange,
-  disabled = false,
-  className,
-  panelClassName,
-  ariaLabel,
-  title,
-  searchable,
-  searchPlaceholder = "Search…",
-}: {
-  value: string;
+type SharedProps = {
   options: readonly SelectOption[];
-  onChange: (value: string) => void;
   disabled?: boolean;
   /** Trigger styling — the caller's existing field classes. */
   className?: string;
-  panelClassName?: string;
   ariaLabel?: string;
   title?: string;
   /** Defaults to on for lists longer than eight. */
   searchable?: boolean;
   searchPlaceholder?: string;
+  /** Shown before the label. With one, phones get the icon alone — the label and chevron return from sm up. */
+  icon?: ReactNode;
+};
+
+/** Pick one. */
+export function Select({ value, onChange, ...rest }: SharedProps & { value: string; onChange: (value: string) => void }) {
+  return (
+    <SelectBase
+      {...rest}
+      isSelected={(option) => option === value}
+      triggerLabel={rest.options.find((option) => option.value === value)?.label ?? value}
+      onPick={(next) => (next !== value ? onChange(next) : undefined)}
+    />
+  );
+}
+
+/**
+ * Pick any number — a checklist. Stays open while ticking, so several
+ * values can be chosen in one go; the trigger reads `emptyLabel` with
+ * nothing ticked, the one label with one, and "N selected" beyond.
+ */
+export function MultiSelect({
+  values,
+  onChange,
+  emptyLabel,
+  ...rest
+}: SharedProps & { values: readonly string[]; onChange: (values: string[]) => void; emptyLabel: ReactNode }) {
+  const only = values.length === 1 ? rest.options.find((option) => option.value === values[0])?.label : null;
+  return (
+    <SelectBase
+      {...rest}
+      multiple
+      isSelected={(option) => values.includes(option)}
+      triggerLabel={values.length === 0 ? emptyLabel : (only ?? `${values.length} selected`)}
+      onPick={(next) => onChange(values.includes(next) ? values.filter((v) => v !== next) : [...values, next])}
+    />
+  );
+}
+
+function SelectBase({
+  options,
+  isSelected,
+  triggerLabel,
+  onPick,
+  multiple = false,
+  disabled = false,
+  className,
+  ariaLabel,
+  title,
+  searchable,
+  searchPlaceholder = "Search…",
+  icon,
+}: SharedProps & {
+  isSelected: (value: string) => boolean;
+  triggerLabel: ReactNode;
+  onPick: (value: string) => void;
+  multiple?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -65,7 +108,6 @@ export function Select({
 
   useEffect(() => {
     if (!open) return;
-    setQuery("");
     if (withSearch) inputRef.current?.focus();
     // A fixed panel would be left behind by a scroll; closing is simpler and
     // matches how native selects behave. Scrolls inside the panel don't count.
@@ -91,10 +133,9 @@ export function Select({
     });
   }, [options, query]);
 
-  const selected = options.find((option) => option.value === value);
-
   function toggle() {
     if (disabled) return;
+    if (!open) setQuery(""); // a fresh search each time it opens
     if (!open && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
       const width = Math.max(rect.width, 160);
@@ -107,8 +148,8 @@ export function Select({
   }
 
   function pick(next: string) {
-    setOpen(false);
-    if (next !== value) onChange(next);
+    if (!multiple) setOpen(false);
+    onPick(next);
   }
 
   return (
@@ -124,8 +165,12 @@ export function Select({
         title={title}
         className={cn("flex items-center justify-between gap-1.5 text-left disabled:cursor-not-allowed", className)}
       >
-        <span className="min-w-0 truncate">{selected?.label ?? value}</span>
-        <ChevronDown size={12} className={cn("shrink-0 opacity-60 transition-transform", open && "rotate-180")} />
+        {icon && <span className="shrink-0 opacity-70">{icon}</span>}
+        <span className={cn("min-w-0 truncate", icon && "hidden sm:inline")}>{triggerLabel}</span>
+        <ChevronDown
+          size={12}
+          className={cn("shrink-0 opacity-60 transition-transform", open && "rotate-180", icon && "hidden sm:block")}
+        />
       </button>
 
       {open &&
@@ -135,8 +180,7 @@ export function Select({
             ref={panelRef}
             style={{ left: pos.left, top: pos.top, bottom: pos.bottom, minWidth: pos.width }}
             className={cn(
-              "fixed z-[100] flex max-h-[300px] max-w-[320px] flex-col overflow-hidden rounded-lg border border-white/10 bg-surface-raised text-cream shadow-lg",
-              panelClassName
+              "fixed z-[100] flex max-h-[300px] max-w-[320px] flex-col overflow-hidden rounded-lg border border-white/10 bg-surface-raised text-cream shadow-lg"
             )}
           >
             {withSearch && (
@@ -154,10 +198,10 @@ export function Select({
                 />
               </div>
             )}
-            <ul role="listbox" className="flex-1 overflow-y-auto py-1">
+            <ul role="listbox" aria-multiselectable={multiple || undefined} className="flex-1 overflow-y-auto py-1">
               {filtered.length === 0 && <li className="px-2.5 py-1.5 text-xs text-faint">No matches</li>}
               {filtered.map((option, index) => {
-                const isSelected = option.value === value;
+                const selected = isSelected(option.value);
                 const showGroup = option.group && option.group !== filtered[index - 1]?.group;
                 return (
                   <li key={option.value}>
@@ -169,15 +213,26 @@ export function Select({
                     <button
                       type="button"
                       role="option"
-                      aria-selected={isSelected}
+                      aria-selected={selected}
                       onClick={() => pick(option.value)}
                       className={cn(
                         "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/[0.06]",
-                        isSelected ? "bg-gold/[0.08] text-gold" : "text-cream"
+                        selected ? "bg-gold/[0.08] text-gold" : "text-cream"
                       )}
                     >
+                      {multiple && (
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border",
+                            selected ? "border-gold bg-gold text-white" : "border-white/25"
+                          )}
+                        >
+                          {selected && <Check size={10} strokeWidth={3} />}
+                        </span>
+                      )}
                       <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                      <Check size={11} className={cn("shrink-0 text-gold", !isSelected && "invisible")} />
+                      {!multiple && <Check size={11} className={cn("shrink-0 text-gold", !selected && "invisible")} />}
                     </button>
                   </li>
                 );

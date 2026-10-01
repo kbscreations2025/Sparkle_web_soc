@@ -170,8 +170,13 @@ button, a { transition-property: color, background-color, border-color, opacity,
 
 /* White-tint utilities lift a surface off a dark ground; on the light ground
    they'd be invisible, so flip them to a black tint of the same weight.
-   The :hover pair comes second so hover feedback still wins. */
-[data-theme="light"] [class*="bg-white/"] {
+   The :hover pair comes second so hover feedback still wins.
+
+   Only a bare `bg-white/…` class, at the start of the list or after a space.
+   A plain substring match also caught `hover:bg-white/…`, which tinted every
+   hover-only row grey at rest — every table read darker than its frame. */
+[data-theme="light"] [class^="bg-white/"],
+[data-theme="light"] [class*=" bg-white/"] {
   background-color: rgba(0, 0, 0, 0.04) !important;
 }
 

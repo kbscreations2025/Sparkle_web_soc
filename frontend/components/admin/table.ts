@@ -22,7 +22,7 @@ export const COMPACT_CELL = "px-3 py-1.5 text-[12px]";
 
 /** A header cell that stays pinned, and opaque, while the rows scroll under it. */
 export const COMPACT_HEAD =
-  "px-3 py-1.5 text-[12px] sticky top-0 z-10 bg-surface-float shadow-[inset_0_-1px_0_rgba(255,255,255,0.10)]";
+  "px-3 py-1 text-[10px] sticky top-0 z-10 bg-surface-float shadow-[inset_0_-1px_0_rgba(255,255,255,0.10)]";
 
 /** The scroll container: outer for a page-level table, nested for one inside a row. */
 export const TABLE_FRAME = "overflow-x-auto rounded-xl border border-white/10 bg-surface-raised/60";

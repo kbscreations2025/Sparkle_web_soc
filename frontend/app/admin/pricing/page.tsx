@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Coins, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { ChevronRight, Coins, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   getPricingCatalogue,
   listPricingRules,
@@ -13,9 +13,11 @@ import {
   type PricingUnit,
 } from "@/lib/api";
 import { Modal } from "@/components/admin/Modal";
-import { CELL, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
+import { COMPACT_CELL as T_CELL, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
+import { HoverInfo } from "@/components/ui/HoverInfo";
 import { cn } from "@/lib/utils";
 import { Select } from "@/components/ui/Select";
+import { TableFilterBar, FILTER_FIELD as BAR_FIELD } from "@/components/admin/TableFilterBar";
 
 const FIELD =
   "w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-cream placeholder:text-faint outline-none focus:border-gold/40";
@@ -25,6 +27,22 @@ const UNIT_LABELS: Record<PricingUnit, string> = {
   per_request: "per request",
   per_second: "per second",
 };
+
+/** Beside the credit figure: what one unit is. */
+const UNIT_SHORT: Record<PricingUnit, string> = {
+  per_image: "/ image",
+  per_request: "/ request",
+  per_second: "/ sec",
+};
+
+/** The header cells: the compact table's padding, without its sticky positioning. */
+const T_HEAD = "px-3 py-1.5";
+
+/** The order the price table's sections appear in — providers, then what each makes. */
+/** The one rule for no particular model — always first, never folded. */
+const CATCH_ALL = "Catch-all";
+const PROVIDER_ORDER = [CATCH_ALL, "Gemini", "OpenAI", "OpenRouter"];
+const TYPE_ORDER = ["Image", "Video", "Text"];
 
 /** The wildcard every match dropdown starts on. */
 const ANY = "";
@@ -103,6 +121,75 @@ export default function PricingPage() {
     return map;
   }, [catalogue]);
 
+  const [ruleQuery, setRuleQuery] = useState("");
+  const ruleNeedle = ruleQuery.trim().toLowerCase();
+  const visibleRules = useMemo(
+    () =>
+      ruleNeedle
+        ? rules.filter((rule) =>
+            [
+              rule.label,
+              rule.tenantId ? orgNames.get(rule.tenantId) : "any organization",
+              rule.modelId ? modelLabels.get(rule.modelId) ?? rule.modelId : "any model",
+              rule.tool ?? "any tool",
+            ]
+              .join(" ")
+              .toLowerCase()
+              .includes(ruleNeedle)
+          )
+        : rules,
+    [rules, ruleNeedle, orgNames, modelLabels]
+  );
+
+  /*
+   * Two levels, so the table reads like the product: who serves the model
+   * (Gemini, OpenAI, OpenRouter), then what it makes (Image, Video, Text).
+   * Both come from the catalogue group a model sits in — "Video (OpenRouter)"
+   * — and a model missing from the catalogue is placed by its id and unit
+   * instead. A rule for no particular model is the catch-all, on its own.
+   */
+  /* Folded providers. A search unfolds everything, so a match is never hidden. */
+  const [collapsedProviders, setCollapsedProviders] = useState<Set<string>>(() => new Set());
+  const isCollapsed = (provider: string) => provider !== CATCH_ALL && !ruleNeedle && collapsedProviders.has(provider);
+  const toggleProvider = (provider: string) =>
+    setCollapsedProviders((current) => {
+      const next = new Set(current);
+      if (next.has(provider)) next.delete(provider);
+      else next.add(provider);
+      return next;
+    });
+
+  const groupedRules = useMemo(() => {
+    const placeOf = new Map<string, { provider: string; type: string }>();
+    catalogue?.models.forEach((group) => {
+      const [, type, provider] = group.group.match(/^(\w+)(?: \((.+)\))?/) ?? [];
+      group.models.forEach((model) => placeOf.set(model.id, { provider: provider ?? "Gemini", type: type ?? "Other" }));
+    });
+    const typeByUnit: Record<PricingUnit, string> = { per_image: "Image", per_second: "Video", per_request: "Text" };
+    const guessProvider = (id: string) => (id.includes("/") ? "OpenRouter" : id.startsWith("gpt") ? "OpenAI" : "Gemini");
+
+    const tree = new Map<string, Map<string, PricingRule[]>>();
+    for (const rule of visibleRules) {
+      const place = !rule.modelId
+        ? { provider: CATCH_ALL, type: "" }
+        : (placeOf.get(rule.modelId) ?? { provider: guessProvider(rule.modelId), type: typeByUnit[rule.unit] });
+      const types = tree.get(place.provider) ?? new Map<string, PricingRule[]>();
+      types.set(place.type, [...(types.get(place.type) ?? []), rule]);
+      tree.set(place.provider, types);
+    }
+
+    const rank = (order: string[], name: string) => order.indexOf(name) + 1 || order.length + 1;
+    return [...tree.entries()]
+      .sort(([a], [b]) => rank(PROVIDER_ORDER, a) - rank(PROVIDER_ORDER, b) || a.localeCompare(b))
+      .map(([provider, types]) => ({
+        provider,
+        count: [...types.values()].reduce((sum, rules) => sum + rules.length, 0),
+        sections: [...types.entries()]
+          .sort(([a], [b]) => rank(TYPE_ORDER, a) - rank(TYPE_ORDER, b))
+          .map(([type, rules]) => ({ type, rules })),
+      }));
+  }, [visibleRules, catalogue]);
+
   async function handleRetire(rule: PricingRule) {
     if (!confirm(`Retire "${rule.label}"? It stops pricing new runs but stays on record.`)) return;
     const result = await deletePricingRule(rule.id);
@@ -119,25 +206,6 @@ export default function PricingPage() {
           </p>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="flex items-center gap-2 text-[11px] text-muted">
-            <input
-              type="checkbox"
-              checked={includeRetired}
-              onChange={(event) => setIncludeRetired(event.target.checked)}
-              className="accent-[var(--color-gold)]"
-            />
-            Show retired rules
-          </label>
-
-          <button
-            onClick={() => setAdding(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/15 px-3 py-1.5 text-[11px] font-semibold text-gold transition-colors hover:bg-gold/25"
-          >
-            <Plus size={13} /> New rule
-          </button>
-        </div>
-
         {loading ? (
           <p className="flex items-center gap-2 text-sm text-faint">
             <Loader2 size={14} className="animate-spin" /> Loading…
@@ -147,101 +215,178 @@ export default function PricingPage() {
             No pricing rules yet. Start with a wildcard catch-all so nothing is ever unpriced.
           </p>
         ) : (
-          <div className={TABLE_FRAME}>
-            <table className="w-full min-w-[1100px] border-collapse">
+          <div>
+          <TableFilterBar
+            query={ruleQuery}
+            onQuery={setRuleQuery}
+            placeholder="Search label, organization, model or tool"
+            onReset={() => {
+              setRuleQuery("");
+              setIncludeRetired(false);
+            }}
+            canReset={Boolean(ruleNeedle) || includeRetired}
+            count={`${ruleNeedle ? `${visibleRules.length}/` : ""}${rules.length} rules`}
+            trailing={
+              <button
+                onClick={() => setAdding(true)}
+                className="flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/15 px-3 text-[11px] font-semibold text-gold transition-colors hover:bg-gold/25"
+              >
+                <Plus size={13} /> <span className="hidden sm:inline">New rule</span>
+              </button>
+            }
+          >
+            <label
+              title="Show retired rules"
+              className={cn(
+                BAR_FIELD,
+                "flex shrink-0 cursor-pointer items-center gap-1.5",
+                includeRetired && "border-gold/30 text-gold"
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={includeRetired}
+                onChange={(event) => setIncludeRetired(event.target.checked)}
+                className="accent-[var(--color-gold)]"
+              />
+              <span className="hidden sm:inline">Retired</span>
+            </label>
+          </TableFilterBar>
+          <div className={cn(TABLE_FRAME, "rounded-t-none")}>
+            <table className="w-full min-w-[860px] border-collapse">
               <thead>
                 <tr className={HEAD_ROW}>
-                  <th className={CELL}>Label</th>
-                  <th className={CELL}>Organization</th>
-                  <th className={CELL}>Model</th>
-                  <th className={CELL}>Tool</th>
-                  <th className={CELL}>Quality</th>
-                  <th className={CELL}>Unit</th>
-                  <th className={cn(CELL, "text-right")}>Provider rate</th>
-                  <th className={cn(CELL, "text-right")}>Our credits</th>
-                  <th className={cn(CELL, "text-right")}>Actions</th>
+                  <th className={T_HEAD}>Rule</th>
+                  <th className={T_HEAD}>Organization</th>
+                  <th className={T_HEAD}>Model</th>
+                  <th className={T_HEAD}>Tool</th>
+                  <th className={T_HEAD}>Quality</th>
+                  <th className={cn(T_HEAD, "text-right")}>Provider rate</th>
+                  <th className={cn(T_HEAD, "text-right")}>Credits</th>
+                  <th className={cn(T_HEAD, "w-16 text-right")} />
                 </tr>
               </thead>
               <tbody>
-                {rules.map((rule) => (
-                  <tr
-                    key={rule.id}
-                    className={cn(
-                      "border-t border-white/5 transition-colors hover:bg-white/[0.03]",
-                      // A retired rule stays legible but visibly out of play.
-                      !rule.active && "opacity-50"
-                    )}
-                  >
-                    <td className={cn(CELL, "font-medium text-cream")}>
-                      <span className="flex items-center gap-2">
-                        {rule.label}
-                        {!rule.active && (
-                          <span className="rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-faint">
-                            Retired
-                          </span>
-                        )}
-                      </span>
-                      {rule.notes && (
-                        <span className="mt-0.5 block text-[11px] text-faint">{rule.notes}</span>
-                      )}
-                    </td>
-                    <td className={cn(CELL, "text-muted")}>
-                      {rule.tenantId ? (orgNames.get(rule.tenantId) ?? "Unknown org") : <Any />}
-                    </td>
-                    <td className={cn(CELL, "text-muted")}>
-                      {rule.modelId ? (modelLabels.get(rule.modelId) ?? rule.modelId) : <Any />}
-                    </td>
-                    <td className={cn(CELL, "text-muted")}>{rule.tool ?? <Any />}</td>
-                    <td className={cn(CELL, "text-muted")}>{rule.quality ?? <Any />}</td>
-                    <td className={cn(CELL, "text-muted")}>{UNIT_LABELS[rule.unit]}</td>
-                    <td className={cn(CELL, "text-right tabular-nums text-muted")}>
-                      {rule.providerRate === null ? (
-                        <span className="text-faint">—</span>
-                      ) : (
-                        (() => {
-                          const { primary, secondary } = formatRates(
-                            rule.providerRate,
-                            rule.providerCurrency,
-                            catalogue?.usdToInr ?? 0
-                          );
-                          return (
-                            <>
-                              <span className="block">{primary}</span>
-                              {secondary && (
-                                <span className="block text-[11px] text-faint">{secondary}</span>
-                              )}
-                            </>
-                          );
-                        })()
-                      )}
-                    </td>
-                    <td className={cn(CELL, "text-right tabular-nums font-medium text-gold")}>
-                      {rule.creditsPerUnit}
-                    </td>
-                    <td className={cn(CELL, "text-right")}>
-                      <div className="inline-flex items-center gap-1">
-                        <button
-                          onClick={() => setEditing(rule)}
-                          title="Edit this rule"
-                          className="rounded border border-white/10 p-1.5 text-muted transition-colors hover:bg-white/[0.07] hover:text-cream"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        {rule.active && (
-                          <button
-                            onClick={() => handleRetire(rule)}
-                            title="Retire this rule"
-                            className="rounded border border-white/10 p-1.5 text-muted transition-colors hover:bg-error/[0.12] hover:text-error"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                      </div>
+                {visibleRules.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className={cn(T_CELL, "py-4 text-center text-faint")}>
+                      No rules match that search.
                     </td>
                   </tr>
+                )}
+                {groupedRules.map(({ provider, count, sections }) => (
+                  <Fragment key={provider}>
+                    {/* Provider, then what it makes — so a long price table
+                        reads as sections rather than one undifferentiated list. */}
+                    {/* The catch-all is one rule that underpins all the others,
+                        so it sits first with no header and never folds away. */}
+                    {provider !== CATCH_ALL && (
+                    <tr
+                      className="cursor-pointer select-none border-t border-gold/20 bg-gold/[0.08] transition-colors hover:bg-gold/[0.12]"
+                      onClick={() => toggleProvider(provider)}
+                      aria-expanded={!isCollapsed(provider)}
+                    >
+                      <td colSpan={8} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-gold">
+                        <span className="flex items-center gap-1.5">
+                          <ChevronRight
+                            size={13}
+                            className={cn("shrink-0 transition-transform", !isCollapsed(provider) && "rotate-90")}
+                          />
+                          {provider}
+                          <span className="font-medium text-faint">{count}</span>
+                        </span>
+                      </td>
+                    </tr>
+                    )}
+                    {!isCollapsed(provider) && sections.map(({ type, rules: inGroup }) => (
+                    <Fragment key={type}>
+                    {type && (
+                      <tr className="border-t border-white/5 bg-gold/[0.03]">
+                        <td colSpan={8} className="py-1 pl-6 pr-3 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                          {type}
+                          <span className="ml-1.5 font-medium text-faint">{inGroup.length}</span>
+                        </td>
+                      </tr>
+                    )}
+                    {inGroup.map((rule) => {
+                      const rates =
+                        rule.providerRate === null
+                          ? null
+                          : formatRates(rule.providerRate, rule.providerCurrency, catalogue?.usdToInr ?? 0);
+                      return (
+                        <tr
+                          key={rule.id}
+                          className={cn(
+                            "border-t border-white/5 transition-colors hover:bg-gold/[0.04]",
+                            // A retired rule stays legible but visibly out of play.
+                            !rule.active && "opacity-50"
+                          )}
+                        >
+                          <td className={cn(T_CELL, "font-medium text-cream")}>
+                            <span className="flex items-center gap-1.5">
+                              <span className="truncate">{rule.label}</span>
+                              {/* The rationale is a sentence; it lives behind the
+                                  icon so every row stays one line tall. */}
+                              {rule.notes && <HoverInfo text={rule.notes} />}
+                              {!rule.active && (
+                                <span className="shrink-0 rounded border border-white/10 px-1 py-px text-[9px] uppercase tracking-wide text-faint">
+                                  Retired
+                                </span>
+                              )}
+                            </span>
+                          </td>
+                          <td className={cn(T_CELL, "text-muted")}>
+                            {rule.tenantId ? (orgNames.get(rule.tenantId) ?? "Unknown org") : <Any />}
+                          </td>
+                          <td className={cn(T_CELL, "whitespace-nowrap text-muted")}>
+                            {rule.modelId ? (modelLabels.get(rule.modelId) ?? rule.modelId) : <Any />}
+                          </td>
+                          <td className={cn(T_CELL, "text-muted")}>{rule.tool ?? <Any />}</td>
+                          <td className={cn(T_CELL, "text-muted")}>{rule.quality ?? <Any />}</td>
+                          <td className={cn(T_CELL, "whitespace-nowrap text-right tabular-nums text-muted")}>
+                            {rates ? (
+                              <>
+                                {rates.primary}
+                                {rates.secondary && <span className="ml-1.5 text-[10px] text-faint">{rates.secondary}</span>}
+                              </>
+                            ) : (
+                              <span className="text-faint">—</span>
+                            )}
+                          </td>
+                          <td className={cn(T_CELL, "whitespace-nowrap text-right tabular-nums")}>
+                            <span className="font-semibold text-gold">{rule.creditsPerUnit}</span>
+                            <span className="ml-1 text-[10px] text-faint">{UNIT_SHORT[rule.unit]}</span>
+                          </td>
+                          <td className={cn(T_CELL, "text-right")}>
+                            <div className="inline-flex items-center gap-0.5">
+                              <button
+                                onClick={() => setEditing(rule)}
+                                title="Edit this rule"
+                                className="rounded p-1 text-muted transition-colors hover:bg-gold/[0.08] hover:text-cream"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                              {rule.active && (
+                                <button
+                                  onClick={() => handleRetire(rule)}
+                                  title="Retire this rule"
+                                  className="rounded p-1 text-muted transition-colors hover:bg-error/[0.12] hover:text-error"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    </Fragment>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
+          </div>
           </div>
         )}
       </div>
@@ -419,7 +564,7 @@ function RuleForm({
                 { value: ANY, label: "Any (global)" },
                 ...catalogue.organizations.map((org) => ({ value: org.id, label: org.name })),
               ]}
-              className={cn(FIELD, "w-full")}
+              className={FIELD}
             />
           </Field>
 
@@ -433,7 +578,7 @@ function RuleForm({
                   group.models.map((model) => ({ value: model.id, label: model.label, group: group.group }))
                 ),
               ]}
-              className={cn(FIELD, "w-full")}
+              className={FIELD}
             />
           </Field>
 
@@ -442,7 +587,7 @@ function RuleForm({
               value={tool}
               onChange={setTool}
               options={[{ value: ANY, label: "Any tool" }, ...catalogue.tools.map((key) => ({ value: key, label: key }))]}
-              className={cn(FIELD, "w-full")}
+              className={FIELD}
             />
           </Field>
 
@@ -465,7 +610,7 @@ function RuleForm({
             value={unit}
             onChange={(next) => setUnit(next as PricingUnit)}
             options={catalogue.units.map((option) => ({ value: option, label: UNIT_LABELS[option] }))}
-            className={cn(FIELD, "w-full")}
+            className={FIELD}
           />
         </Field>
 

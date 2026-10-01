@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { ArrowUpRight, Check, Circle, Eraser, Minus, MousePointer2, Pencil, Redo2, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { ArrowUpRight, Check, Circle, Eraser, GripVertical, Minus, MousePointer2, Pencil, Redo2, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import type { ShapeKind } from "@/lib/annotationShapes";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +58,72 @@ function widthToStop(width: number) {
   return nearest;
 }
 
+type Corner = "tl" | "tr" | "bl" | "br";
+const CORNER_CLASS: Record<Corner, string> = {
+  tl: "left-3 top-3",
+  tr: "right-3 top-3",
+  bl: "left-3 bottom-3",
+  br: "right-3 bottom-3",
+};
+
+/**
+ * Lets the toolbar be dragged by its grip and, on release, snaps it to
+ * whichever corner of the drawing area is nearest — so it can be moved off
+ * the part of the piece being drawn on, but never left half over it.
+ */
+function useCornerDrag() {
+  const [corner, setCorner] = useState<Corner>("tr");
+  const [offset, setOffset] = useState<{ x: number; y: number } | null>(null);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  function end() {
+    const el = ref.current;
+    const area = el?.offsetParent?.getBoundingClientRect();
+    if (el && area && start.current) {
+      const box = el.getBoundingClientRect();
+      const top = box.top + box.height / 2 < area.top + area.height / 2;
+      const left = box.left + box.width / 2 < area.left + area.width / 2;
+      setCorner(`${top ? "t" : "b"}${left ? "l" : "r"}`);
+    }
+    start.current = null;
+    setOffset(null);
+  }
+
+  const gripProps = {
+    onPointerDown(event: ReactPointerEvent<HTMLElement>) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      start.current = { x: event.clientX, y: event.clientY };
+      setOffset({ x: 0, y: 0 });
+    },
+    onPointerMove(event: ReactPointerEvent<HTMLElement>) {
+      if (start.current) setOffset({ x: event.clientX - start.current.x, y: event.clientY - start.current.y });
+    },
+    onPointerUp: end,
+    onPointerCancel: end,
+  };
+
+  return {
+    ref,
+    positionClass: CORNER_CLASS[corner],
+    style: offset ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined,
+    gripProps,
+  };
+}
+
+function DragGrip(props: ReturnType<typeof useCornerDrag>["gripProps"]) {
+  return (
+    <span
+      {...props}
+      title="Drag to move — it snaps to the nearest corner"
+      aria-label="Move toolbar"
+      className="flex h-7 w-4 shrink-0 cursor-grab touch-none items-center justify-center text-faint hover:text-muted active:cursor-grabbing"
+    >
+      <GripVertical size={13} />
+    </span>
+  );
+}
+
 export function DrawingToolbar({
   tool,
   onToolChange,
@@ -74,6 +140,8 @@ export function DrawingToolbar({
   onConfirm,
   confirmLabel,
   onClose,
+  collapsed = false,
+  onExpand,
 }: {
   tool: Tool;
   onToolChange: (tool: Tool) => void;
@@ -91,95 +159,157 @@ export function DrawingToolbar({
   onConfirm: () => void;
   confirmLabel: string;
   onClose: () => void;
+  /** Folded down to the current tool, Attach and Close — out of the way while drawing. */
+  collapsed?: boolean;
+  onExpand?: () => void;
 }) {
   const sizeLabel = tool === "eraser" ? "Eraser size" : "Stroke size";
+  const { ref: dragRef, positionClass, style: dragStyle, gripProps } = useCornerDrag();
+
+  const confirmButton = (
+    <button
+      type="button"
+      onClick={onConfirm}
+      className="flex h-7 items-center gap-1 rounded-full border border-gold/30 bg-gold/[0.12] px-3 text-[11px] font-semibold text-gold transition-colors hover:border-gold/50 hover:bg-gold/20"
+    >
+      <Check size={13} /> {confirmLabel}
+    </button>
+  );
+  const closeButton = (
+    <ToolbarAction label="Close" onClick={onClose}>
+      <X size={14} />
+    </ToolbarAction>
+  );
+
+  if (collapsed) {
+    // The active tool stands in for the whole row: it shows what a stroke
+    // will draw, and tapping it brings the full toolbar back.
+    const ActiveIcon = (TOOLS.find((entry) => entry.id === tool) ?? TOOLS[1]).icon;
+    return (
+      <div
+        ref={dragRef}
+        style={dragStyle}
+        className={cn(
+          "absolute z-10 flex items-center gap-1.5 rounded-md border border-gold/20 bg-surface-raised/95 py-1.5 pl-0.5 pr-1.5 shadow-[0_6px_24px_rgba(74,52,16,0.14)] backdrop-blur-md",
+          positionClass
+        )}
+      >
+        <DragGrip {...gripProps} />
+        <button
+          type="button"
+          onClick={onExpand}
+          title="Show drawing tools"
+          aria-label="Show drawing tools"
+          className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold transition-colors hover:bg-gold/25"
+        >
+          <ActiveIcon size={14} />
+          <span
+            className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-surface-raised"
+            style={{ background: color }}
+          />
+        </button>
+        {/* Undo and redo stay out while drawing — they are the two most
+            used controls after a stroke, and opening the full toolbar for
+            them would defeat folding it away. */}
+        <ToolbarAction label="Undo" onClick={onUndo} disabled={!canUndo}>
+          <Undo2 size={14} />
+        </ToolbarAction>
+        <ToolbarAction label="Redo" onClick={onRedo} disabled={!canRedo}>
+          <Redo2 size={14} />
+        </ToolbarAction>
+        {confirmButton}
+        {closeButton}
+      </div>
+    );
+  }
 
   return (
-    // Wraps rather than scrolls: on a phone the row is wider than the screen,
-    // and a toolbar that has to be scrolled sideways hides half its tools.
-    <div className="absolute right-3 top-3 flex max-w-[92%] flex-wrap items-center justify-end gap-1.5 rounded-2xl border border-white/10 bg-black px-2 py-1.5">
-      <div className="flex items-center gap-0.5">
-        {TOOLS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            title={label}
-            aria-pressed={tool === id}
-            onClick={() => onToolChange(id)}
-            className={cn(
-              "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors",
-              tool === id ? "bg-gold/30 text-gold" : "text-white/80 hover:bg-white/15"
-            )}
-          >
-            <Icon size={14} />
-          </button>
-        ))}
+    // Two fixed rows rather than one that wraps wherever it runs out of room:
+    // what to draw with (and undo it) on top, how it looks underneath, so
+    // each control is always in the same place.
+    <div
+      ref={dragRef}
+      style={dragStyle}
+      className={cn(
+        "absolute z-10 flex max-w-[92%] flex-col gap-1 rounded-md border border-gold/20 bg-surface-raised/95 py-1.5 pl-0.5 pr-2 shadow-[0_6px_24px_rgba(74,52,16,0.14)] backdrop-blur-md",
+        positionClass
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        <DragGrip {...gripProps} />
+        <div className="flex flex-wrap items-center gap-0.5">
+          {TOOLS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              title={label}
+              aria-pressed={tool === id}
+              onClick={() => onToolChange(id)}
+              className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors",
+                tool === id ? "bg-gold/15 text-gold" : "text-muted hover:bg-gold/[0.08] hover:text-cream"
+              )}
+            >
+              <Icon size={14} />
+            </button>
+          ))}
+        </div>
+
+        <Divider />
+
+        <ToolbarAction label="Undo" onClick={onUndo} disabled={!canUndo}>
+          <Undo2 size={14} />
+        </ToolbarAction>
+        <ToolbarAction label="Redo" onClick={onRedo} disabled={!canRedo}>
+          <Redo2 size={14} />
+        </ToolbarAction>
+        <ToolbarAction label={deleteLabel} onClick={onDelete}>
+          <Trash2 size={14} />
+        </ToolbarAction>
+        {closeButton}
       </div>
 
-      <Divider />
+      <div className="flex items-center gap-2 border-t border-gold/15 pl-1.5 pt-1">
+        <label title="Colour" className="relative h-6 w-6 shrink-0 overflow-hidden rounded-full border border-gold/30 shadow-sm">
+          <span className="block h-full w-full" style={{ background: color }} />
+          <input
+            type="color"
+            value={color}
+            onChange={(event) => onColorChange(event.target.value)}
+            aria-label="Colour"
+            className="absolute inset-0 cursor-pointer opacity-0"
+          />
+        </label>
 
-      <label title="Colour" className="relative h-6 w-6 shrink-0 overflow-hidden rounded-full border border-white/25">
-        <span className="block h-full w-full" style={{ background: color }} />
-        <input
-          type="color"
-          value={color}
-          onChange={(event) => onColorChange(event.target.value)}
-          aria-label="Colour"
-          className="absolute inset-0 cursor-pointer opacity-0"
-        />
-      </label>
+        {/* One slider for both: the eraser needs a size as much as the pen does. */}
+        <label className="flex min-w-0 flex-1 items-center gap-1.5 px-1" title={sizeLabel}>
+          <span
+            className="shrink-0 rounded-full bg-cream"
+            style={{ width: Math.min(strokeWidth, 14), height: Math.min(strokeWidth, 14) }}
+          />
+          <input
+            type="range"
+            min={0}
+            max={WIDTHS.length - 1}
+            step={1}
+            value={widthToStop(strokeWidth)}
+            onChange={(event) => onWidthChange(WIDTHS[Number(event.target.value)])}
+            aria-label={sizeLabel}
+            className="h-1 min-w-16 flex-1 cursor-pointer accent-gold"
+          />
+          {/* The preview dot stops growing at 14px so it can't push the toolbar
+              around, which would otherwise make every size above that look
+              identical. The number keeps the change readable all the way up. */}
+          <span className="w-6 shrink-0 text-right text-[10px] tabular-nums text-faint">{strokeWidth}</span>
+        </label>
 
-      {/* One slider for both: the eraser needs a size as much as the pen does. */}
-      <label className="flex items-center gap-1.5 px-1" title={sizeLabel}>
-        <span
-          className="shrink-0 rounded-full bg-white"
-          style={{ width: Math.min(strokeWidth, 14), height: Math.min(strokeWidth, 14) }}
-        />
-        <input
-          type="range"
-          min={0}
-          max={WIDTHS.length - 1}
-          step={1}
-          value={widthToStop(strokeWidth)}
-          onChange={(event) => onWidthChange(WIDTHS[Number(event.target.value)])}
-          aria-label={sizeLabel}
-          className="h-1 w-20 cursor-pointer accent-gold"
-        />
-        {/* The preview dot stops growing at 14px so it can't push the toolbar
-            around, which would otherwise make every size above that look
-            identical. The number keeps the change readable all the way up. */}
-        <span className="w-6 shrink-0 text-right text-[10px] tabular-nums text-white/60">{strokeWidth}</span>
-      </label>
-
-      <Divider />
-
-      <ToolbarAction label="Undo" onClick={onUndo} disabled={!canUndo}>
-        <Undo2 size={14} />
-      </ToolbarAction>
-      <ToolbarAction label="Redo" onClick={onRedo} disabled={!canRedo}>
-        <Redo2 size={14} />
-      </ToolbarAction>
-      <ToolbarAction label={deleteLabel} onClick={onDelete}>
-        <Trash2 size={14} />
-      </ToolbarAction>
-
-      <Divider />
-
-      <button
-        type="button"
-        onClick={onConfirm}
-        className="flex h-7 items-center gap-1 rounded-full bg-gold/20 px-2.5 text-[11px] font-medium text-gold transition-colors hover:bg-gold/30"
-      >
-        <Check size={13} /> {confirmLabel}
-      </button>
-      <ToolbarAction label="Close" onClick={onClose}>
-        <X size={14} />
-      </ToolbarAction>
+        {confirmButton}
+      </div>
     </div>
   );
 }
 
-const Divider = () => <span className="mx-0.5 h-5 w-px bg-white/15" />;
+const Divider = () => <span className="mx-0.5 h-5 w-px bg-gold/20" />;
 
 function ToolbarAction({
   label,
@@ -198,7 +328,7 @@ function ToolbarAction({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 disabled:opacity-30 disabled:hover:bg-transparent"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-gold/[0.08] hover:text-cream disabled:opacity-30 disabled:hover:bg-transparent"
     >
       {children}
     </button>

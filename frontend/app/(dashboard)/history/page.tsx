@@ -96,28 +96,26 @@ function modelLabelFor(model?: string | null) {
   return MODEL_LABELS[model] || model;
 }
 
-/** 2 columns on mobile, 4 on tablet, 6 on desktop — tracked live so a rotated tablet or a resized window reflows immediately. */
-function useResponsiveColumns() {
-  const [columns, setColumns] = useState(2);
+/** Whether the viewport is at least `px` wide — tracked live, so a rotated tablet or a resized window reacts immediately. */
+function useMinWidth(px: number) {
+  const [matches, setMatches] = useState(false);
 
   useEffect(() => {
-    const tablet = window.matchMedia("(min-width: 640px)");
-    const desktop = window.matchMedia("(min-width: 1024px)");
-
-    function update() {
-      setColumns(desktop.matches ? 6 : tablet.matches ? 4 : 2);
-    }
+    const query = window.matchMedia(`(min-width: ${px}px)`);
+    const update = () => setMatches(query.matches);
     update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, [px]);
 
-    tablet.addEventListener("change", update);
-    desktop.addEventListener("change", update);
-    return () => {
-      tablet.removeEventListener("change", update);
-      desktop.removeEventListener("change", update);
-    };
-  }, []);
+  return matches;
+}
 
-  return columns;
+/** 2 columns on mobile, 4 on tablet, 6 on desktop. */
+function useResponsiveColumns() {
+  const tablet = useMinWidth(640);
+  const desktop = useMinWidth(1024);
+  return desktop ? 6 : tablet ? 4 : 2;
 }
 
 export default function HistoryPage() {
@@ -208,6 +206,9 @@ export default function HistoryPage() {
   const [kitsLoading, setKitsLoading] = useState(false);
 
   const columns = useResponsiveColumns();
+  // Which form the filter row takes — see `filterControls`.
+  const tabletUp = useMinWidth(768);
+  const wide = useMinWidth(1280);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   /** Writes the current view and filters back to the query string. */
@@ -324,7 +325,7 @@ export default function HistoryPage() {
         // Replaced, not appended: this is page one of a different question.
         setItems(res.items ?? []);
         setNextCursor(res.nextCursor ?? null);
-        setServerTotal(typeof res.totalImages === "number" ? res.totalImages : null);
+        setServerTotal(res.totalImages ?? null);
         setCanReadTeam(Boolean(res.canReadTeam));
       }
       setLoading(false);
@@ -631,17 +632,20 @@ export default function HistoryPage() {
     // the permission for it.
     // Every page, not just the first: kits are filtered here in the browser,
     // so the badge and the filters are only right if all of them are loaded.
+    // Each page is shown as it lands, so the first kits appear after one
+    // round trip rather than after the last page.
     (async () => {
-      const all: MarketingKitSummary[] = [];
+      let all: MarketingKitSummary[] = [];
       let cursor: string | undefined;
-      for (let page = 0; page < 40; page++) {
+      do {
         const res = await listMarketingKits({ limit: 50, scope: "team", cursor });
         if (cancelled) return;
         if (res.status !== "success") break;
-        all.push(...(res.kits ?? []));
-        if (!res.nextCursor) break;
-        cursor = res.nextCursor;
-      }
+        all = [...all, ...(res.kits ?? [])];
+        setKits(all);
+        setKitsLoading(false);
+        cursor = res.nextCursor ?? undefined;
+      } while (cursor);
       setKits(all);
       setKitsLoading(false);
     })();
@@ -830,9 +834,13 @@ export default function HistoryPage() {
    */
   const filterControls = hasAccess ? (
     <>
-      <div className="flex min-w-0 flex-1 md:hidden">{renderPhoneFilters()}</div>
-      <div className="hidden min-w-0 flex-1 items-center justify-between gap-2 md:flex xl:hidden">{renderFilters(true)}</div>
-      <div className="hidden min-w-0 flex-1 items-center justify-between gap-2 xl:flex">{renderFilters(false)}</div>
+      {/* One form at a time — mounting all three and hiding two with CSS
+          tripled every filter's state, listeners and re-renders. */}
+      {tabletUp ? (
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-2">{renderFilters(!wide)}</div>
+      ) : (
+        renderPhoneFilters()
+      )}
     </>
   ) : null;
 
@@ -1060,14 +1068,7 @@ function ViewTab({
         <Icon size={compact ? 14 : 12} />
         {!compact && label}
       </button>
-      {badge != null && badge > 0 && (
-        <span
-          aria-label={badgeLabel}
-          className="pointer-events-none absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410] shadow-sm"
-        >
-          {badge}
-        </span>
-      )}
+      <CountBadge count={badge ?? 0} label={badgeLabel} />
     </span>
   );
 }
@@ -1173,7 +1174,7 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
             tiles use for it — the kit's own name is the badge above and the
             tooltip on the tile, so this corner stays the one place you look
             to see whose work a tile is. */}
-        <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:px-2 md:text-[10px] lg:text-[11px]">
+        <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]">
           {kit.userName}
         </span>
         <span className="shrink-0 rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:px-2 md:text-[10px]">
@@ -1228,11 +1229,7 @@ function CheckboxFilter({
   /** Icon only — the phone's form, where the labels cost a row each. */
   compact?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const closeMenu = useCallback(() => setOpen(false), []);
-  useDismissable(containerRef, open, closeMenu);
+  const { open, side, toggle: togglePanel, containerRef } = usePopover();
 
   function toggle(id: string) {
     onChange(selected.includes(id) ? selected.filter((v) => v !== id) : [...selected, id]);
@@ -1244,7 +1241,7 @@ function CheckboxFilter({
     <div className="relative" ref={containerRef}>
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={togglePanel}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={label}
@@ -1265,17 +1262,13 @@ function CheckboxFilter({
 
       {/* What's checked, not what they are — the list itself already shows
           every option. */}
-      {selected.length > 0 && (
-        <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410] shadow-sm">
-          {selected.length}
-        </span>
-      )}
+      <CountBadge count={selected.length} />
 
       {open && (
         <div
           role="listbox"
           aria-multiselectable="true"
-          className={cn("absolute top-full z-50 mt-2 w-48 overflow-hidden", panelSide(containerRef.current), " rounded-lg border border-white/10 bg-surface-raised shadow-lg")}
+          className={cn("absolute top-full z-50 mt-2 w-48 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg", side)}
         >
           {options.length === 0 ? (
             <p className="px-3 py-2.5 text-[11px] text-faint">{emptyLabel}</p>
@@ -1389,16 +1382,13 @@ function describeRange(range: DateRange) {
  * grid never looks unfiltered.
  */
 function MoreFilters({ activeCount, children }: { activeCount: number; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const closeMenu = useCallback(() => setOpen(false), []);
-  useDismissable(containerRef, open, closeMenu);
+  const { open, side, toggle, containerRef } = usePopover();
 
   return (
     <div ref={containerRef} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((wasOpen) => !wasOpen)}
+        onClick={toggle}
         aria-expanded={open}
         aria-label="More filters"
         title="More filters"
@@ -1408,15 +1398,16 @@ function MoreFilters({ activeCount, children }: { activeCount: number; children:
         )}
       >
         <MoreHorizontal size={15} />
-        {activeCount > 0 && (
-          <span className="pointer-events-none absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410]">
-            {activeCount}
-          </span>
-        )}
       </button>
+      <CountBadge count={activeCount} />
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-2 flex w-max flex-col items-stretch gap-2 rounded-xl border border-white/10 bg-surface-raised p-2 shadow-lg [&>*]:w-full">
+        <div
+          className={cn(
+            "absolute top-full z-50 mt-2 flex w-max flex-col items-stretch gap-2 rounded-xl border border-white/10 bg-surface-raised p-2 shadow-lg [&>*]:w-full",
+            side
+          )}
+        >
           {children}
         </div>
       )}
@@ -1430,9 +1421,43 @@ function MoreFilters({ activeCount, children }: { activeCount: number; children:
  * the sidebar; a button in the left half of the screen opens rightward.
  */
 function panelSide(anchor: HTMLElement | null) {
-  if (!anchor || typeof window === "undefined") return "right-0";
+  if (!anchor) return "right-0";
   const rect = anchor.getBoundingClientRect();
   return rect.left + rect.width / 2 < window.innerWidth / 2 ? "left-0" : "right-0";
+}
+
+/**
+ * The open/close plumbing every filter popover here shares: its state, the
+ * container that counts as "inside", dismissal on Escape or an outside
+ * click, and which side the panel opens to — measured once when it opens,
+ * not on every render.
+ */
+function usePopover() {
+  const [open, setOpen] = useState(false);
+  const [side, setSide] = useState("right-0");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismissable(containerRef, open, close);
+
+  const toggle = useCallback(() => {
+    setSide(panelSide(containerRef.current));
+    setOpen((wasOpen) => !wasOpen);
+  }, []);
+
+  return { open, side, toggle, close, containerRef };
+}
+
+/** The gold count on a filter's corner — how many of its values are set. Renders nothing at zero. */
+function CountBadge({ count, label }: { count: number; label?: string }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      aria-label={label}
+      className="pointer-events-none absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410] shadow-sm"
+    >
+      {count}
+    </span>
+  );
 }
 
 /** When to show results from — presets, or an exact pair of dates. */
@@ -1445,18 +1470,14 @@ function DateFilter({
   onChange: (next: DateRange) => void;
   compact?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { open, side, toggle, containerRef } = usePopover();
   const active = Boolean(range.from || range.to);
-
-  const closeMenu = useCallback(() => setOpen(false), []);
-  useDismissable(containerRef, open, closeMenu);
 
   return (
     <div className="relative" ref={containerRef}>
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={toggle}
         aria-expanded={open}
         aria-label={active ? `Date range: ${describeRange(range)}` : "Date range"}
         title={active ? describeRange(range) : "Date range"}
@@ -1474,14 +1495,10 @@ function DateFilter({
         )}
       </button>
 
-      {active && (
-        <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-[9px] font-bold text-[#4A3410] shadow-sm">
-          1
-        </span>
-      )}
+      <CountBadge count={active ? 1 : 0} />
 
       {open && (
-        <div className={cn("absolute top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg", panelSide(containerRef.current))}>
+        <div className={cn("absolute top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg", side)}>
           <div className="py-1">
             <button
               type="button"
@@ -1767,7 +1784,7 @@ const HistoryTile = memo(
                 so a grid can be scanned for it without opening anything.
                 Absent on a text result, which has no size. */}
             {item.quality && (
-              <span className="shrink-0 rounded-full bg-black/55 px-1 py-0.5 text-[7px] font-semibold text-white/85 backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]">
+              <span className="shrink-0 rounded-full bg-black/55 px-1 py-0.5 text-[6px] font-semibold text-white/85 backdrop-blur-sm md:text-[8px]">
                 {item.quality}
               </span>
             )}
@@ -1848,7 +1865,7 @@ const HistoryTile = memo(
         </div>
 
         <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
-          <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:px-2 md:text-[10px] lg:text-[11px]">
+          <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]">
             {item.userName}
           </span>
 

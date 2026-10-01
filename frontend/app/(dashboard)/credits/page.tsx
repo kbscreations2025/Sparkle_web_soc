@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Coins, Minus, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowLeft, Coins, Minus, Plus, RefreshCw } from "lucide-react";
 import {
   distributeCredits,
   fetchCreditTenant,
@@ -15,7 +15,6 @@ import {
   type updateMember,
   type CreditMember,
   type CreditTenantSummary,
-  type Member,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
@@ -24,7 +23,7 @@ import { DailyAllowanceControl } from "@/components/admin/DailyAllowanceControl"
 import { MemberRows } from "@/components/admin/MemberRows";
 import { CreditAmountDialog } from "@/components/admin/CreditAmountDialog";
 import { cn } from "@/lib/utils";
-import { Select } from "@/components/ui/Select";
+import { useMemberFilter } from "@/components/admin/MemberFilterBar";
 
 
 /**
@@ -177,39 +176,6 @@ function StaffCredits() {
  * what is in the pool — an organization that has run out has to ask
  * platform staff for more.
  */
-/** The audit log's filter field, so the two bars are the same control. */
-const FILTER_FIELD =
-  "h-[30px] rounded-lg border border-white/10 bg-white/[0.06] px-2.5 text-[11px] text-cream placeholder:text-faint outline-none focus:border-gold/40";
-
-/**
- * A native select dressed as the audit log's dropdown buttons. Native, not a
- * custom popover: two short fixed lists, and on a phone the OS picker is the
- * better control anyway.
- */
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: [value: string, label: string][];
-}) {
-  return (
-    <div className="min-w-0 flex-1 sm:flex-none">
-      <Select
-        value={value}
-        onChange={onChange}
-        ariaLabel={label}
-        options={options.map(([optionValue, optionLabel]) => ({ value: optionValue, label: optionLabel }))}
-        className={cn(FILTER_FIELD, "w-full cursor-pointer sm:w-auto", value && "border-gold/30 text-cream")}
-      />
-    </div>
-  );
-}
-
 function MyOrgCredits() {
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchMyOrgCredits>> | null>(null);
   const [roster, setRoster] = useState<Awaited<ReturnType<typeof fetchOrgMembers>> | null>(null);
@@ -222,9 +188,7 @@ function MyOrgCredits() {
     balance: number;
   } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [query, setQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const memberFilter = useMemberFilter();
 
   /*
    * Two requests: the pool and balances, and the roster with the grant
@@ -293,13 +257,6 @@ function MyOrgCredits() {
 
   const shortfall = data.pool.available === 0;
 
-  const needle = query.trim().toLowerCase();
-  const filtering = Boolean(needle || roleFilter || statusFilter);
-  const matches = (member: Member) =>
-    (!roleFilter || member.role === roleFilter) &&
-    (!statusFilter || member.status === statusFilter) &&
-    (!needle || `${member.name ?? ""} ${member.email}`.toLowerCase().includes(needle));
-  const shownCount = roster ? roster.members.filter(matches).length : 0;
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
@@ -311,7 +268,7 @@ function MyOrgCredits() {
 
         {/* The pool is the budget every hand-out comes out of, so it leads
             the page rather than sitting in the table with the people. */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-surface-raised p-4">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-surface-raised p-3 sm:p-4">
           {/* The organization's name lives here rather than in a page header
               above — one card instead of a title and a card, so the member
               list starts higher. Named, not "Organization pool": an admin in
@@ -320,10 +277,10 @@ function MyOrgCredits() {
             <Coins size={18} className="shrink-0 text-gold/70" />
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold text-cream">{data.tenant.name}</h1>
-              <p className="text-[11px] text-faint">Credit pool · what you have left to share out</p>
+              <p className="hidden text-[11px] text-faint sm:block">Credit pool · what you have left to share out</p>
             </div>
           </div>
-          <div className="flex items-center gap-5">
+          <div className="flex shrink-0 items-center gap-3 sm:gap-5">
             <div className="text-right">
               <p className="text-[9px] uppercase tracking-widest text-faint">Available</p>
               <p className={cn("text-lg font-semibold tabular-nums", shortfall ? "text-error" : "text-cream")}>
@@ -344,64 +301,14 @@ function MyOrgCredits() {
             copy of its markup. Reusing MemberRows is what makes the
             permissions editor available here at no extra cost, and means
             the two rosters can never drift apart. */}
-        <div className="space-y-2">
-          {/* The audit log's filter bar, field for field: one raised strip,
-              search taking the slack, the count on the right. On a phone the
-              search gets its own line and the two selects share the next. */}
+        {/* The filter bar is the table's header strip: one card, the bar on
+            top with no gap, so it reads as controls for this table. */}
+        <div className={roster ? "[&>*:nth-child(2)]:rounded-t-none" : "space-y-2"}>
+          {/* The audit log's filter bar, field for field: search taking the
+              slack, the count on the right. On a phone the two selects
+              shrink to icons so everything stays on one line. */}
           {roster ? (
-            <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-surface-raised/60 p-1.5">
-              <div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1">
-                <Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-faint" />
-                <input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search name or email"
-                  aria-label="Search members"
-                  className={cn(FILTER_FIELD, "w-full pl-7")}
-                />
-              </div>
-              <FilterSelect
-                label="Filter by role"
-                value={roleFilter}
-                onChange={setRoleFilter}
-                options={[
-                  ["", "Any role"],
-                  ["admin", "Admin"],
-                  ["user", "User"],
-                ]}
-              />
-              <FilterSelect
-                label="Filter by status"
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={[
-                  ["", "Any status"],
-                  ["active", "Active"],
-                  ["invited", "Invited"],
-                  ["suspended", "Suspended"],
-                  ["removed", "Removed"],
-                ]}
-              />
-              {filtering && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuery("");
-                    setRoleFilter("");
-                    setStatusFilter("");
-                  }}
-                  aria-label="Clear filters"
-                  title="Clear filters"
-                  className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-muted transition-colors hover:border-white/[0.18] hover:text-cream"
-                >
-                  <X size={12} />
-                </button>
-              )}
-              <span className="ml-auto whitespace-nowrap px-1 text-[11px] text-faint tabular-nums">
-                {filtering ? `${shownCount} of ${roster.members.length}` : roster.members.length} members
-              </span>
-            </div>
+            memberFilter.bar(roster.members)
           ) : (
             <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
               Members · {data.members.length}
@@ -411,7 +318,7 @@ function MyOrgCredits() {
           {roster ? (
             <MemberRows
               members={roster.members}
-              visible={matches}
+              visible={memberFilter.matches}
               groups={roster.groups}
               /* Only what this admin holds; the rest render locked. The
                  server refuses them too — this just avoids a dead end. */

@@ -44,7 +44,7 @@ const isId = (value) => mongoose.Types.ObjectId.isValid(value);
 function priceableModels() {
   return [
     {
-      group: "Image",
+      group: "Image (Gemini)",
       models: gemini.GEMINI_MODELS.map((id) => ({
         id,
         label: gemini.labelFor(id),
@@ -60,7 +60,7 @@ function priceableModels() {
       })),
     },
     {
-      group: "Video",
+      group: "Video (Gemini)",
       models: gemini.GEMINI_VIDEO_MODELS.map((id) => ({
         id,
         label: gemini.videoLabelFor(id),
@@ -77,8 +77,23 @@ function priceableModels() {
         .map(([id, spec]) => ({ id, label: spec.label, qualities: [...spec.resolutions].reverse() })),
     },
     {
-      group: "Text",
-      models: gemini.GEMINI_TEXT_MODELS.map((id) => ({ id, label: id, qualities: [] })),
+      group: "Image (OpenRouter)",
+      // Only the ones picked directly; the Gemini-equivalent ids stand in for
+      // the Gemini models and bill under those.
+      models: openrouter.OPENROUTER_MODELS.filter((id) => !id.startsWith("google/")).map((id) => ({
+        id,
+        label: openrouter.labelFor(id),
+        qualities: openrouter.qualitiesFor(id),
+      })),
+    },
+    {
+      group: "Text (Gemini)",
+      models: gemini.GEMINI_TEXT_MODELS.map((id) => ({
+        id,
+        // "gemini-2.5-pro" → "Gemini 2.5 Pro"
+        label: id.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        qualities: [],
+      })),
     },
   ];
 }
