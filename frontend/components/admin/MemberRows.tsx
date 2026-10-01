@@ -7,6 +7,7 @@ import { Modal } from "@/components/admin/Modal";
 import { DailyAllowanceControl } from "@/components/admin/DailyAllowanceControl";
 import { COMPACT_CELL as CELL, COMPACT_HEAD as HEAD, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
+import { Select } from "@/components/ui/Select";
 
 const ROLES = ["user", "admin"];
 const STATUSES = ["invited", "active", "suspended", "removed"];
@@ -335,38 +336,28 @@ function MemberRow({
 
         <td className={cn(CELL, "hidden lg:table-cell")}>
           {/* Editable inline: role is only a label, so this changes nothing about access. */}
-          <select
+          <Select
             value={member.role}
-            onChange={(event) => onPatch({ role: event.target.value })}
+            onChange={(role) => onPatch({ role })}
             disabled={readOnly}
-            aria-label={`Role label for ${member.email}`}
+            ariaLabel={`Role label for ${member.email}`}
+            options={ROLES.map((role) => ({ value: role, label: role.toUpperCase() }))}
             className="rounded border border-white/10 bg-white/[0.06] px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cream outline-none focus:border-gold/40 disabled:opacity-70"
-          >
-            {ROLES.map((role) => (
-              <option key={role} value={role}>
-                {role}
-              </option>
-            ))}
-          </select>
+          />
         </td>
 
         <td className={cn(CELL, "hidden sm:table-cell")}>
-          <select
+          <Select
             value={member.status}
-            onChange={(event) => onPatch({ status: event.target.value })}
+            onChange={(status) => onPatch({ status })}
             disabled={readOnly}
-            aria-label={`Account status for ${member.email}`}
+            ariaLabel={`Account status for ${member.email}`}
+            options={STATUSES.map((status) => ({ value: status, label: status.toUpperCase() }))}
             className={cn(
               "rounded border px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide outline-none disabled:opacity-70",
               STATUS_TONE[member.status] ?? STATUS_TONE.removed
             )}
-          >
-            {STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
+          />
         </td>
 
         <td className={cn(CELL, "hidden lg:table-cell")}>
@@ -411,6 +402,18 @@ function MemberRow({
           {/* Read as a stepper: take away on the left, the figure, add on
               the right. Both controls on one side made the pair read as two
               unrelated buttons that happened to sit next to a number. */}
+          {/* The daily limit sits above the stepper, so every row's figures
+              line up in one column whether or not a limit is set. */}
+          <div className="inline-flex flex-col items-center gap-1">
+            {dailyAllowance && (
+              <DailyAllowanceControl
+                userId={member.id}
+                holder={member.name || member.email}
+                current={member.credits.dailyAllowance}
+                tenantId={dailyAllowance.tenantId}
+                onSaved={dailyAllowance.onSaved}
+              />
+            )}
           <div className="inline-flex items-center gap-1.5">
             {onReclaimCredits && (
               <button
@@ -439,15 +442,7 @@ function MemberRow({
                 <Plus size={11} />
               </button>
             )}
-            {dailyAllowance && (
-              <DailyAllowanceControl
-                userId={member.id}
-                holder={member.name || member.email}
-                current={member.credits.dailyAllowance}
-                tenantId={dailyAllowance.tenantId}
-                onSaved={dailyAllowance.onSaved}
-              />
-            )}
+          </div>
           </div>
         </td>
 

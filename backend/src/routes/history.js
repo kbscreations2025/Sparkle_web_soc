@@ -305,10 +305,27 @@ router.get("/", async (req, res) => {
     query.createdAt = { ...query.createdAt, $lte: toDate };
   }
 
-  const generations = await Generation.find(query)
-    .sort({ createdAt: -1 })
-    .limit(limit + 1)
-    .lean();
+  /*
+   * Every image the filters match, not just the ones on this page — the
+   * badge shows this. Only on page one: a cursor page would count a slice.
+   */
+  const totalPromise =
+    before || after
+      ? Promise.resolve(null)
+      : Generation.aggregate([
+          // Cast through a query first: `aggregate` skips Mongoose's casting,
+          // so string ids and dates in the filter would otherwise match nothing.
+          { $match: Generation.find(query).cast() },
+          { $group: { _id: null, images: { $sum: { $size: { $ifNull: ["$response.outputAssets", []] } } } } },
+        ]).then((rows) => rows[0]?.images ?? 0);
+
+  const [generations, totalImages] = await Promise.all([
+    Generation.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit + 1)
+      .lean(),
+    totalPromise,
+  ]);
 
   const hasMore = generations.length > limit;
   const page = hasMore ? generations.slice(0, limit) : generations;
@@ -316,6 +333,7 @@ router.get("/", async (req, res) => {
   res.json({
     status: "success",
     items: page.map((generation) => toHistoryItem(generation, req.dbUser)),
+    ...(totalImages === null ? {} : { totalImages }),
     nextCursor: hasMore ? page[page.length - 1].createdAt.toISOString() : null,
     canReadTeam: hasPermission(req.dbUser, "result.read.others"),
   });

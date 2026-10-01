@@ -55,7 +55,7 @@ export function TopNav() {
           onClick={() => setDrawerOpen((value) => !value)}
           aria-expanded={drawerOpen}
           aria-label={drawerOpen ? "Close menu" : "Open menu"}
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-muted hover:text-cream hover:bg-white/[0.07] transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-muted hover:text-cream hover:bg-white/[0.07] transition-colors"
         >
           {drawerOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
@@ -69,7 +69,7 @@ export function TopNav() {
               transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
               // Labels come back here: an icon grid is guesswork on a phone,
               // where there's no hover to reveal the tooltip.
-              className="fixed left-2 right-2 top-[3.75rem] max-h-[calc(100dvh-4.5rem)] overflow-y-auto rounded-xl border border-white/10 bg-surface-raised shadow-lg p-1.5 grid grid-cols-2 gap-1"
+              className="fixed left-2 right-2 top-[3.25rem] max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-xl border border-white/10 bg-surface-raised shadow-lg p-1.5 grid grid-cols-2 gap-1"
             >
               {navItems.map(({ id, label, icon: Icon, href }) => {
                 const isActive = href !== undefined && pathname === href;
@@ -110,7 +110,7 @@ export function TopNav() {
           otherwise sit empty on the left — the route trail fills it, unless
           the page has put its own controls here instead. */}
       {toolbar ? (
-        <div className="hidden min-w-0 flex-1 items-center gap-2 md:flex">{toolbar}</div>
+        <div className="flex min-w-0 flex-1 items-center gap-2">{toolbar}</div>
       ) : (
         <Breadcrumbs />
       )}
@@ -132,14 +132,14 @@ export function TopNav() {
 
         {/* Credits and the account avatar as one pill, not two — a divider
             between them instead of a gap that reads as unrelated controls. */}
-        <div className="flex items-center gap-2 pl-1.5 pr-1.5 py-1 rounded-full bg-surface-raised/80 backdrop-blur-md border border-gold/25">
+        <div className="flex items-center gap-1.5 md:gap-2 px-1 py-0.5 md:px-1.5 md:py-px lg:py-1 rounded-full bg-surface-raised/80 backdrop-blur-md border border-gold/25">
           <span
             aria-hidden
-            className="relative w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.4)]"
+            className="relative w-[18px] h-[18px] md:w-[22px] md:h-[22px] rounded-full flex items-center justify-center shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.4)]"
             style={{ background: "repeating-conic-gradient(var(--color-gold-dim) 0deg 6deg, var(--color-gold-bright) 6deg 12deg)" }}
           >
             <span
-              className="absolute inset-[2px] rounded-full flex items-center justify-center text-[11px] font-bold leading-none text-[#4A3410]"
+              className="absolute inset-[2px] rounded-full flex items-center justify-center text-[9px] md:text-[11px] font-bold leading-none text-[#4A3410]"
               style={{ background: "linear-gradient(to bottom right, var(--color-gold-bright), var(--color-gold), var(--color-gold-dim))" }}
             >
               ₹
@@ -158,7 +158,7 @@ export function TopNav() {
                 : "Loading your balance…"
             }
             className={cn(
-              "text-xs font-semibold tabular-nums leading-none",
+              "text-[11px] md:text-xs font-semibold tabular-nums leading-none",
               // Red is "you cannot run anything", which is only true once the
               // frozen credits are gone too. Nothing spendable *because* runs
               // are holding it all is a wait, not a wall.
@@ -182,9 +182,9 @@ export function TopNav() {
             </span>
           )}
 
-          <span aria-hidden className="w-px h-5 shrink-0 bg-gold/20" />
+          <span aria-hidden className="w-px h-4 md:h-5 shrink-0 bg-gold/20" />
 
-          <AccountMenu avatarClassName="w-7 h-7" />
+          <AccountMenu avatarClassName="w-6 h-6 md:w-7 md:h-7" />
         </div>
       </div>
     </NavBar>

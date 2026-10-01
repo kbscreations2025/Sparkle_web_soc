@@ -22,6 +22,7 @@ import {
 import { MemberRows } from "@/components/admin/MemberRows";
 import { AddMemberPanel } from "@/components/admin/AddMemberPanel";
 import { Modal } from "@/components/admin/Modal";
+import { Select } from "@/components/ui/Select";
 import { CELL, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
 
@@ -401,18 +402,14 @@ export default function ConsolePage() {
                           </span>
                         </td>
                         <td className={CELL} onClick={(event) => event.stopPropagation()}>
-                          <select
+                          <Select
                             value={org.timezone}
-                            onChange={(event) => changeTimezone(org, event.target.value)}
+                            options={timezoneOptions(org.timezone).map((zone) => ({ value: zone, label: zone }))}
+                            onChange={(zone) => changeTimezone(org, zone)}
                             title="When a new day starts for this organization's daily credit allowances"
+                            searchPlaceholder="Search timezones…"
                             className="max-w-[150px] rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-cream focus:border-gold/30 focus:outline-none"
-                          >
-                            {timezoneOptions(org.timezone).map((zone) => (
-                              <option key={zone} value={zone}>
-                                {zone}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </td>
                         <td className={cn(CELL, "text-center tabular-nums text-cream")}>{org.adminCount}</td>
                         <td className={cn(CELL, "text-center tabular-nums text-cream")}>{org.memberCount}</td>

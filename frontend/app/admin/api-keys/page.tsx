@@ -15,6 +15,7 @@ import {
 import { Modal } from "@/components/admin/Modal";
 import { CELL, HEAD_ROW, TABLE_FRAME, NESTED_TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
+import { Select } from "@/components/ui/Select";
 
 const FIELD =
   "w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-cream placeholder:text-faint outline-none focus:border-gold/40";
@@ -553,13 +554,12 @@ function AddKeyForm({
     >
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Field label="Provider">
-          <select value={provider} onChange={(event) => setProvider(event.target.value)} className={FIELD}>
-            {providerNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={provider}
+            onChange={setProvider}
+            options={providerNames.map((name) => ({ value: name, label: name }))}
+            className={cn(FIELD, "w-full")}
+          />
         </Field>
 
         <LabelField value={label} onChange={setLabel} />

@@ -1,7 +1,7 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ChevronDown, Coins, Minus, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowLeft, Coins, Minus, Plus, RefreshCw, Search, X } from "lucide-react";
 import {
   distributeCredits,
   fetchCreditTenant,
@@ -24,6 +24,7 @@ import { DailyAllowanceControl } from "@/components/admin/DailyAllowanceControl"
 import { MemberRows } from "@/components/admin/MemberRows";
 import { CreditAmountDialog } from "@/components/admin/CreditAmountDialog";
 import { cn } from "@/lib/utils";
+import { Select } from "@/components/ui/Select";
 
 
 /**
@@ -197,24 +198,14 @@ function FilterSelect({
   options: [value: string, label: string][];
 }) {
   return (
-    <div className="relative min-w-0 flex-1 sm:flex-none">
-      <select
+    <div className="min-w-0 flex-1 sm:flex-none">
+      <Select
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        aria-label={label}
-        className={cn(
-          FILTER_FIELD,
-          "w-full cursor-pointer appearance-none pr-7 sm:w-auto",
-          value && "border-gold/30 text-cream"
-        )}
-      >
-        {options.map(([optionValue, optionLabel]) => (
-          <option key={optionValue} value={optionValue}>
-            {optionLabel}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-faint" />
+        onChange={onChange}
+        ariaLabel={label}
+        options={options.map(([optionValue, optionLabel]) => ({ value: optionValue, label: optionLabel }))}
+        className={cn(FILTER_FIELD, "w-full cursor-pointer sm:w-auto", value && "border-gold/30 text-cream")}
+      />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -15,6 +15,7 @@ import {
   Loader2,
   type LucideIcon,
   MessageCircle,
+  MoreHorizontal,
   Eye,
   ArrowUp,
   Newspaper,
@@ -64,7 +65,7 @@ const TOOL_OPTIONS = TOOLS.map((t) => ({ id: t.id, label: t.label }));
  * — the same grouping the lightbox toolbar uses.
  */
 const TILE_ACTION_GROUP =
-  "flex shrink-0 items-center gap-0.5 rounded-full border border-white/20 bg-black/55 p-0.5 backdrop-blur-sm";
+  "flex h-4 shrink-0 items-center rounded-full border border-white/20 bg-black/55 px-0.5 backdrop-blur-sm md:h-5";
 
 /**
  * One action inside that pill.
@@ -83,8 +84,8 @@ const TILE_ACTION_GROUP =
  * adds a column.
  */
 const TILE_ACTION_BUTTON =
-  "flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-white/25 md:h-5 md:w-5";
-const TILE_ACTION_ICON = "text-white/85 md:h-3 md:w-3";
+  "flex h-3.5 w-4 items-center justify-center rounded-full transition-colors hover:bg-white/25 md:h-4 md:w-5";
+const TILE_ACTION_ICON = "h-2.5 w-2.5 text-white/85 md:h-3 md:w-3";
 
 /** Row gap between tiles, kept as one constant since both the CSS grid and the row-height estimate must agree. */
 const GRID_GAP = 10;
@@ -188,6 +189,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [serverTotal, setServerTotal] = useState<number | null>(null);
   const [canReadTeam, setCanReadTeam] = useState(false);
   const [selected, setSelected] = useState<HistoryItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -322,6 +324,7 @@ export default function HistoryPage() {
         // Replaced, not appended: this is page one of a different question.
         setItems(res.items ?? []);
         setNextCursor(res.nextCursor ?? null);
+        setServerTotal(typeof res.totalImages === "number" ? res.totalImages : null);
         setCanReadTeam(Boolean(res.canReadTeam));
       }
       setLoading(false);
@@ -415,10 +418,16 @@ export default function HistoryPage() {
     loadMore();
   }, [view, virtualRows, rows.length, loadMore]);
 
-  const totalImages = useMemo(
+  const loadedImages = useMemo(
     () => visibleItems.reduce((sum, item) => sum + item.outputs.length, 0),
     [visibleItems]
   );
+  /*
+   * The server's count of everything the filters match, not what has been
+   * paged in. Never below what is on screen — new runs arriving live, or an
+   * older backend that sends no total, fall back to the loaded count.
+   */
+  const totalImages = Math.max(serverTotal ?? 0, loadedImages);
 
   /**
    * The kits the range allows, by when they were last touched — which is
@@ -620,11 +629,22 @@ export default function HistoryPage() {
     // Same reach as the grid, so the Members filter carries across the two
     // tabs — the server narrows `team` back to own work for anyone without
     // the permission for it.
-    listMarketingKits({ limit: 50, scope: "team" }).then((res) => {
-      if (cancelled) return;
-      setKits(res.status === "success" ? (res.kits ?? []) : []);
+    // Every page, not just the first: kits are filtered here in the browser,
+    // so the badge and the filters are only right if all of them are loaded.
+    (async () => {
+      const all: MarketingKitSummary[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 40; page++) {
+        const res = await listMarketingKits({ limit: 50, scope: "team", cursor });
+        if (cancelled) return;
+        if (res.status !== "success") break;
+        all.push(...(res.kits ?? []));
+        if (!res.nextCursor) break;
+        cursor = res.nextCursor;
+      }
+      setKits(all);
       setKitsLoading(false);
-    });
+    })();
 
     return () => {
       cancelled = true;
@@ -682,10 +702,39 @@ export default function HistoryPage() {
   const renderFilters = (compact: boolean) => (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        {/* A segmented toggle, not two separate pills — one bordered group,
-            squared off, split by a single divider. The count sits on the
-            corner of the tab that is showing: images under History, saved
-            decks under Marketing Kits. */}
+        {renderViewTabs(compact)}
+        {renderSecondaryFilters(compact)}
+      </div>
+      {renderToolFilter(compact)}
+    </>
+  );
+
+  /** How many of the filters folded into the phone's "more" menu are set — its badge. */
+  const moreActiveCount =
+    selectedMembers.length +
+    (view === "history" ? selectedQualities.length + selectedTypes.length : 0) +
+    (dateRange.from || dateRange.to ? 1 : 0);
+
+  /*
+   * The phone layout, in the header itself: the view toggle and Tools stay
+   * out, everything else folds into one "more" menu. A second bar of
+   * filters under the header cost a row of a screen that's short already.
+   */
+  const renderPhoneFilters = () => (
+    <div className="flex min-w-0 flex-1 items-center justify-between gap-1.5">
+      <div className="flex items-center gap-1.5">
+        {renderViewTabs(true)}
+        <MoreFilters activeCount={moreActiveCount}>{renderSecondaryFilters(false)}</MoreFilters>
+      </div>
+      {renderToolFilter(true)}
+    </div>
+  );
+
+  /* A segmented toggle, not two separate pills — one bordered group,
+     squared off, split by a single divider. The count sits on the corner of
+     the tab that is showing: images under History, saved decks under
+     Marketing Kits. */
+  const renderViewTabs = (compact: boolean) => (
         <div className="flex items-center rounded-md border border-white/10">
           <ViewTab
             icon={History}
@@ -708,6 +757,10 @@ export default function HistoryPage() {
             badgeLabel={`${badgeCount} kits`}
           />
         </div>
+  );
+
+  const renderSecondaryFilters = (compact: boolean) => (
+    <>
         {/* Unlike the two below, this one shows on both tabs: a date range
             narrows a list of documents exactly as well as a grid of
             pictures. */}
@@ -744,12 +797,14 @@ export default function HistoryPage() {
             />
           </>
         )}
-      </div>
+    </>
+  );
 
-      {/* The same control in the same place on both tabs, over whichever
-          dimension actually separates the rows there: which tool made a
-          result, or which kind a kit is. */}
-      {view === "history" ? (
+  /* The same control in the same place on both tabs, over whichever
+     dimension actually separates the rows there: which tool made a result,
+     or which kind a kit is. */
+  const renderToolFilter = (compact: boolean) =>
+      view === "history" ? (
         <ToolFilter
           selected={selectedTools}
           onChange={(next) => updateFilters(next, selectedMembers)}
@@ -764,16 +819,26 @@ export default function HistoryPage() {
           }}
           compact={compact}
         />
-      )}
+      );
+
+  /*
+   * Icons only on tablets and small laptops, labels from `xl` up. The
+   * labelled row is ~700px wide, and between `md` (where it moves into the
+   * header) and `xl` the header has less than that once the sidebar and the
+   * account menu are counted — it wrapped to a second line the fixed-height
+   * header then clipped.
+   */
+  const filterControls = hasAccess ? (
+    <>
+      <div className="flex min-w-0 flex-1 md:hidden">{renderPhoneFilters()}</div>
+      <div className="hidden min-w-0 flex-1 items-center justify-between gap-2 md:flex xl:hidden">{renderFilters(true)}</div>
+      <div className="hidden min-w-0 flex-1 items-center justify-between gap-2 xl:flex">{renderFilters(false)}</div>
     </>
-  );
+  ) : null;
 
-  const filterControls = hasAccess ? renderFilters(false) : null;
-
-  // From `md` up these render in the header, replacing the breadcrumb —
+  // These render in the header at every width, replacing the breadcrumb —
   // there's no room for both there, and the filters are the more useful of
-  // the two on this page. Below `md` the header has no room for them either,
-  // so they stay in the page body instead (see the `md:hidden` bar below).
+  // the two on this page.
   usePageToolbar(filterControls);
 
   if (!hasAccess) {
@@ -786,9 +851,6 @@ export default function HistoryPage() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-white/[0.06] px-3 py-2 md:hidden">
-        {hasAccess ? renderFilters(true) : null}
-      </div>
 
       {/* A delete that fails has to say so. Silence here was the whole
           problem: the tile stayed, and nothing explained why. */}
@@ -988,7 +1050,7 @@ function ViewTab({
         title={label}
         className={cn(
           "flex items-center justify-center text-xs font-medium transition-colors",
-          compact ? "h-8 w-9" : "gap-1.5 px-3 py-1.5",
+          compact ? "h-7 w-8 md:h-8 md:w-8" : "gap-1.5 px-3 py-1.5",
           // The divider belongs to the left half, so the group reads as one
           // control however many tabs it grows to.
           side === "left" ? "rounded-l-[5px] border-r border-white/10" : "rounded-r-[5px]",
@@ -1189,7 +1251,7 @@ function CheckboxFilter({
         title={label}
         className={cn(
           "flex items-center rounded-full border border-white/10 bg-surface-raised font-medium text-cream transition-colors hover:border-white/20",
-          compact ? "h-8 w-8 justify-center" : "gap-1.5 py-1.5 pl-3 pr-2.5 text-xs"
+          compact ? "h-7 w-7 justify-center md:h-8 md:w-8" : "gap-1.5 py-1.5 pl-3 pr-2.5 text-xs"
         )}
       >
         <Icon size={compact ? 14 : 12} className="text-faint" />
@@ -1213,7 +1275,7 @@ function CheckboxFilter({
         <div
           role="listbox"
           aria-multiselectable="true"
-          className="absolute right-0 top-full z-10 mt-2 w-48 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg"
+          className={cn("absolute top-full z-50 mt-2 w-48 overflow-hidden", panelSide(containerRef.current), " rounded-lg border border-white/10 bg-surface-raised shadow-lg")}
         >
           {options.length === 0 ? (
             <p className="px-3 py-2.5 text-[11px] text-faint">{emptyLabel}</p>
@@ -1320,6 +1382,59 @@ function describeRange(range: DateRange) {
   return "Date";
 }
 
+/**
+ * The phone header's "more" button: Date, Members, Quality and Type folded
+ * behind one icon so the header keeps room for the view toggle and Tools.
+ * The badge counts how many of the hidden filters are set, so a narrowed
+ * grid never looks unfiltered.
+ */
+function MoreFilters({ activeCount, children }: { activeCount: number; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback(() => setOpen(false), []);
+  useDismissable(containerRef, open, closeMenu);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((wasOpen) => !wasOpen)}
+        aria-expanded={open}
+        aria-label="More filters"
+        title="More filters"
+        className={cn(
+          "relative flex h-7 w-7 items-center justify-center rounded-full border bg-surface-raised transition-colors",
+          open || activeCount > 0 ? "border-gold/30 text-gold" : "border-white/10 text-cream hover:border-white/20"
+        )}
+      >
+        <MoreHorizontal size={15} />
+        {activeCount > 0 && (
+          <span className="pointer-events-none absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410]">
+            {activeCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-2 flex w-max flex-col items-stretch gap-2 rounded-xl border border-white/10 bg-surface-raised p-2 shadow-lg [&>*]:w-full">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Which edge a filter's panel hangs from. Right-aligned panels opened
+ * leftward, which for the icons near the left of the header put them under
+ * the sidebar; a button in the left half of the screen opens rightward.
+ */
+function panelSide(anchor: HTMLElement | null) {
+  if (!anchor || typeof window === "undefined") return "right-0";
+  const rect = anchor.getBoundingClientRect();
+  return rect.left + rect.width / 2 < window.innerWidth / 2 ? "left-0" : "right-0";
+}
+
 /** When to show results from — presets, or an exact pair of dates. */
 function DateFilter({
   range,
@@ -1347,7 +1462,7 @@ function DateFilter({
         title={active ? describeRange(range) : "Date range"}
         className={cn(
           "flex items-center rounded-full border border-white/10 bg-surface-raised text-xs font-medium text-cream transition-colors hover:border-white/20",
-          compact ? "h-8 w-8 justify-center" : "gap-1.5 py-1.5 pl-3 pr-2.5"
+          compact ? "h-7 w-7 justify-center md:h-8 md:w-8" : "gap-1.5 py-1.5 pl-3 pr-2.5"
         )}
       >
         <CalendarRange size={compact ? 14 : 12} className="text-faint" />
@@ -1366,7 +1481,7 @@ function DateFilter({
       )}
 
       {open && (
-        <div className="absolute right-0 top-full z-10 mt-2 w-60 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg">
+        <div className={cn("absolute top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg", panelSide(containerRef.current))}>
           <div className="py-1">
             <button
               type="button"

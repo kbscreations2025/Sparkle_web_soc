@@ -15,6 +15,7 @@ import {
 import { Modal } from "@/components/admin/Modal";
 import { CELL, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
+import { Select } from "@/components/ui/Select";
 
 const FIELD =
   "w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-cream placeholder:text-faint outline-none focus:border-gold/40";
@@ -411,74 +412,61 @@ function RuleForm({
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Organization" hint="Any = applies to every customer.">
-            <select value={tenantId} onChange={(e) => setTenantId(e.target.value)} className={FIELD}>
-              <option value={ANY}>Any (global)</option>
-              {catalogue.organizations.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={tenantId}
+              onChange={setTenantId}
+              options={[
+                { value: ANY, label: "Any (global)" },
+                ...catalogue.organizations.map((org) => ({ value: org.id, label: org.name })),
+              ]}
+              className={cn(FIELD, "w-full")}
+            />
           </Field>
 
           <Field label="Model">
-            <select value={modelId} onChange={(e) => handleModelChange(e.target.value)} className={FIELD}>
-              <option value={ANY}>Any model</option>
-              {catalogue.models.map((group) => (
-                <optgroup key={group.group} label={group.group}>
-                  {group.models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <Select
+              value={modelId}
+              onChange={handleModelChange}
+              options={[
+                { value: ANY, label: "Any model" },
+                ...catalogue.models.flatMap((group) =>
+                  group.models.map((model) => ({ value: model.id, label: model.label, group: group.group }))
+                ),
+              ]}
+              className={cn(FIELD, "w-full")}
+            />
           </Field>
 
           <Field label="Tool">
-            <select value={tool} onChange={(e) => setTool(e.target.value)} className={FIELD}>
-              <option value={ANY}>Any tool</option>
-              {catalogue.tools.map((key) => (
-                <option key={key} value={key}>
-                  {key}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={tool}
+              onChange={setTool}
+              options={[{ value: ANY, label: "Any tool" }, ...catalogue.tools.map((key) => ({ value: key, label: key }))]}
+              className={cn(FIELD, "w-full")}
+            />
           </Field>
 
           <Field
             label="Quality"
             hint={modelId ? undefined : "Pick a model first — the sizes differ per model."}
           >
-            <select
+            <Select
               value={quality}
-              onChange={(e) => setQuality(e.target.value)}
+              onChange={setQuality}
               disabled={qualityOptions.length === 0}
-              className={cn(FIELD, "disabled:opacity-50")}
-            >
-              <option value={ANY}>Any quality</option>
-              {qualityOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+              options={[{ value: ANY, label: "Any quality" }, ...qualityOptions.map((option) => ({ value: option, label: option }))]}
+              className={cn(FIELD, "w-full disabled:opacity-50")}
+            />
           </Field>
         </div>
 
         <Field label="Unit" hint="What both rates below are multiplied by.">
-          <select
+          <Select
             value={unit}
-            onChange={(e) => setUnit(e.target.value as PricingUnit)}
-            className={FIELD}
-          >
-            {catalogue.units.map((option) => (
-              <option key={option} value={option}>
-                {UNIT_LABELS[option]}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => setUnit(next as PricingUnit)}
+            options={catalogue.units.map((option) => ({ value: option, label: UNIT_LABELS[option] }))}
+            className={cn(FIELD, "w-full")}
+          />
         </Field>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -490,17 +478,12 @@ function RuleForm({
             }
           >
             <div className="flex gap-2">
-              <select
+              <Select
                 value={providerCurrency}
-                onChange={(e) => setProviderCurrency(e.target.value)}
+                onChange={setProviderCurrency}
+                options={catalogue.currencies.map((code) => ({ value: code, label: code }))}
                 className={cn(FIELD, "w-24 shrink-0")}
-              >
-                {catalogue.currencies.map((code) => (
-                  <option key={code} value={code}>
-                    {code}
-                  </option>
-                ))}
-              </select>
+              />
               <input
                 value={providerRate}
                 onChange={(event) => setProviderRate(event.target.value)}

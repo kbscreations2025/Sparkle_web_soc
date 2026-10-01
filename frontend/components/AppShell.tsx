@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * because they must always agree — the nav sits outside the flow, so if they
  * drift the first screenful of content slides under it.
  */
-export const NAV_HEIGHT = "h-14 md:h-16";
+export const NAV_HEIGHT = "h-12 md:h-14 lg:h-16";
 const NAV_OFFSET = "pt-14 md:pt-16";
 
 /**

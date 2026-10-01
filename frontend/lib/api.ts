@@ -1598,7 +1598,8 @@ export function fetchHistory(
   if (params.limit) query.set("limit", String(params.limit));
   if (params.scope === "team") query.set("scope", "team");
   const qs = query.toString();
-  return apiRequest<{ items: HistoryItem[]; nextCursor: string | null; canReadTeam: boolean }>(
+  /** `totalImages`: every image the filters match, sent with page one only. */
+  return apiRequest<{ items: HistoryItem[]; nextCursor: string | null; canReadTeam: boolean; totalImages?: number }>(
     `/api/history${qs ? `?${qs}` : ""}`
   );
 }
