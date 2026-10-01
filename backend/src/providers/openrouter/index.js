@@ -194,7 +194,134 @@ async function generateImage({ apiKey, modelId, prompt, images, quality, aspectR
   return { base64: item.b64_json, mimeType: item.media_type || "image/png", text: null };
 }
 
+/**
+ * Video models served through OpenRouter's `/videos` endpoint. Ids are from
+ * OpenRouter's own Playground exports. The Veo ids here double as the
+ * fallback for the native Gemini Veo models (see modelEquivalents.js); the
+ * rest are only reachable through an OpenRouter key.
+ *
+ * `durations` and `resolutions` are what this app offers per model — the
+ * route clamps to them, so a pick the model can't run never reaches it.
+ */
+const OPENROUTER_VIDEO_MODELS = {
+  "google/veo-3.1": { label: "Veo 3.1 Standard", durations: [4, 6, 8], resolutions: ["720p", "1080p"] },
+  "google/veo-3.1-fast": { label: "Veo 3.1 Fast", durations: [4, 6, 8], resolutions: ["720p", "1080p"] },
+  "google/veo-3.1-lite": { label: "Veo 3.1 Lite", durations: [4, 6, 8], resolutions: ["720p", "1080p"] },
+  "kwaivgi/kling-v3.0-pro": { label: "Kling 3.0 Pro", durations: [5, 10], resolutions: ["720p", "1080p"] },
+  "kwaivgi/kling-v3.0-std": { label: "Kling 3.0 Standard", durations: [5, 10], resolutions: ["720p"] },
+  "openai/sora-2-pro": { label: "Sora 2 Pro", durations: [4, 8, 12], resolutions: ["720p", "1080p"] },
+  "alibaba/wan-3.0": { label: "Wan 3.0", durations: [5], resolutions: ["720p", "1080p"] },
+  "alibaba/wan-2.7": { label: "Wan 2.7", durations: [5], resolutions: ["720p", "1080p"] },
+  "bytedance/seedance-2.5": { label: "Seedance 2.5", durations: [4, 5, 10], resolutions: ["720p", "1080p"] },
+  "bytedance/seedance-2.0": { label: "Seedance 2.0", durations: [4, 5, 10], resolutions: ["720p", "1080p"] },
+  "bytedance/seedance-2.0-fast": { label: "Seedance 2.0 Fast", durations: [4, 5, 10], resolutions: ["720p"] },
+};
+
+function isKnownVideoModel(modelId) {
+  return Object.hasOwn(OPENROUTER_VIDEO_MODELS, modelId);
+}
+
+function videoLabelFor(modelId) {
+  return OPENROUTER_VIDEO_MODELS[modelId]?.label || modelId;
+}
+
+/** Same cadence and ceiling as gemini.js's Veo polling — see there. */
+const VIDEO_POLL_INTERVAL_MS = 5000;
+const VIDEO_MAX_POLLS = 120;
+
+async function openrouterFetch(apiKey, path, init = {}) {
+  const res = await fetch(path.startsWith("http") ? path : `${OPENROUTER_BASE_URL}${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${apiKey}`, ...(init.body ? { "Content-Type": "application/json" } : {}) },
+    signal: AbortSignal.timeout(init.timeoutMs || 60_000),
+  });
+  if (!res.ok) {
+    const raw = await res.text().catch(() => "");
+    const err = new Error(`OpenRouter video request failed (${res.status})`);
+    err.status = res.status;
+    err.error = { message: raw || res.statusText };
+    throw err;
+  }
+  return res;
+}
+
+/**
+ * Submit, poll, download — OpenRouter's video API is asynchronous: the POST
+ * answers 202 with a job id, the job is polled until `completed`/`failed`,
+ * and the bytes come from `/videos/{id}/content` with the same key.
+ *
+ * `views` are `[{ mimeType, base64 }]`. One view is pinned as the first
+ * frame; several go in as `input_references` instead, mirroring the
+ * first-frame vs reference split the Gemini path makes.
+ *
+ * Returns `{ base64, mimeType, text }` like every other generator here.
+ */
+async function generateVideo({ apiKey, modelId, prompt, views, aspectRatio, resolution, durationSeconds, onPoll }) {
+  const asUrl = ({ mimeType, base64 }) => ({ type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } });
+  const imageInput = !views?.length
+    ? {}
+    : views.length === 1
+      ? { frame_images: [{ ...asUrl(views[0]), frame_type: "first_frame" }] }
+      : { input_references: views.map(asUrl) };
+
+  const submitted = await withRetry(async () =>
+    (
+      await openrouterFetch(apiKey, "/videos", {
+        method: "POST",
+        body: JSON.stringify({
+          model: modelId,
+          prompt,
+          duration: durationSeconds,
+          resolution,
+          aspect_ratio: aspectRatio,
+          ...imageInput,
+        }),
+      })
+    ).json()
+  );
+
+  if (!submitted?.id) throw new Error("OpenRouter did not return a video job id");
+  const pollUrl = submitted.polling_url || `/videos/${submitted.id}`;
+
+  let job = submitted;
+  for (let poll = 0; job.status !== "completed" && job.status !== "failed" && poll < VIDEO_MAX_POLLS; poll++) {
+    await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_INTERVAL_MS));
+    job = await withRetry(async () => (await openrouterFetch(apiKey, pollUrl)).json());
+    try {
+      await onPoll?.(poll + 1, VIDEO_MAX_POLLS);
+    } catch (err) {
+      console.error("[openrouter] video poll progress failed:", err.message);
+    }
+  }
+
+  if (job.status === "failed") {
+    const err = new Error(job.error?.message || job.error || "Video generation failed");
+    err.error = { message: String(job.error?.message || job.error || "") };
+    throw err;
+  }
+  if (job.status !== "completed") {
+    const err = new Error("The video is taking longer than expected. Try a shorter duration or a faster model.");
+    err.code = "video_timeout";
+    err.expose = true;
+    err.noRetry = true;
+    throw err;
+  }
+
+  const contentUrl = job.unsigned_urls?.[0] || `/videos/${submitted.id}/content?index=0`;
+  const res = await withRetry(() => openrouterFetch(apiKey, contentUrl, { timeoutMs: 300_000 }));
+  const buffer = Buffer.from(await res.arrayBuffer());
+  // Same guard as gemini.js: a 0-byte video must fail the job, not be stored.
+  if (!buffer.length) throw new Error("The generated video downloaded as an empty file");
+
+  const mimeType = (res.headers.get("content-type") || "video/mp4").split(";")[0];
+  return { base64: buffer.toString("base64"), mimeType: mimeType.startsWith("video/") ? mimeType : "video/mp4", text: null };
+}
+
 module.exports = {
+  OPENROUTER_VIDEO_MODELS,
+  isKnownVideoModel,
+  videoLabelFor,
+  generateVideo,
   OPENROUTER_MODELS,
   DEFAULT_OPENROUTER_MODEL,
   qualityFor,

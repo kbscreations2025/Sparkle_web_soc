@@ -16,8 +16,30 @@ const {
   REFERENCE_MODE,
 } = require("../prompts/video");
 const gemini = require("../providers/gemini");
+const openrouter = require("../providers/openrouter");
 
 const router = express.Router();
+
+/**
+ * Which provider a requested video model belongs to. Veo ids stay on Gemini
+ * (with OpenRouter as a priority-ordered fallback, see routeVideoCall);
+ * Kling, Sora, Wan and Seedance exist only on OpenRouter. Anything unknown
+ * falls back to the default Veo model.
+ */
+function resolveVideoModel(requested) {
+  if (openrouter.isKnownVideoModel(requested)) {
+    const spec = openrouter.OPENROUTER_VIDEO_MODELS[requested];
+    return { provider: "openrouter", modelId: requested, label: spec.label, durations: spec.durations, resolutions: spec.resolutions };
+  }
+  const modelId = gemini.resolveVideoModel(requested);
+  return { provider: "gemini", modelId, label: gemini.videoLabelFor(modelId), durations: null, resolutions: RESOLUTIONS };
+}
+
+/** The allowed length closest to what was asked for. */
+function nearest(value, allowed) {
+  const wanted = Number(value) || DEFAULT_DURATION;
+  return allowed.reduce((best, option) => (Math.abs(option - wanted) < Math.abs(best - wanted) ? option : best), allowed[0]);
+}
 
 router.use(requireAuth, requirePermission("tool.image_to_video.run"));
 
@@ -57,16 +79,23 @@ router.post("/", async (req, res) => {
    */
   const multiView = parsedViews.length > 1;
 
-  const modelId = multiView ? REFERENCE_MODE.model : gemini.resolveVideoModel(requestedModel);
-  const seconds = multiView ? REFERENCE_MODE.durationSeconds : clampDuration(durationSeconds);
-  const pickedResolution = multiView ? REFERENCE_MODE.resolution : oneOf(resolution, RESOLUTIONS, DEFAULT_RESOLUTION);
+  const video = resolveVideoModel(multiView ? REFERENCE_MODE.model : requestedModel);
+  const { modelId, provider } = video;
+  const seconds = multiView
+    ? REFERENCE_MODE.durationSeconds
+    : video.durations
+      ? nearest(durationSeconds, video.durations)
+      : clampDuration(durationSeconds);
+  const pickedResolution = multiView
+    ? REFERENCE_MODE.resolution
+    : oneOf(resolution, video.resolutions, video.resolutions.includes(DEFAULT_RESOLUTION) ? DEFAULT_RESOLUTION : video.resolutions[0]);
   const pickedAspect = multiView ? REFERENCE_MODE.aspectRatio : oneOf(aspectRatio, ASPECT_RATIOS, DEFAULT_ASPECT_RATIO);
 
   return queueGeneration(req, res, {
     type: IMAGE_TO_VIDEO_JOB,
     tool: "image_to_video",
     request: {
-      provider: "gemini",
+      provider,
       /*
        * Composite on purpose. The duration estimator samples past runs by
        * `(type, request.model)`, and a 4-second clip and a 15-second one are
@@ -77,7 +106,7 @@ router.post("/", async (req, res) => {
        */
       model: `${modelId}:${pickedResolution}:${seconds}s${multiView ? `:${parsedViews.length}views` : ""}`,
       modelId,
-      modelLabel: gemini.videoLabelFor(modelId),
+      modelLabel: video.label,
       quality: pickedResolution,
       durationSeconds: seconds,
       aspectRatio: pickedAspect,
@@ -101,10 +130,11 @@ router.post("/", async (req, res) => {
       resolution: pickedResolution,
       durationSeconds: seconds,
       requestedModel: modelId,
+      provider,
       conversationId: conversationId || null,
     },
     preview,
-    message: `queued a ${seconds}s ${pickedResolution} video on ${gemini.videoLabelFor(modelId)}${
+    message: `queued a ${seconds}s ${pickedResolution} video on ${video.label}${
       multiView ? ` from ${parsedViews.length} views` : ""
     }`,
   });

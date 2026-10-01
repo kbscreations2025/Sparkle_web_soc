@@ -20,6 +20,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
+import { DailyAllowanceControl } from "@/components/admin/DailyAllowanceControl";
 import { MemberRows } from "@/components/admin/MemberRows";
 import { CreditAmountDialog } from "@/components/admin/CreditAmountDialog";
 import { cn } from "@/lib/utils";
@@ -452,6 +453,7 @@ function MyOrgCredits() {
                       })
                   : undefined
               }
+              dailyAllowance={data.canManage ? { onSaved: load } : undefined}
             />
           ) : (
             <p className="rounded-lg border border-white/[0.06] px-3 py-3 text-[11px] text-faint">
@@ -564,7 +566,7 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
           {data.members.length === 0 ? (
             <p className="text-xs text-faint">No members in this organization.</p>
           ) : (
-            data.members.map((member) => <MemberRow key={member.userId} member={member} onAct={setPending} />)
+            data.members.map((member) => <MemberRow key={member.userId} member={member} onAct={setPending} tenantId={tenantId} onAllowanceSaved={load} />)
           )}
         </div>
 
@@ -676,9 +678,13 @@ function AccountRow({
 function MemberRow({
   member,
   onAct,
+  tenantId,
+  onAllowanceSaved,
 }: {
   member: CreditMember;
   onAct: (p: { userId: string | null; holder: string; mode: "grant" | "revoke"; amount: number }) => void;
+  tenantId: string;
+  onAllowanceSaved: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-surface-raised p-3">
@@ -707,6 +713,13 @@ function MemberRow({
         </div>
         <Figure label="Frozen" value={member.reserved} muted />
         <Figure label="Spent" value={member.lifetimeSpent} muted />
+        <DailyAllowanceControl
+          userId={member.userId}
+          holder={member.name}
+          current={member.dailyAllowance}
+          tenantId={tenantId}
+          onSaved={onAllowanceSaved}
+        />
         <AmountControls
           onGrant={(amount) => onAct({ userId: member.userId, holder: member.name, mode: "grant", amount })}
           onRevoke={(amount) => onAct({ userId: member.userId, holder: member.name, mode: "revoke", amount })}

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useRef, useState } from "react";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
@@ -8,6 +8,7 @@ import { JobProgressBar } from "@/components/studio/JobProgressBar";
 import { AspectChips } from "@/components/studio/AspectChips";
 import { OptionChips } from "@/components/studio/OptionChips";
 import { PromptCard } from "@/components/studio/PromptCard";
+import { InlineDropdown } from "@/components/studio/InlineDropdown";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import {
   imageToVideo,
@@ -18,7 +19,6 @@ import {
   DEFAULT_VIDEO_MODEL,
   VIDEO_ASPECTS,
   VIDEO_CAMERA_STYLES,
-  VIDEO_DURATIONS,
   VIDEO_MODELS,
   VIDEO_MOOD_STYLES,
   VIDEO_RESOLUTIONS,
@@ -255,6 +255,21 @@ export default function ImageToVideoPage() {
     ? VIDEO_REFERENCE_MODE
     : { model, aspectRatio, resolution, durationSeconds };
 
+  /** Each model has its own lengths and sizes — the pickers offer only those. */
+  const modelSpec = VIDEO_MODELS.find((entry) => entry.id === effective.model) ?? VIDEO_MODELS[0];
+
+  /** Switching model snaps length and resolution onto what the new one accepts. */
+  function chooseModel(next: VideoModelId) {
+    const spec = VIDEO_MODELS.find((entry) => entry.id === next) ?? VIDEO_MODELS[0];
+    setModel(next);
+    const lengths: readonly number[] = spec.durations;
+    if (!lengths.includes(durationSeconds)) {
+      setDurationSeconds(lengths.reduce((best, s) => (Math.abs(s - durationSeconds) < Math.abs(best - durationSeconds) ? s : best)));
+    }
+    const sizes: readonly string[] = spec.resolutions;
+    if (!sizes.includes(resolution)) setResolution(sizes[0]);
+  }
+
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       {status !== "idle" && <ToolHeader onReset={reset} resetLabel="New clip" />}
@@ -450,70 +465,23 @@ export default function ImageToVideoPage() {
               </p>
             )}
 
+          </div>
+
+          <div className="space-y-4">
             <OptionChips label="Mood" options={VIDEO_MOOD_STYLES} value={mood} onChange={setMood} />
             <p className="-mt-1 text-[11px] text-faint">
               {VIDEO_MOOD_STYLES.find((entry) => entry.id === mood)?.description}
             </p>
 
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-4 rounded-xl border border-white/[0.08] bg-surface-raised p-4">
-              {/* Locked rather than hidden with more than one view: the
-                  values still matter to the user, they just aren't a choice
-                  in reference mode. */}
-              {multiView && (
-                <p className="rounded-lg border border-gold/20 bg-gold/[0.06] px-2.5 py-2 text-[11px] leading-relaxed text-gold/90">
-                  Multiple views need Veo&apos;s reference mode, which only runs on Veo 3.1 Standard at 8s, 720p and
-                  16:9. Drop back to one view for the other models, lengths and shapes.
-                </p>
-              )}
-
-              <Setting label="Model">
-                <select
-                  value={effective.model}
-                  disabled={multiView}
-                  onChange={(event) => setModel(event.target.value as VideoModelId)}
-                  className="min-h-8 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-xs text-cream focus:border-gold/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {VIDEO_MODELS.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.label}
-                    </option>
-                  ))}
-                </select>
-              </Setting>
-
-              <Setting label="Length">
-                <select
-                  value={effective.durationSeconds}
-                  disabled={multiView}
-                  onChange={(event) => setDurationSeconds(Number(event.target.value))}
-                  className="min-h-8 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-xs text-cream focus:border-gold/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {VIDEO_DURATIONS.map((seconds) => (
-                    <option key={seconds} value={seconds}>
-                      {seconds}s
-                    </option>
-                  ))}
-                </select>
-              </Setting>
-
-
-              <Setting label="Resolution">
-                <div className="flex gap-1.5">
-                  {VIDEO_RESOLUTIONS.map((entry) => (
-                    <SmallChip
-                      key={entry.id}
-                      label={entry.label}
-                      active={entry.id === effective.resolution}
-                      disabled={multiView}
-                      onClick={() => setResolution(entry.id)}
-                    />
-                  ))}
-                </div>
-              </Setting>
-            </div>
+            {/* Locked rather than hidden with more than one view: the
+                values still matter to the user, they just aren't a choice
+                in reference mode. */}
+            {multiView && (
+              <p className="rounded-lg border border-gold/20 bg-gold/[0.06] px-2.5 py-2 text-[11px] leading-relaxed text-gold/90">
+                Multiple views need Veo&apos;s reference mode, which only runs on Veo 3.1 Standard at 8s, 720p and
+                16:9. Drop back to one view for the other models, lengths and shapes.
+              </p>
+            )}
 
             {/* The same shape picker the image tools use, out of the
                 settings card and on its own: a ratio is chosen by its
@@ -525,13 +493,44 @@ export default function ImageToVideoPage() {
               disabled={multiView}
             />
 
-            {/* No footer: this page's settings are in the card above, not
-                on the box. */}
+            {/* Model and length sit on the box, like the image tools. */}
             <PromptCard
               label="Anything else"
               value={description}
               onChange={setDescription}
               placeholder="Optional — extra direction for the motion"
+              footerStart={
+                <InlineDropdown
+                  label="Length"
+                  value={String(effective.durationSeconds)}
+                  disabled={multiView}
+                  onChange={(next) => setDurationSeconds(Number(next))}
+                  options={modelSpec.durations.map((seconds) => ({ value: String(seconds), label: `${seconds}s` }))}
+                  panelClassName="w-[92px]"
+                />
+              }
+              footerEnd={
+                <div className="flex min-w-0 items-center gap-2">
+                  <InlineDropdown
+                    label="Model"
+                    value={effective.model}
+                    disabled={multiView}
+                    onChange={(next) => chooseModel(next as VideoModelId)}
+                    options={VIDEO_MODELS.map((entry) => ({ value: entry.id, label: entry.label, hint: entry.description, group: entry.provider }))}
+                    triggerClassName="max-w-[150px] sm:max-w-[170px]"
+                    panelClassName="w-[210px] max-h-[300px] !overflow-y-auto"
+                  />
+                  <InlineDropdown
+                    label="Resolution"
+                    value={effective.resolution}
+                    disabled={multiView}
+                    onChange={setResolution}
+                    options={modelSpec.resolutions.map((id) => ({ value: id, label: id }))}
+                    align="right"
+                    panelClassName="w-[92px]"
+                  />
+                </div>
+              }
               // A pasted photo is another view of the piece, not text — same
               // as dropping it on the uploader, just without leaving the
               // keyboard. Diverted before it can land in the prompt as an
@@ -545,8 +544,8 @@ export default function ImageToVideoPage() {
               icon={rendering ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
             >
               {rendering
-                ? "Renderingâ€¦"
-                : `Animate ${multiView ? `these ${photos.length} views` : "this photo"} Â· ${effective.durationSeconds}s`}
+                ? "Rendering…"
+                : `Animate ${multiView ? `these ${photos.length} views` : "this photo"} · ${effective.durationSeconds}s`}
             </RunButton>
 
             {rendering && job && (
@@ -590,43 +589,5 @@ export default function ImageToVideoPage() {
         </div>
       </div>
     </div>
-  );
-}
-
-function Setting({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <span className="text-[10px] font-medium uppercase tracking-widest text-faint">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function SmallChip({
-  label,
-  active,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={active}
-      className={cn(
-        "min-h-8 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-        active
-          ? "border-gold/30 bg-gold/10 text-gold"
-          : "border-white/[0.07] bg-white/[0.03] text-muted hover:border-white/[0.14] hover:text-cream"
-      )}
-    >
-      {label}
-    </button>
   );
 }

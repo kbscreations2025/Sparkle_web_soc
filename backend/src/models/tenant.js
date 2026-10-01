@@ -66,6 +66,8 @@ const tenantSchema = new mongoose.Schema(
       match: [/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, "slug must be lowercase, URL-safe"],
     },
     status: { type: String, enum: TENANT_STATUSES, default: "active" },
+    /** IANA zone that decides when "a new day" starts for daily credit allowances. */
+    timezone: { type: String, default: "Asia/Kolkata" },
 
     // ── gen-AI credentials ──
     aiProviders: { type: [aiProviderSchema], default: [] },

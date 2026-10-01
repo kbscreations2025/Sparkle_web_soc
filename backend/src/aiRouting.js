@@ -278,17 +278,65 @@ async function routeTextCall({ tenant, modelId, prompt, images, parts, ...option
 }
 
 /**
- * A video out. Shares the tenant's Gemini keys and their failover with every
- * other call, which matters more here than elsewhere: a Veo run is minutes
- * long, so a key that turns out to be rate-limited should cost a retry on
- * the next key rather than the whole job.
+ * A video out, across providers in the tenant's key priority order — same
+ * candidate list as images (see `imageCandidatesFor`): a Veo model tries
+ * the Gemini keys and, when it has an OpenRouter equivalent, the OpenRouter
+ * keys, interleaved by priority. An OpenRouter-only model (Kling, Sora…)
+ * uses only OpenRouter keys. Failover matters more here than anywhere: a
+ * run is minutes long, so a rate-limited key should cost a retry on the
+ * next key rather than the whole job.
+ *
+ * The two providers take differently shaped inputs: Gemini gets its SDK
+ * `image`/`config`, OpenRouter gets the raw `views` and plain settings.
+ *
+ * @returns {{ output, providerId, provider, modelId }} — which provider and
+ *   model id actually served it, for the history record.
  */
-async function routeVideoCall({ tenant, modelId, prompt, image, config, onPoll }) {
-  return routeProviderOperation({
-    tenant,
-    provider: "gemini",
-    call: ({ apiKey, mod }) => mod.generateVideo({ apiKey, modelId, prompt, image, config, onPoll }),
-  });
+async function routeVideoCall({ tenant, provider = "gemini", modelId, prompt, image, config, views, onPoll }) {
+  const candidates = imageCandidatesFor(tenant, provider, modelId);
+  if (candidates.length === 0) {
+    throw new NoProviderError(`This organization has no ${PROVIDER_LABELS[provider]} key configured. Ask a super admin to add one.`);
+  }
+
+  let used;
+  let output;
+  try {
+    output = await tryImageCandidates(candidates, async (candidate) => {
+      const { entry, mod, modelId: resolvedModelId } = candidate;
+      const withCredential = await Tenant.loadProvider(tenant._id, entry._id);
+      const apiKey = decryptSecret(withCredential.credential, { provider: entry.provider });
+
+      try {
+        const result =
+          entry.provider === "openrouter"
+            ? await mod.generateVideo({
+                apiKey,
+                modelId: resolvedModelId,
+                prompt,
+                views,
+                aspectRatio: config.aspectRatio,
+                resolution: config.resolution,
+                durationSeconds: config.durationSeconds,
+                onPoll,
+              })
+            : await mod.generateVideo({ apiKey, modelId: resolvedModelId, prompt, image, config, onPoll });
+        tenant.recordProviderSuccess(entry._id);
+        used = candidate;
+        return result;
+      } catch (err) {
+        tenant.recordProviderFailure(entry._id, mod.classifyError(err).code);
+        throw err;
+      }
+    });
+  } finally {
+    try {
+      await tenant.save();
+    } catch (err) {
+      console.error("could not record provider health:", err.message);
+    }
+  }
+
+  return { output, providerId: used.entry._id, provider: used.entry.provider, modelId: used.modelId };
 }
 
 /** Back-compat shorthand for the pre-multi-provider call sites. */

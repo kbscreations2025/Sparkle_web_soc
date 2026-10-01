@@ -29,6 +29,7 @@ const toAccount = (account, holder) => ({
   available: account.available,
   lifetimeGranted: account.lifetimeGranted,
   lifetimeSpent: account.lifetimeSpent,
+  dailyAllowance: account.dailyAllowance ?? null,
   updatedAt: account.updatedAt,
 });
 
@@ -66,9 +67,15 @@ router.get(
      * accounts collection. Nothing here needs the row to exist: no account
      * means no credits, which is what an empty balance says.
      */
-    const account = await CreditAccount.findOne({ tenantId: req.dbUser.tenantId, userId: req.dbUser._id })
-      .select("balance reserved available")
+    let account = await CreditAccount.findOne({ tenantId: req.dbUser.tenantId, userId: req.dbUser._id })
+      .select("balance reserved available dailyAllowance")
       .lean();
+
+    // The one write this route allows: a member on a daily allowance sees
+    // today's top-up the moment they arrive. A no-op once today is done.
+    if (account && account.dailyAllowance !== null && account.dailyAllowance !== undefined) {
+      account = (await credit.applyDailyReset(req.dbUser.tenantId, req.dbUser._id)) || account;
+    }
 
     res.json({
       status: "success",
@@ -76,6 +83,7 @@ router.get(
         balance: account?.balance ?? 0,
         reserved: account?.reserved ?? 0,
         available: account?.available ?? 0,
+        dailyAllowance: account?.dailyAllowance ?? null,
       },
     });
   })
@@ -140,6 +148,7 @@ router.get(
             reserved: account?.reserved ?? 0,
             available: account?.available ?? 0,
             lifetimeSpent: account?.lifetimeSpent ?? 0,
+            dailyAllowance: account?.dailyAllowance ?? null,
           };
         })
         .sort((a, b) => Number(b.isSelf) - Number(a.isSelf) || a.name.localeCompare(b.name)),
@@ -260,6 +269,57 @@ router.post(
   })
 );
 
+/**
+ * Turns a member's daily allowance on, changes it, or turns it off.
+ *
+ * `amount` is a whole number of credits per day, or null to switch it off.
+ * An org admin acts on their own organization; a super admin may name one
+ * with `tenantId`, the same way /grant does.
+ *
+ * Setting it resets the member immediately — their unspent credits go back
+ * to the pool and the allowance comes out of it — so the figure on screen is
+ * the allowance straight away rather than tomorrow.
+ */
+router.post(
+  "/daily-allowance",
+  requirePermission("org.credits.manage"),
+  handle(async (req, res) => {
+    const { userId, amount: rawAmount, tenantId: bodyTenantId } = req.body || {};
+    const tenantId = req.isSuperAdmin && bodyTenantId ? bodyTenantId : req.dbUser.tenantId;
+
+    if (!isId(tenantId)) return bad(res, "a valid organization is required");
+    if (!isId(userId)) return bad(res, "a valid member is required");
+
+    let amount = null;
+    if (rawAmount !== null && rawAmount !== undefined && rawAmount !== "") {
+      amount = parseAmount(rawAmount);
+      if (amount === null) return bad(res, "amount must be a whole number of credits above zero, or null to turn it off");
+    }
+
+    const member = await User.findOne({ _id: userId, tenantId, deletedAt: null }).select("_id name email");
+    if (!member) return bad(res, "that user is not a member of this organization");
+
+    const account = await credit.setDailyAllowance({ tenantId, userId, amount, actorUserId: req.dbUser?._id });
+
+    logAudit({
+      ...actorFrom(req),
+      ...requestMeta(req),
+      tenantId,
+      action: amount === null ? "credits.daily_allowance_disabled" : "credits.daily_allowance_set",
+      status: "success",
+      targetType: "credit_account",
+      targetId: String(account._id),
+      message:
+        amount === null
+          ? `turned off the daily allowance for ${member.name || member.email}`
+          : `set a daily allowance of ${amount} credits for ${member.name || member.email}`,
+      metadata: { amount, userId: String(userId) },
+    });
+
+    res.json({ status: "success", member: toAccount(account, "User") });
+  })
+);
+
 // ── platform staff ─────────────────────────────────────────────────────────
 
 /*
@@ -372,6 +432,7 @@ router.get(
           reserved: account?.reserved ?? 0,
           available: account?.available ?? 0,
           lifetimeSpent: account?.lifetimeSpent ?? 0,
+          dailyAllowance: account?.dailyAllowance ?? null,
         };
       }),
     });

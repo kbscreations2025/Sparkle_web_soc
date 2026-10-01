@@ -6,6 +6,7 @@ const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const { GENERATION_TOOLS } = require("../generations");
 const gemini = require("../providers/gemini");
 const openai = require("../providers/openai");
+const openrouter = require("../providers/openrouter");
 const Tenant = require("../models/tenant");
 const CreditPricingRule = require("../models/creditPricingRule");
 
@@ -67,6 +68,13 @@ function priceableModels() {
         // already clamps it to this pair — see routes/imageToVideo.js.
         qualities: ["1080p", "720p"],
       })),
+    },
+    {
+      group: "Video (OpenRouter)",
+      models: Object.entries(openrouter.OPENROUTER_VIDEO_MODELS)
+        // The Veo ids only stand in for the Gemini ones and bill under those.
+        .filter(([id]) => !id.startsWith("google/"))
+        .map(([id, spec]) => ({ id, label: spec.label, qualities: [...spec.resolutions].reverse() })),
     },
     {
       group: "Text",

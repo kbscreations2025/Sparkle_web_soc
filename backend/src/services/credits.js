@@ -61,13 +61,18 @@ async function totalsByTenant(tenantIds = null) {
  */
 async function balancesByUser(tenantId) {
   const accounts = await CreditAccount.find({ tenantId, userId: { $ne: null } })
-    .select("userId balance reserved available")
+    .select("userId balance reserved available dailyAllowance")
     .lean();
 
   return new Map(
     accounts.map((account) => [
       String(account.userId),
-      { balance: account.balance, reserved: account.reserved, available: account.available },
+      {
+        balance: account.balance,
+        reserved: account.reserved,
+        available: account.available,
+        dailyAllowance: account.dailyAllowance ?? null,
+      },
     ])
   );
 }
@@ -155,7 +160,12 @@ async function record(entry) {
  * @returns what was frozen, to be stored on the job and closed out later.
  */
 async function holdForRun({ tenantId, userId, userName, tool, priced, jobHint }) {
-  const account = await CreditAccount.ensure(tenantId, userId);
+  let account = await CreditAccount.ensure(tenantId, userId);
+  // A member on a daily allowance gets today's top-up before the first run
+  // of the day is priced, even if the scheduled pass hasn't reached them yet.
+  if (account.dailyAllowance !== null && account.dailyAllowance !== undefined) {
+    account = (await applyDailyReset(tenantId, userId)) || account;
+  }
   if (priced.cost <= 0) return { accountId: account._id, ...priced, held: 0 };
 
   const updated = await CreditAccount.hold(account._id, priced.cost);
@@ -368,8 +378,188 @@ async function transfer({ tenantId, fromUserId, toUserId, amount, actorUserId, a
   return { source: debited, target: credited };
 }
 
+// ── daily allowance ──────────────────────────────────────────────────────
+
+const DEFAULT_TIMEZONE = "Asia/Kolkata";
+
+/** Today's date in `timeZone` as "YYYY-MM-DD" — en-CA formats that way natively. */
+function dayKey(timeZone = DEFAULT_TIMEZONE, at = new Date()) {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+  }
+}
+
+async function timezoneFor(tenantId) {
+  const Tenant = require("../models/tenant");
+  const tenant = await Tenant.findById(tenantId).select("timezone").lean();
+  return tenant?.timezone || DEFAULT_TIMEZONE;
+}
+
+/**
+ * Starts a new day for one account on a daily allowance: everything still
+ * spendable goes back to the pool, then the allowance comes out of the pool
+ * (as much of it as the pool can cover).
+ *
+ * Runs at most once per account per day. The claim — setting `lastResetOn`
+ * guarded on it not already being today — is the lock, so the scheduled
+ * pass, a lazy check before a run, and a second worker can all call this at
+ * once and only one of them does anything. Credits frozen by a run in flight
+ * are left alone; that run still has to settle against them.
+ *
+ * `force` skips the once-a-day guard, for an admin setting or changing the
+ * allowance mid-day; its ledger keys carry a timestamp so a second reset on
+ * the same day is recorded rather than dropped as a duplicate.
+ *
+ * @returns the account after the reset, or null when nothing was due.
+ */
+async function applyDailyReset(tenantId, userId, timeZone, { force = false } = {}) {
+  if (!userId) return null;
+  const today = dayKey(timeZone || (await timezoneFor(tenantId)));
+
+  // "before", so the key below can name the day being left as well as the
+  // day being entered — each transition is then its own ledger entry, even
+  // if `lastResetOn` is ever rewound and the same date comes round twice.
+  const prior = await CreditAccount.findOneAndUpdate(
+    { tenantId, userId, dailyAllowance: { $ne: null }, ...(force ? {} : { lastResetOn: { $ne: today } }) },
+    { $set: { lastResetOn: today } },
+    { returnDocument: "before" }
+  );
+  if (!prior) return null;
+  const claimed = prior;
+  const keyDay = force ? `${today}:${Date.now()}` : `${prior.lastResetOn || "start"}>${today}`;
+
+  const pool = await CreditAccount.ensure(tenantId, null);
+  const actorName = "Daily allowance";
+
+  // Sweep: zero `available` and take the same off `balance` in one update,
+  // reading back what was swept — a separate read-then-debit could race a
+  // hold taken in between.
+  const before = await CreditAccount.findOneAndUpdate(
+    { _id: claimed._id },
+    [{ $set: { balance: { $subtract: ["$balance", "$available"] }, available: 0 } }],
+    // Mongoose 9 refuses an array update unless asked for it explicitly.
+    { returnDocument: "before", updatePipeline: true }
+  );
+  const swept = before?.available ?? 0;
+
+  if (swept > 0) {
+    const poolAfter = await CreditAccount.credit(pool._id, swept);
+    await record({
+      tenantId, accountId: claimed._id, userId, kind: "daily_sweep", amount: -swept,
+      balanceAfter: before.balance - swept, actorName, reason: `unused credits returned to the pool (${today})`,
+      idempotencyKey: `daily_sweep:${claimed._id}:${keyDay}`,
+    });
+    await record({
+      tenantId, accountId: pool._id, userId: null, kind: "daily_sweep", amount: swept,
+      balanceAfter: poolAfter.balance, actorName, reason: `returned by a member on a daily allowance (${today})`,
+      idempotencyKey: `daily_sweep:${pool._id}:${claimed._id}:${keyDay}`,
+    });
+  }
+
+  // Top up. Re-read the pool and retry once: another member's top-up may
+  // have spent some of it between the read and the guarded debit.
+  let given = 0;
+  let poolAfter = null;
+  for (let attempt = 0; attempt < 2 && !poolAfter; attempt++) {
+    const fresh = await CreditAccount.findById(pool._id).select("available").lean();
+    given = Math.min(claimed.dailyAllowance, fresh?.available ?? 0);
+    if (given <= 0) break;
+    poolAfter = await CreditAccount.debit(pool._id, given);
+  }
+
+  if (!poolAfter) {
+    if (claimed.dailyAllowance > 0) {
+      console.warn(`[credits] daily allowance for user ${userId} not paid: organization pool is empty`);
+    }
+    return CreditAccount.findById(claimed._id);
+  }
+
+  const userAfter = await CreditAccount.credit(claimed._id, given);
+  const shortfall = given < claimed.dailyAllowance ? ` — pool covered only ${given} of ${claimed.dailyAllowance}` : "";
+  await record({
+    tenantId, accountId: pool._id, userId: null, kind: "daily_topup", amount: -given,
+    balanceAfter: poolAfter.balance, actorName, reason: `daily allowance paid out (${today})${shortfall}`,
+    idempotencyKey: `daily_topup:${pool._id}:${claimed._id}:${keyDay}`,
+  });
+  await record({
+    tenantId, accountId: claimed._id, userId, kind: "daily_topup", amount: given,
+    balanceAfter: userAfter.balance, actorName, reason: `daily allowance (${today})${shortfall}`,
+    idempotencyKey: `daily_topup:${claimed._id}:${keyDay}`,
+  });
+
+  return userAfter;
+}
+
+/**
+ * Turns a member's daily allowance on (with an amount) or off (null).
+ *
+ * Turning it on, or changing the amount, resets the account straight away
+ * rather than waiting for tomorrow — the admin who sets 2,000 expects the
+ * member to have 2,000 now. Turning it off leaves the balance as it is.
+ */
+async function setDailyAllowance({ tenantId, userId, amount, actorUserId }) {
+  const account = await CreditAccount.ensure(tenantId, userId);
+
+  await CreditAccount.updateOne(
+    { _id: account._id },
+    {
+      $set: {
+        dailyAllowance: amount,
+        dailyAllowanceSetBy: actorUserId || null,
+        dailyAllowanceUpdatedAt: new Date(),
+      },
+    }
+  );
+
+  if (amount !== null) await applyDailyReset(tenantId, userId, null, { force: true });
+  return CreditAccount.findById(account._id);
+}
+
+/** The nightly pass: every account on an allowance, in its own organization's day. */
+async function runDailyResets() {
+  const Tenant = require("../models/tenant");
+  const accounts = await CreditAccount.find({ dailyAllowance: { $ne: null }, userId: { $ne: null } })
+    .select("tenantId userId lastResetOn")
+    .lean();
+  if (!accounts.length) return 0;
+
+  const tenantIds = [...new Set(accounts.map((a) => String(a.tenantId)))];
+  const tenants = await Tenant.find({ _id: { $in: tenantIds } }).select("timezone").lean();
+  const zoneByTenant = new Map(tenants.map((t) => [String(t._id), t.timezone || DEFAULT_TIMEZONE]));
+
+  let done = 0;
+  for (const account of accounts) {
+    const tz = zoneByTenant.get(String(account.tenantId)) || DEFAULT_TIMEZONE;
+    if (account.lastResetOn === dayKey(tz)) continue;
+    try {
+      if (await applyDailyReset(account.tenantId, account.userId, tz)) done++;
+    } catch (err) {
+      console.error(`[credits] daily reset failed for user ${account.userId}:`, err.message);
+    }
+  }
+  return done;
+}
+
+/** Runs `runDailyResets` now and every `intervalMs`. Safe in several processes at once — the claim is per account per day. */
+function startDailyResetScheduler(intervalMs = 5 * 60 * 1000) {
+  const tick = () =>
+    runDailyResets()
+      .then((n) => n && console.log(`[credits] daily allowance reset for ${n} account(s)`))
+      .catch((err) => console.error("[credits] daily reset pass failed:", err.message));
+  tick();
+  const timer = setInterval(tick, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 module.exports = {
   InsufficientCreditsError,
+  applyDailyReset,
+  setDailyAllowance,
+  runDailyResets,
+  startDailyResetScheduler,
   totalsByTenant,
   balancesByUser,
   transfer,

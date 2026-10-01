@@ -116,6 +116,8 @@ export type Organization = {
   name: string;
   slug: string;
   status: "active" | "trial" | "suspended" | "archived";
+  /** IANA zone that decides when a new day starts for daily credit allowances. */
+  timezone: string;
   aiProviderCount: number;
   memberCount: number;
   /** How many members carry the admin label. */
@@ -149,7 +151,7 @@ export type Member = {
   /** Open connections right now, from the socket layer. 0 means idle. */
   liveSessions: number;
   /** What this person can spend. 0 available means they cannot generate at all. */
-  credits: { balance: number; reserved: number; available: number };
+  credits: { balance: number; reserved: number; available: number; dailyAllowance?: number | null };
 };
 
 /** One assignable permission, as the backend defines it. */
@@ -182,7 +184,7 @@ export function createOrganization(name: string) {
   });
 }
 
-export function updateOrganization(id: string, patch: { name?: string; status?: string }) {
+export function updateOrganization(id: string, patch: { name?: string; status?: string; timezone?: string }) {
   return apiRequest<{ organization?: Organization }>(`/api/admin/organizations/${id}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
@@ -1101,10 +1103,26 @@ export function imageToText(body: { image: string; preview?: string | null }) {
 
 // ── image to video ───────────────────────────────────────────────────────────
 
+/**
+ * Mirrors backend/src/providers/openrouter's OPENROUTER_VIDEO_MODELS and the
+ * Gemini Veo list. `durations`/`resolutions` are what each model accepts —
+ * the backend clamps to the same lists. Veo runs on the Gemini keys with
+ * OpenRouter as a priority-ordered fallback; the rest are OpenRouter only.
+ */
+const VEO_DURATIONS = [4, 6, 8] as const;
+const BOTH_RES = ["720p", "1080p"] as const;
 export const VIDEO_MODELS = [
-  { id: "veo-3.1-generate-preview", label: "Veo 3.1 Standard", quality: "Best", description: "Highest fidelity · richest motion & detail" },
-  { id: "veo-3.1-fast-generate-preview", label: "Veo 3.1 Fast", quality: "Fast", description: "Faster turnaround · strong quality" },
-  { id: "veo-3.1-lite-generate-preview", label: "Veo 3.1 Lite", quality: "Budget", description: "Lightweight & economical" },
+  { id: "veo-3.1-generate-preview", label: "Veo 3.1 Standard", provider: "Google", description: "Highest fidelity · richest motion & detail", durations: VEO_DURATIONS, resolutions: BOTH_RES },
+  { id: "veo-3.1-fast-generate-preview", label: "Veo 3.1 Fast", provider: "Google", description: "Faster turnaround · strong quality", durations: VEO_DURATIONS, resolutions: BOTH_RES },
+  { id: "veo-3.1-lite-generate-preview", label: "Veo 3.1 Lite", provider: "Google", description: "Lightweight & economical", durations: VEO_DURATIONS, resolutions: BOTH_RES },
+  { id: "kwaivgi/kling-v3.0-pro", label: "Kling 3.0 Pro", provider: "Kling", description: "Very stable object · smooth orbits", durations: [5, 10], resolutions: BOTH_RES },
+  { id: "kwaivgi/kling-v3.0-std", label: "Kling 3.0 Standard", provider: "Kling", description: "Stable motion · lower cost", durations: [5, 10], resolutions: ["720p"] },
+  { id: "openai/sora-2-pro", label: "Sora 2 Pro", provider: "OpenAI", description: "Rich lighting · best for mood shots", durations: [4, 8, 12], resolutions: BOTH_RES },
+  { id: "alibaba/wan-3.0", label: "Wan 3.0", provider: "Alibaba", description: "Good value · clean backdrops", durations: [5], resolutions: BOTH_RES },
+  { id: "alibaba/wan-2.7", label: "Wan 2.7", provider: "Alibaba", description: "Budget · plain backdrops", durations: [5], resolutions: BOTH_RES },
+  { id: "bytedance/seedance-2.5", label: "Seedance 2.5", provider: "ByteDance", description: "Cinematic motion", durations: [4, 5, 10], resolutions: BOTH_RES },
+  { id: "bytedance/seedance-2.0", label: "Seedance 2.0", provider: "ByteDance", description: "Balanced speed & quality", durations: [4, 5, 10], resolutions: BOTH_RES },
+  { id: "bytedance/seedance-2.0-fast", label: "Seedance 2.0 Fast", provider: "ByteDance", description: "Fastest · drafts", durations: [4, 5, 10], resolutions: ["720p"] },
 ] as const;
 
 export type VideoModelId = (typeof VIDEO_MODELS)[number]["id"];
@@ -1649,6 +1667,8 @@ export type CreditMember = {
   reserved: number;
   available: number;
   lifetimeSpent: number;
+  /** Credits topped up to each day, or null when the member is not on a daily allowance. */
+  dailyAllowance?: number | null;
 };
 
 /** The signed-in person's own balance. Needs no permission beyond being logged in. */
@@ -1694,6 +1714,15 @@ export function updateOrgMember(id: string, patch: Parameters<typeof updateMembe
 /** Moves credits from the organization pool to one of its members. */
 export function distributeCredits(body: { userId: string; amount: number; reason?: string }) {
   return apiRequest("/api/credits/distribute", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * Sets a member's daily allowance, or turns it off with `amount: null`.
+ * Takes effect at once: their unspent credits return to the pool and the
+ * allowance is paid out of it. `tenantId` is only honoured for a super admin.
+ */
+export function setDailyAllowance(body: { userId: string; amount: number | null; tenantId?: string }) {
+  return apiRequest("/api/credits/daily-allowance", { method: "POST", body: JSON.stringify(body) });
 }
 
 /** Pulls a member's unspent credits back into the pool. */

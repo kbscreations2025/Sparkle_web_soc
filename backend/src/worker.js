@@ -339,10 +339,15 @@ function startWorker() {
   // leaves credits frozen, and this is the process that comes back up.
   const reaper = startCreditReaper();
 
+  // Daily allowances: return yesterday's leftovers to the pool and pay out
+  // today's. Idempotent per account per day, so extra worker replicas are safe.
+  const stopDailyResets = require("./services/credits").startDailyResetScheduler();
+
   return {
     /** Closes every lane, so callers can keep treating this as one worker. */
     close: () => {
       reaper.stop();
+      stopDailyResets();
       return Promise.all(workers.map((worker) => worker.close()));
     },
     workers,

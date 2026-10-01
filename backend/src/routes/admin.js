@@ -37,12 +37,25 @@ router.use(
   })
 );
 
+/** True for a zone the runtime knows, e.g. "Asia/Kolkata". */
+function isValidTimezone(zone) {
+  if (typeof zone !== "string" || !zone.trim()) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Shapes an organization for the console — never leaks provider credentials. */
 const toOrg = (tenant, { memberCount = 0, adminCount = 0, credits = null } = {}) => ({
   id: tenant._id,
   name: tenant.name,
   slug: tenant.slug,
   status: tenant.status,
+  /** Decides when a new day starts for daily credit allowances. */
+  timezone: tenant.timezone || "Asia/Kolkata",
   aiProviderCount: tenant.aiProviders?.length ?? 0,
   // The table shows both: total people, and how many carry the admin label.
   memberCount,
@@ -212,19 +225,25 @@ router.patch(
   "/organizations/:id",
   handle(async (req, res) => {
     const { tenant } = req;
-    const { name, status } = req.body || {};
+    const { name, status, timezone } = req.body || {};
 
     if (status && !Tenant.TENANT_STATUSES.includes(status)) {
       return bad(res, `status must be one of: ${Tenant.TENANT_STATUSES.join(", ")}`);
     }
-    if (!name?.trim() && !status) return bad(res, "nothing to update");
+    // A real IANA zone only: an unknown one would silently fall back to
+    // India time and move every daily-allowance reset without saying so.
+    if (timezone !== undefined && !isValidTimezone(timezone)) {
+      return bad(res, "timezone must be an IANA zone such as Asia/Kolkata");
+    }
+    if (!name?.trim() && !status && timezone === undefined) return bad(res, "nothing to update");
 
-    const before = { name: tenant.name, status: tenant.status };
+    const before = { name: tenant.name, status: tenant.status, timezone: tenant.timezone };
 
     // Note: `slug` is immutable in the schema, so it is deliberately not
     // updatable here — it is baked into URLs.
     if (name?.trim()) tenant.name = name.trim();
     if (status) tenant.status = status;
+    if (timezone !== undefined) tenant.timezone = timezone;
     await tenant.save();
 
     logAudit({
@@ -236,7 +255,7 @@ router.patch(
       targetType: "tenant",
       targetId: String(tenant._id),
       message: `updated organization "${tenant.name}"`,
-      metadata: { before, after: { name: tenant.name, status: tenant.status } },
+      metadata: { before, after: { name: tenant.name, status: tenant.status, timezone: tenant.timezone } },
     });
 
     const counts = await countsByTenant();

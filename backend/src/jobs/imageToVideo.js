@@ -9,6 +9,7 @@ const {
   REFERENCE_MODE,
 } = require("../prompts/video");
 const gemini = require("../providers/gemini");
+const openrouter = require("../providers/openrouter");
 const User = require("../models/user");
 
 const IMAGE_TO_VIDEO_JOB = "imageToVideo.generate";
@@ -33,8 +34,10 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
   if (!dbUser) throw new Error("the user who queued this job no longer exists");
 
   const tenant = await loadTenantOrThrow(dbUser);
-  const modelId = gemini.resolveVideoModel(data.requestedModel);
-  const modelLabel = gemini.videoLabelFor(modelId);
+  // Older queued jobs predate `provider` and are all Veo on Gemini.
+  const requestedProvider = data.provider === "openrouter" && openrouter.isKnownVideoModel(data.requestedModel) ? "openrouter" : "gemini";
+  const modelId = requestedProvider === "openrouter" ? data.requestedModel : gemini.resolveVideoModel(data.requestedModel);
+  const modelLabel = requestedProvider === "openrouter" ? openrouter.videoLabelFor(modelId) : gemini.videoLabelFor(modelId);
 
   // Older queued jobs predate `images` and carry only `image`.
   const views = (Array.isArray(data.images) && data.images.length ? data.images : [data.image]).filter(Boolean);
@@ -99,13 +102,17 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
       }
     : { image: { imageBytes: views[0].base64, mimeType: views[0].mimeType }, referenceImages: undefined };
 
-  const { output, providerId } = await withProgress(
+  const { output, providerId, provider } = await withProgress(
     { from: 15, to: 80, phase: "generating" },
     async ({ stepDone }) => {
       const result = await routeVideoCall({
         tenant,
+        provider: requestedProvider,
         modelId,
         prompt,
+        // The raw views, for an OpenRouter key — same first-frame vs
+        // references split, capped the same way.
+        views: views.slice(0, MAX_REFERENCE_IMAGES).map((view) => ({ mimeType: view.mimeType, base64: view.base64 })),
         image: viewInput.image,
         config: {
           numberOfVideos: 1,
@@ -140,7 +147,7 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
     parentGenerationId: data.parentGenerationId || null,
     model: modelId,
     modelLabel,
-    provider: "gemini",
+    provider,
     quality: data.resolution,
     prompt,
     userPrompt: data.description || null,
@@ -173,7 +180,7 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
     durationSeconds: data.durationSeconds,
     model: modelId,
     modelLabel,
-    provider: "gemini",
+    provider,
   };
 });
 

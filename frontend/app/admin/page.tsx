@@ -32,6 +32,19 @@ const STATUS_TONE: Record<Organization["status"], string> = {
   archived: "border-white/15 bg-white/[0.06] text-faint",
 };
 
+/** Common zones first; the full IANA list after, where the runtime provides one. */
+const COMMON_TIMEZONES = ["Asia/Kolkata", "Asia/Dubai", "Asia/Singapore", "Europe/London", "America/New_York", "UTC"];
+
+function timezoneOptions(current: string) {
+  let all: string[] = [];
+  try {
+    all = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.("timeZone") ?? [];
+  } catch {
+    all = [];
+  }
+  return [...new Set([current, ...COMMON_TIMEZONES, ...all].filter(Boolean))];
+}
+
 export default function ConsolePage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [groups, setGroups] = useState<GrantGroup[]>([]);
@@ -276,6 +289,13 @@ export default function ConsolePage() {
     await reloadOrgs();
   }
 
+  async function changeTimezone(org: Organization, timezone: string) {
+    setOrganizations((rows) => rows.map((row) => (row.id === org.id ? { ...row, timezone } : row)));
+    const result = await updateOrganization(org.id, { timezone });
+    if (result.status !== "success") setError(result.message || "Could not change that timezone");
+    await reloadOrgs();
+  }
+
   async function toggleStatus(org: Organization) {
     const next = org.status === "suspended" ? "active" : "suspended";
     setOrganizations((rows) => rows.map((row) => (row.id === org.id ? { ...row, status: next } : row)));
@@ -348,6 +368,7 @@ export default function ConsolePage() {
                   <th className={CELL}>Organization</th>
                   <th className={CELL}>Slug</th>
                   <th className={CELL}>Status</th>
+                  <th className={CELL} title="When a new day starts for daily credit allowances">Timezone</th>
                   <th className={cn(CELL, "text-center")}>Admins</th>
                   <th className={cn(CELL, "text-center")}>Users</th>
                   <th className={cn(CELL, "text-center")}>Credits</th>
@@ -378,6 +399,20 @@ export default function ConsolePage() {
                           >
                             {org.status}
                           </span>
+                        </td>
+                        <td className={CELL} onClick={(event) => event.stopPropagation()}>
+                          <select
+                            value={org.timezone}
+                            onChange={(event) => changeTimezone(org, event.target.value)}
+                            title="When a new day starts for this organization's daily credit allowances"
+                            className="max-w-[150px] rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-cream focus:border-gold/30 focus:outline-none"
+                          >
+                            {timezoneOptions(org.timezone).map((zone) => (
+                              <option key={zone} value={zone}>
+                                {zone}
+                              </option>
+                            ))}
+                          </select>
                         </td>
                         <td className={cn(CELL, "text-center tabular-nums text-cream")}>{org.adminCount}</td>
                         <td className={cn(CELL, "text-center tabular-nums text-cream")}>{org.memberCount}</td>
@@ -460,7 +495,7 @@ export default function ConsolePage() {
 
                       {isOpen && (
                         <tr className="border-t border-white/5">
-                          <td colSpan={8} className="bg-surface-deep/30 px-4 py-4">
+                          <td colSpan={9} className="bg-surface-deep/30 px-4 py-4">
                             <div className="space-y-3">
                               {loadingMembers && !members[org.id] ? (
                                 <p className="flex items-center gap-2 text-[12px] text-faint">
@@ -480,6 +515,7 @@ export default function ConsolePage() {
                                       holder: member.name || member.email,
                                     })
                                   }
+                                  dailyAllowance={{ tenantId: org.id, onSaved: () => loadMembers(org.id) }}
                                 />
                               )}
                             </div>

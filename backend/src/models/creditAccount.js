@@ -46,6 +46,18 @@ const creditAccountSchema = new mongoose.Schema(
     /** Running totals, for display. Derived from the ledger and never spent against. */
     lifetimeGranted: { type: Number, default: 0, min: 0 },
     lifetimeSpent: { type: Number, default: 0, min: 0 },
+
+    /**
+     * Daily allowance. Null means off — the account behaves exactly as it
+     * always has. When set, each new day (in the organization's timezone)
+     * returns whatever is left to the pool and tops the account back up to
+     * this amount from it. See services/credits.js `applyDailyReset`.
+     */
+    dailyAllowance: { type: Number, default: null, min: 0 },
+    /** "YYYY-MM-DD" of the last reset — what makes a reset happen once a day, not once per check. */
+    lastResetOn: { type: String, default: null },
+    dailyAllowanceSetBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    dailyAllowanceUpdatedAt: { type: Date, default: null },
   },
   { timestamps: true, collection: "credit_accounts" }
 );

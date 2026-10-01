@@ -84,6 +84,27 @@ const VIDEO_RULES = [
   { model: "veo-3.1-fast-generate-preview", quality: "720p", rate: 0.1, label: "Veo 3.1 Fast — 720p" },
   { model: "veo-3.1-lite-generate-preview", quality: "1080p", rate: 0.08, label: "Veo 3.1 Lite — 1080p" },
   { model: "veo-3.1-lite-generate-preview", quality: "720p", rate: 0.05, label: "Veo 3.1 Lite — 720p" },
+
+  /*
+   * OpenRouter-only video models. 720p rates are the cost OpenRouter's
+   * Playground reported for one run divided by its length (seedance's runs
+   * were at 480p, so its 720p rate is an upper estimate of that). 1080p is
+   * 1.5× as a placeholder — OpenRouter quotes no per-resolution price here;
+   * revise both once real invoices exist.
+   */
+  ...[
+    ["kwaivgi/kling-v3.0-pro", "Kling 3.0 Pro", 0.168],
+    ["kwaivgi/kling-v3.0-std", "Kling 3.0 Standard", 0.126],
+    ["openai/sora-2-pro", "Sora 2 Pro", 0.3],
+    ["alibaba/wan-3.0", "Wan 3.0", 0.2],
+    ["alibaba/wan-2.7", "Wan 2.7", 0.15],
+    ["bytedance/seedance-2.5", "Seedance 2.5", 0.29],
+    ["bytedance/seedance-2.0", "Seedance 2.0", 0.152],
+    ["bytedance/seedance-2.0-fast", "Seedance 2.0 Fast", 0.115],
+  ].flatMap(([model, name, rate]) => [
+    { model, quality: "1080p", rate: +(rate * 1.5).toFixed(3), label: `${name} — 1080p` },
+    { model, quality: "720p", rate, label: `${name} — 720p` },
+  ]),
 ];
 
 /**

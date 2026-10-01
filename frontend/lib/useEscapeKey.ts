@@ -32,12 +32,19 @@ export function useEscapeKey(onEscape: () => void, active = true) {
  * Nothing is bound while `open` is false, so a page full of closed menus
  * costs no listeners at all.
  */
-export function useDismissable(ref: RefObject<HTMLElement | null>, open: boolean, onDismiss: () => void) {
+export function useDismissable(
+  ref: RefObject<HTMLElement | null>,
+  open: boolean,
+  onDismiss: () => void,
+  /** A second element that counts as "inside" — e.g. a panel portalled out of `ref`. */
+  alsoInside?: RefObject<HTMLElement | null>
+) {
   useEffect(() => {
     if (!open) return;
 
     function onPointerDown(event: MouseEvent) {
-      if (!ref.current?.contains(event.target as Node)) onDismiss();
+      const target = event.target as Node;
+      if (!ref.current?.contains(target) && !alsoInside?.current?.contains(target)) onDismiss();
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onDismiss();
@@ -49,5 +56,5 @@ export function useDismissable(ref: RefObject<HTMLElement | null>, open: boolean
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [ref, open, onDismiss]);
+  }, [ref, open, onDismiss, alsoInside]);
 }

@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 export type InlineOption<T extends string> = {
   value: T;
   label: string;
-  /** A second line under the label — what the option is for. */
+  /** What the option is for — shown as a tooltip beside the cursor on hover. */
   hint?: string;
   /**
    * Which provider this option belongs to — e.g. "Gemini", "OpenRouter". A
@@ -55,6 +55,8 @@ export function InlineDropdown<T extends string>({
   panelClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
+  /** The hovered option's hint, drawn beside the cursor. */
+  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const close = useCallback(() => setOpen(false), []);
@@ -129,8 +131,16 @@ export function InlineDropdown<T extends string>({
                     aria-selected={isSelected}
                     onClick={() => {
                       onChange(option.value);
+                      setTip(null);
                       close();
                     }}
+                    // The hint follows the cursor rather than taking a second
+                    // line, so the list stays names only.
+                    onMouseMove={(event) =>
+                      option.hint && setTip({ text: option.hint, x: event.clientX, y: event.clientY })
+                    }
+                    onMouseLeave={() => setTip(null)}
+                    aria-description={option.hint}
                     className={cn(
                       "flex w-full items-start gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.06]",
                       isSelected && "bg-gold/[0.08]"
@@ -145,9 +155,6 @@ export function InlineDropdown<T extends string>({
                       >
                         {option.label}
                       </span>
-                      {option.hint && (
-                        <span className="mt-0.5 block text-[9px] leading-tight text-faint">{option.hint}</span>
-                      )}
                     </span>
                     {/* Reserved whether or not it shows, so the labels of the
                         selected and unselected rows line up. */}
@@ -162,6 +169,21 @@ export function InlineDropdown<T extends string>({
           </motion.ul>
         )}
       </AnimatePresence>
+
+      {open && tip && (
+        <div
+          role="tooltip"
+          // Flips to the cursor's left near the screen's right edge.
+          style={
+            tip.x + 240 > window.innerWidth
+              ? { right: window.innerWidth - tip.x + 10, top: tip.y + 16 }
+              : { left: tip.x + 14, top: tip.y + 16 }
+          }
+          className="pointer-events-none fixed z-50 w-max max-w-[220px] rounded-md border border-white/10 bg-surface-raised px-2 py-1 text-[10px] leading-snug text-muted shadow-lg"
+        >
+          {tip.text}
+        </div>
+      )}
     </div>
   );
 }

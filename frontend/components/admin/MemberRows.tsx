@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { Minus, Monitor, Plus, Shield, SlidersHorizontal, Trash2, Loader2 } from "lucide-react";
 import type { GrantGroup, Member, DataScope, updateMember } from "@/lib/api";
 import { Modal } from "@/components/admin/Modal";
+import { DailyAllowanceControl } from "@/components/admin/DailyAllowanceControl";
 import { COMPACT_CELL as CELL, COMPACT_HEAD as HEAD, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
 
@@ -32,12 +33,14 @@ const STATUS_TONE: Record<string, string> = {
   removed: "border-white/15 bg-white/[0.06] text-faint",
 };
 
-/** "21 Aug 2026", or "Never" for someone who has not signed in yet. */
+/** "21 Aug 2026" and "4:05 pm", or "Never" for someone who has not signed in yet. */
 function formatLastLogin(value?: string) {
-  if (!value) return "Never";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Never";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return { date: "Never", time: "" };
+  return {
+    date: date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }),
+    time: date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }),
+  };
 }
 
 export function MemberRows({
@@ -51,6 +54,7 @@ export function MemberRows({
   selfId,
   canRemove = true,
   visible,
+  dailyAllowance,
 }: {
   members: Member[];
   groups: GrantGroup[];
@@ -78,6 +82,11 @@ export function MemberRows({
    * "selected" peers from everyone — hiding a row must not hide them there.
    */
   visible?: (member: Member) => boolean;
+  /**
+   * Shows the daily-allowance control beside each balance. Omitted where the
+   * viewer cannot manage credits. `onSaved` should reload the balances.
+   */
+  dailyAllowance?: { tenantId?: string; onSaved: () => void };
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -106,7 +115,6 @@ export function MemberRows({
             {/* From lg only: below that the shield by the name already says who is an admin. */}
             <th className={cn(HEAD, "hidden lg:table-cell")}>Role</th>
             <th className={cn(HEAD, "hidden sm:table-cell")}>Status</th>
-            <th className={cn(HEAD, "hidden lg:table-cell")}>Last login</th>
             <th className={cn(HEAD, "hidden lg:table-cell")}>Active</th>
             <th className={cn(HEAD, "text-center")}>Credits</th>
             <th className={cn(HEAD, "text-right")}>Actions</th>
@@ -115,7 +123,7 @@ export function MemberRows({
         <tbody>
           {shown.length === 0 && (
             <tr>
-              <td colSpan={8} className="px-4 py-6 text-center text-[12px] text-muted">
+              <td colSpan={7} className="px-4 py-6 text-center text-[12px] text-muted">
                 No members match these filters.
               </td>
             </tr>
@@ -133,6 +141,7 @@ export function MemberRows({
               onRemove={() => onRemove(member)}
               onGrantCredits={onGrantCredits}
               onReclaimCredits={onReclaimCredits}
+              dailyAllowance={dailyAllowance}
               assignableGrants={assignableGrants}
               readOnly={Boolean(selfId) && String(member.id) === String(selfId)}
               canRemove={canRemove}
@@ -155,6 +164,7 @@ function MemberRow({
   onRemove,
   onGrantCredits,
   onReclaimCredits,
+  dailyAllowance,
   assignableGrants,
   readOnly = false,
   canRemove = true,
@@ -169,6 +179,7 @@ function MemberRow({
   onRemove: () => Promise<void>;
   onGrantCredits?: (member: Member) => void;
   onReclaimCredits?: (member: Member) => void;
+  dailyAllowance?: { tenantId?: string; onSaved: () => void };
   assignableGrants?: string[];
   /** This is the viewer's own row: shown, but not editable. */
   readOnly?: boolean;
@@ -358,12 +369,11 @@ function MemberRow({
           </select>
         </td>
 
-        <td className={cn(CELL, "hidden whitespace-nowrap text-muted tabular-nums lg:table-cell")}>{formatLastLogin(member.lastLoginAt)}</td>
-
         <td className={cn(CELL, "hidden lg:table-cell")}>
+          <div className="flex items-center gap-2.5">
           {/* Live socket connections right now — open tabs and devices. */}
           <span
-            className="relative inline-flex"
+            className="relative inline-flex shrink-0"
             title={
               member.liveSessions > 0
                 ? `${member.liveSessions} open ${member.liveSessions === 1 ? "session" : "sessions"}`
@@ -377,6 +387,19 @@ function MemberRow({
               </span>
             )}
           </span>
+          {/* Last sign-in, under the live indicator: "connected now" and
+              "last here" answer the same question, so they share a cell. */}
+          <span className="whitespace-nowrap text-[10px] leading-tight text-faint tabular-nums">
+            {member.lastLoginAt ? (
+              <>
+                <span className="block">{formatLastLogin(member.lastLoginAt).date}</span>
+                <span className="block">{formatLastLogin(member.lastLoginAt).time}</span>
+              </>
+            ) : (
+              "Never"
+            )}
+          </span>
+          </div>
         </td>
 
         {/* What this person can spend, and a + to top them up.
@@ -415,6 +438,15 @@ function MemberRow({
               >
                 <Plus size={11} />
               </button>
+            )}
+            {dailyAllowance && (
+              <DailyAllowanceControl
+                userId={member.id}
+                holder={member.name || member.email}
+                current={member.credits.dailyAllowance}
+                tenantId={dailyAllowance.tenantId}
+                onSaved={dailyAllowance.onSaved}
+              />
             )}
           </div>
         </td>

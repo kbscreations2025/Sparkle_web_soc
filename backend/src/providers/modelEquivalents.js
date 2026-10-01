@@ -12,6 +12,10 @@ const OPENROUTER_EQUIVALENTS = {
   gemini: {
     "gemini-3-pro-image": "google/gemini-3-pro-image",
     "gemini-3.1-flash-image": "google/gemini-3.1-flash-image",
+    // Veo, for Image to Video — see routeVideoCall.
+    "veo-3.1-generate-preview": "google/veo-3.1",
+    "veo-3.1-fast-generate-preview": "google/veo-3.1-fast",
+    "veo-3.1-lite-generate-preview": "google/veo-3.1-lite",
   },
   openai: {
     "gpt-image-1": "openai/gpt-image-1",

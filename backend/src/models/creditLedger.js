@@ -7,7 +7,7 @@ const mongoose = require("mongoose");
  * record and cannot. Nothing here is ever updated or deleted — a correction
  * is another entry, which is what makes a balance explicable months later.
  */
-const LEDGER_KINDS = ["grant", "revoke", "transfer_in", "transfer_out", "hold", "settle", "refund", "adjust"];
+const LEDGER_KINDS = ["grant", "revoke", "transfer_in", "transfer_out", "hold", "settle", "refund", "adjust", "daily_sweep", "daily_topup"];
 
 const creditLedgerSchema = new mongoose.Schema(
   {
