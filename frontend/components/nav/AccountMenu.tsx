@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
 import { can } from "@/lib/permissions";
 import { useDismissable } from "@/lib/useEscapeKey";
+import { useCanHover } from "@/lib/useCanHover";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,6 +21,7 @@ export function AccountMenu({ avatarClassName }: { avatarClassName?: string } = 
   const { theme, toggle: toggleTheme } = useTheme();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const canHover = useCanHover();
 
   // Closing is delayed so the cursor can cross the gap between the avatar and
   // the panel without the menu vanishing underneath it.
@@ -46,11 +48,17 @@ export function AccountMenu({ avatarClassName }: { avatarClassName?: string } = 
   useDismissable(menuRef, open, closeNow);
 
   return (
-    <div className="relative" ref={menuRef} onMouseEnter={openMenu} onMouseLeave={closeSoon}>
-      {/* Opens rather than toggles: on touch the browser fires a synthetic
-          mouseenter first, so a toggle here would close what that just opened. */}
+    <div
+      className="relative"
+      ref={menuRef}
+      // Hover only where there is a real pointer; touch devices tap to toggle.
+      onMouseEnter={canHover ? openMenu : undefined}
+      onMouseLeave={canHover ? closeSoon : undefined}
+    >
+      {/* With hover, a click only opens: the hover already did, and a toggle
+          would close it. Without hover the tap is the whole interaction. */}
       <button
-        onClick={openMenu}
+        onClick={canHover ? openMenu : () => setOpen((value) => !value)}
         aria-haspopup="menu"
         aria-expanded={open}
         title={user?.name ?? "Account"}

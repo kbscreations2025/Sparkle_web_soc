@@ -7,7 +7,7 @@ import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
-import { OptionChips } from "@/components/studio/OptionChips";
+import { Chip, OptionChips } from "@/components/studio/OptionChips";
 import { AspectChips } from "@/components/studio/AspectChips";
 import { JewelryBuilder, JewelrySelectionChips, useJewelryBuilder } from "@/components/studio/JewelryBuilder";
 import { ReferencePhotoField, useReferencePhoto } from "@/components/studio/ReferencePhotoField";
@@ -44,6 +44,24 @@ const REFINE_HINTS = [
   "Sharpen the linework and detail",
 ];
 
+/** Optional angles to lay out side by side in a single sketch sheet. */
+const VIEW_OPTIONS = [
+  { id: "front", label: "Front view" },
+  { id: "side", label: "Side view" },
+  { id: "top", label: "Top view" },
+  { id: "back", label: "Back view" },
+  { id: "three-quarter", label: "3/4 perspective" },
+  { id: "detail", label: "Close-up detail" },
+] as const;
+type ViewId = (typeof VIEW_OPTIONS)[number]["id"];
+
+/** Empty when no views are picked, so the prompt is exactly what it was before. */
+function viewsInstruction(views: ViewId[]) {
+  if (views.length === 0) return "";
+  const labels = VIEW_OPTIONS.filter((v) => views.includes(v.id)).map((v) => v.label.toLowerCase());
+  return `show the same piece in a single image as a multi-view design sheet with these views arranged neatly side by side: ${labels.join(", ")}`;
+}
+
 export default function TextToSketchPage() {
   const { user } = useAuth();
 
@@ -53,6 +71,11 @@ export default function TextToSketchPage() {
   const [model, setModel] = useState<OptionalImageModelId>(DEFAULT_OPTIONAL_IMAGE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_IMAGE_COUNT);
+  const [views, setViews] = useState<ViewId[]>([]);
+
+  function toggleView(id: ViewId) {
+    setViews((current) => (current.includes(id) ? current.filter((v) => v !== id) : [...current, id]));
+  }
 
   const builder = useJewelryBuilder();
   const workspace = useGenerationWorkspace({ tool: "text_to_sketch", onRefine: (body) => refineSketch({ ...body, model, quality }) });
@@ -68,10 +91,11 @@ export default function TextToSketchPage() {
   }
 
   function handleGenerate() {
+    const promptWithViews = [finalDescription, viewsInstruction(views)].filter(Boolean).join(", ");
     workspace.generate(
       () =>
         textToSketch({
-          prompt: finalDescription,
+          prompt: promptWithViews,
           model,
           quality,
           style,
@@ -112,6 +136,17 @@ export default function TextToSketchPage() {
         <div className="flex-1 space-y-5 px-4 py-5 sm:px-6 md:overflow-y-auto md:px-7">
           <OptionChips label="Sketch Style" options={SKETCH_STYLES} value={style} onChange={setStyle} />
           <AspectChips options={ASPECTS} value={aspect} onChange={setAspect} />
+
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-cream">
+              Views <span className="font-normal normal-case tracking-normal text-muted">(optional, shown in one image)</span>
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {VIEW_OPTIONS.map((option) => (
+                <Chip key={option.id} label={option.label} active={views.includes(option.id)} onClick={() => toggleView(option.id)} />
+              ))}
+            </div>
+          </div>
 
           <ReferencePhotoField photo={reference.photo} onPick={reference.pick} onChange={reference.setPhoto} />
 

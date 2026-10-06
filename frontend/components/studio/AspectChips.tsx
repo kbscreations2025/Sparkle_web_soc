@@ -40,7 +40,7 @@ export function AspectChips<TId extends string>({
               disabled={disabled}
               aria-pressed={active}
               className={cn(
-                "flex min-h-11 min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-2 rounded-xl border text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-0",
+                "flex min-h-14 min-w-[calc(50%-0.25rem)] flex-1 flex-col items-center justify-center gap-1.5 rounded-xl py-2 border text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-0",
                 active
                   ? "border-gold/30 bg-gold/10 text-gold"
                   : "border-white/[0.07] bg-white/[0.03] text-muted hover:border-white/[0.14] hover:text-cream"

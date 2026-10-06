@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useNavItems } from "@/lib/nav";
 import { cn } from "@/lib/utils";
+import { useCanHover } from "@/lib/useCanHover";
+import { useDismissable } from "@/lib/useEscapeKey";
 
 /** Shared by every row so the pill geometry can't drift between the three states. */
 const ROW_BASE = "group relative flex shrink-0 items-center rounded-lg text-xs transition-colors";
@@ -59,6 +61,16 @@ export function SideNav() {
   const expanded = pinned || peeking;
   const collapsed = !expanded;
 
+  const canHover = useCanHover();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closePeek = useCallback(() => setPeeking(false), []);
+  // On touch, a tap outside the open rail closes it.
+  useDismissable(panelRef, !canHover && peeking, closePeek);
+  // ...and so does picking a page from it.
+  useEffect(() => {
+    if (!canHover) setPeeking(false);
+  }, [pathname, canHover]);
+
   // Only the tools this person was granted.
   const items = useNavItems();
 
@@ -77,10 +89,13 @@ export function SideNav() {
         // open it too, or a keyboard user is picking between unlabelled
         // icons. React's handlers here are focusin/focusout, so they fire for
         // descendants.
-        onMouseEnter={() => setPeeking(true)}
-        onMouseLeave={() => setPeeking(false)}
-        onFocus={() => setPeeking(true)}
-        onBlur={() => setPeeking(false)}
+        // Touch devices have no hover — a tap would focus a link and flash the
+        // rail open — so there the edge tab is the only way to open it.
+        ref={panelRef}
+        onMouseEnter={canHover ? () => setPeeking(true) : undefined}
+        onMouseLeave={canHover ? () => setPeeking(false) : undefined}
+        onFocus={canHover ? () => setPeeking(true) : undefined}
+        onBlur={canHover ? () => setPeeking(false) : undefined}
         className={cn(
           // `glass-raised` is the top bar's surface: the two meet at a corner,
           // so sharing one class is what keeps them the same colour in both
@@ -96,7 +111,13 @@ export function SideNav() {
           expanded ? "w-48" : "w-16"
         )}
       >
-        <CollapseTab pinned={pinned} onToggle={() => setPinned((value) => !value)} />
+        {canHover ? (
+          <CollapseTab pinned={pinned} onToggle={() => setPinned((value) => !value)} />
+        ) : (
+          // On touch the tab opens the rail as an overlay, like a hover would,
+          // instead of pinning it and squeezing the workspace on a tablet.
+          <CollapseTab pinned={peeking} onToggle={() => setPeeking((value) => !value)} />
+        )}
 
         {/* A fixed height, so swapping the star for the wordmark never moves
             the list beneath it. */}
