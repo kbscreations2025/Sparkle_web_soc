@@ -123,7 +123,16 @@ export type Organization = {
   /** How many members carry the admin label. */
   adminCount: number;
   /** The pool plus every member's balance, with what runs in flight have frozen. */
-  credits: { balance: number; reserved: number; available: number; pool: number };
+  credits: {
+    balance: number;
+    reserved: number;
+    available: number;
+    pool: number;
+    /** The pool less what is frozen — what the organization's Credits page calls "Available". */
+    poolAvailable: number;
+    /** Net of every super-admin grant and revoke — what the organization has been given. */
+    given: number;
+  };
   createdAt?: string;
 };
 
@@ -884,6 +893,8 @@ export function textToImage(body: {
   aspect: string;
   /** How many variations to generate in parallel, e.g. 2/4/6/8. */
   count: number;
+  /** An optional photo to start the design from, as a data URI. */
+  referenceImage?: string;
 }) {
   return apiRequest<QueuedResult>("/api/text-to-image", {
     method: "POST",
@@ -1746,11 +1757,13 @@ export function fetchCreditTenant(id: string) {
 /** Every organization's ledger at once, for the audit log's credit view. Super admin only. */
 export function fetchAllCreditLedger({
   tenantIds = [],
+  kinds = [],
   before,
   limit = 50,
-}: { tenantIds?: string[]; before?: string | null; limit?: number } = {}) {
+}: { tenantIds?: string[]; kinds?: CreditEntry["kind"][]; before?: string | null; limit?: number } = {}) {
   const params = new URLSearchParams({ limit: String(limit) });
   tenantIds.forEach((id) => params.append("tenantId", id));
+  kinds.forEach((kind) => params.append("kind", kind));
   if (before) params.set("before", before);
   return apiRequest<{
     entries: (CreditEntry & { tenant: string | null })[];

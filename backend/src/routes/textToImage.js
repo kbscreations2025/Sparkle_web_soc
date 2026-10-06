@@ -29,6 +29,7 @@ router.post("/", async (req, res) => {
     quality: requestedQuality,
     refineImage,
     referenceImages,
+    referenceImage,
     instruction,
     displayPrompt,
     preview,
@@ -74,11 +75,13 @@ router.post("/", async (req, res) => {
     });
   }
 
-  if (!prompt || !String(prompt).trim()) {
-    return res.status(400).json({ status: "error", message: "a prompt is required", code: "invalid" });
+  // A reference photo alone is enough to start from, as in Text to Sketch.
+  const reference = parseImages(referenceImage);
+  if ((!prompt || !String(prompt).trim()) && !reference.length) {
+    return res.status(400).json({ status: "error", message: "a prompt or a reference photo is required", code: "invalid" });
   }
 
-  const description = String(prompt).trim();
+  const description = String(prompt || "").trim();
   const numImages = Math.max(1, Math.min(MAX_IMAGE_COUNT, Math.round(Number(count)) || DEFAULT_IMAGE_COUNT));
 
   return queueGeneration(req, res, {
@@ -95,6 +98,7 @@ router.post("/", async (req, res) => {
       style: style || null,
       aspect: aspect || null,
       count: numImages,
+      hasReference: reference.length > 0,
     },
     payload: {
       isRefinement: false,
@@ -108,6 +112,7 @@ router.post("/", async (req, res) => {
       requestedModel,
       requestedQuality,
       conversationId: conversationId || null,
+      sourceImages: reference,
     },
     message: `queued a text-to-image run (${numImages} image${numImages > 1 ? "s" : ""}) on ${modelLabel}`,
   });

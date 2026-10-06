@@ -49,7 +49,7 @@ function isValidTimezone(zone) {
 }
 
 /** Shapes an organization for the console — never leaks provider credentials. */
-const toOrg = (tenant, { memberCount = 0, adminCount = 0, credits = null } = {}) => ({
+const toOrg = (tenant, { memberCount = 0, adminCount = 0, credits = null, given = 0 } = {}) => ({
   id: tenant._id,
   name: tenant.name,
   slug: tenant.slug,
@@ -69,7 +69,7 @@ const toOrg = (tenant, { memberCount = 0, adminCount = 0, credits = null } = {})
    * difference is exactly what an admin is trying to judge before granting
    * more.
    */
-  credits: credits ?? { balance: 0, reserved: 0, available: 0, pool: 0 },
+  credits: { ...(credits ?? { balance: 0, reserved: 0, available: 0, pool: 0, poolAvailable: 0 }), given: given ?? 0 },
   createdAt: tenant.createdAt,
 });
 
@@ -170,10 +170,11 @@ router.get(
 router.get(
   "/organizations",
   handle(async (req, res) => {
-    const [tenants, counts, credits] = await Promise.all([
+    const [tenants, counts, credits, given] = await Promise.all([
       Tenant.find({ deletedAt: null }).sort({ name: 1 }),
       countsByTenant(),
       credit.totalsByTenant(),
+      credit.givenByTenant(),
     ]);
 
     res.json({
@@ -182,6 +183,7 @@ router.get(
         toOrg(tenant, {
           ...counts.get(String(tenant._id)),
           credits: credits.get(String(tenant._id)) ?? null,
+          given: given.get(String(tenant._id)) ?? 0,
         })
       ),
     });
@@ -313,10 +315,11 @@ router.get(
      * waits on another — and the totals are narrowed to this organization
      * rather than grouping every account on the platform to read one row.
      */
-    const [members, balances, orgCredits] = await Promise.all([
+    const [members, balances, orgCredits, orgGiven] = await Promise.all([
       User.find({ tenantId: tenant._id, deletedAt: null }).sort({ role: 1, email: 1 }),
       credit.balancesByUser(tenant._id),
       credit.totalsByTenant(tenant._id),
+      credit.givenByTenant(tenant._id),
     ]);
 
     // Admins first, then everyone else — matching how the console lists them.
@@ -329,6 +332,7 @@ router.get(
         memberCount: members.length,
         adminCount,
         credits: orgCredits.get(String(tenant._id)) ?? null,
+        given: orgGiven.get(String(tenant._id)) ?? 0,
       }),
       members: members.map((m) => toMember(m, live[m.authUserId] ?? 0, balances.get(String(m._id)) ?? null)),
     });

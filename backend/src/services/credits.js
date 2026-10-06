@@ -45,10 +45,33 @@ async function totalsByTenant(tenantIds = null) {
         reserved: { $sum: "$reserved" },
         available: { $sum: "$available" },
         pool: { $sum: { $cond: [{ $eq: ["$userId", null] }, "$balance", 0] } },
+        // What the organization's own Credits page calls "Available" — the
+        // pool less anything frozen — so the console shows the same number.
+        poolAvailable: { $sum: { $cond: [{ $eq: ["$userId", null] }, "$available", 0] } },
       },
     },
   ]);
   return new Map(rows.map((row) => [String(row._id), row]));
+}
+
+/**
+ * What each organization has been given, net: every super-admin grant (to
+ * its pool or a member) less every revoke. Transfers inside the organization
+ * and daily top-ups only move credits it already had, so they don't count.
+ * Read beside `totalsByTenant`'s balance, it answers "how much of what we
+ * gave is left".
+ */
+async function givenByTenant(tenantIds = null) {
+  const rows = await CreditLedger.aggregate([
+    {
+      $match: {
+        kind: { $in: ["grant", "revoke"] },
+        ...(tenantIds ? { tenantId: { $in: [].concat(tenantIds) } } : {}),
+      },
+    },
+    { $group: { _id: "$tenantId", given: { $sum: "$amount" } } },
+  ]);
+  return new Map(rows.map((row) => [String(row._id), row.given]));
 }
 
 /**
@@ -561,6 +584,7 @@ module.exports = {
   runDailyResets,
   startDailyResetScheduler,
   totalsByTenant,
+  givenByTenant,
   balancesByUser,
   transfer,
   quote,

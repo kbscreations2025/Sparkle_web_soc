@@ -11,15 +11,16 @@ import { cn } from "@/lib/utils";
 /** Shared by every row so the pill geometry can't drift between the three states. */
 const ROW_BASE = "group relative flex shrink-0 items-center rounded-lg text-xs transition-colors";
 
-/** Labelled: a full-width pill with the icon and name side by side. */
-const ROW_EXPANDED = "gap-2.5 px-2.5 py-2";
-
 /**
- * Icon only: a fixed square rather than a squashed pill, so the boxes read as
- * a column of equal tiles instead of inheriting whatever width the rail
- * happens to be.
+ * One geometry for both states, so nothing moves when the rail opens: every
+ * row is 40px tall and the icon sits 12px in from the row's left edge either
+ * way. Only the width changes — a 36px square collapsed (which centres it in
+ * the 64px rail, given the nav's 14px side padding), full width expanded with
+ * the label appearing beside the icon.
  */
-const ROW_COLLAPSED = "h-10 w-10 justify-center p-0";
+const ROW_SHAPE = "h-9 gap-2.5 pl-2.5 pr-2.5";
+const ROW_EXPANDED = "w-full";
+const ROW_COLLAPSED = "w-9";
 
 /**
  * The active state, as an overlay rather than a left border.
@@ -97,7 +98,9 @@ export function SideNav() {
       >
         <CollapseTab pinned={pinned} onToggle={() => setPinned((value) => !value)} />
 
-        <div className="flex shrink-0 items-center justify-center border-b border-white/[0.06] px-3 py-3">
+        {/* A fixed height, so swapping the star for the wordmark never moves
+            the list beneath it. */}
+        <div className="flex h-[61px] shrink-0 items-center justify-center border-b border-white/[0.06] px-3">
           <Link href="/" title="Dashboard" className="flex min-w-0 items-center">
             {/* The star alone has no room for the wordmark beside it. The
                 `width`/`height` props are the intrinsic size hint behind the
@@ -125,26 +128,31 @@ export function SideNav() {
           </Link>
         </div>
 
-        <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
+        <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3.5 py-2">
           {/* Only with the wordmark — under the bare star it would be a line of
               text wider than the rail it sits in. Outside the list, not inside
               it: a `ul` may only contain `li`. */}
-          {!collapsed && (
-            <p className="truncate px-1 pb-2 text-[9px] font-medium uppercase tracking-[0.18em] text-faint/70">
-              Brilliance… made effortless
-            </p>
-          )}
+          {/* Its line is kept even when hidden, so the rows below start at the
+              same height in both states. */}
+          <p
+            aria-hidden={collapsed}
+            className={cn(
+              "truncate px-1 pb-2 text-[9px] font-medium uppercase tracking-[0.18em] text-faint/70 transition-opacity duration-200",
+              collapsed && "opacity-0"
+            )}
+          >
+            Brilliance… made effortless
+          </p>
 
-          {/* Centred when collapsed: the squares are a fixed 40px, narrower
-              than the rail, so without this they would hug the left edge. */}
-          <ul className={cn("flex flex-col gap-1", collapsed && "items-center")}>
+
+          <ul className="flex flex-col gap-1">
             {items.map(({ id, label, icon: Icon, href }) => {
               // Prefix match, not equality: a tool's workspace lives under its
               // own route (/cleaning/default), and exact matching would leave
               // the nav showing nothing selected once you were inside one.
               const isActive = Boolean(href) && (pathname === href || pathname.startsWith(`${href}/`));
 
-              const shape = cn(ROW_BASE, collapsed ? ROW_COLLAPSED : ROW_EXPANDED);
+              const shape = cn(ROW_BASE, ROW_SHAPE, collapsed ? ROW_COLLAPSED : ROW_EXPANDED);
 
               // `relative z-10` lifts these above the active overlay, which is
               // painted behind them.

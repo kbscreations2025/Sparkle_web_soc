@@ -29,16 +29,23 @@ function variationNote(count) {
 }
 
 /** Builds the prompt for an initial (non-refinement) generation. */
-function buildTextToImagePrompt({ description, style, aspect, count = 1 }) {
+function buildTextToImagePrompt({ description, style, aspect, count = 1, hasReference = false }) {
   const desc =
     description?.trim() ||
-    "an elegant, beautifully designed piece of fine jewelry — the artist's own tasteful choice of type, metal, stones and setting";
+    (hasReference
+      ? "Recreate the attached reference piece faithfully as a finished photograph"
+      : "an elegant, beautifully designed piece of fine jewelry — the artist's own tasteful choice of type, metal, stones and setting");
   const enriched = `${desc}. ${STYLE_GUIDE[style] || ""}. Fine jewellery photography, high resolution.`;
   const aspectNote = ASPECT_TEXT[aspect] || ASPECT_TEXT.square;
-  return (
+  const prompt =
     `${enriched} Image orientation: ${aspectNote}. Show the complete piece from a single fixed elegant hero angle, ` +
-    `fully framed with nothing cropped.${variationNote(count)}`
-  );
+    `fully framed with nothing cropped.${variationNote(count)}`;
+
+  // Same wording as Text to Sketch's reference, so the two tools treat a
+  // starting photo alike: the photo sets the design, the brief overrides it.
+  return hasReference
+    ? `A reference jewellery photo is attached — use it as the visual starting point for the design (its jewelry type, silhouette and general design language), then apply the design brief below on top of it, favouring anything the brief specifies over the reference where they conflict.\n\n${prompt}`
+    : prompt;
 }
 
 /** Wraps a refinement instruction the same way Image Cleaning's refine step does. */

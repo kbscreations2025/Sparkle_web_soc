@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import Image from "next/image";
-import { ImagePlus, Pencil, Wand2, X } from "lucide-react";
+import { useState } from "react";
+import { Wand2 } from "lucide-react";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
 import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
@@ -11,7 +10,7 @@ import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { OptionChips } from "@/components/studio/OptionChips";
 import { AspectChips } from "@/components/studio/AspectChips";
 import { JewelryBuilder, JewelrySelectionChips, useJewelryBuilder } from "@/components/studio/JewelryBuilder";
-import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
+import { ReferencePhotoField, useReferencePhoto } from "@/components/studio/ReferencePhotoField";
 import {
   textToSketch,
   refineOn,
@@ -28,7 +27,6 @@ import {
   type AspectId,
   type SketchStyleId,
 } from "@/lib/jewelryConfigurator";
-import { compressImage } from "@/lib/image";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -55,13 +53,11 @@ export default function TextToSketchPage() {
   const [model, setModel] = useState<OptionalImageModelId>(DEFAULT_OPTIONAL_IMAGE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState<number>(DEFAULT_IMAGE_COUNT);
-  /** An optional photo the design is drawn from, separate from chat attachments. */
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
-  const [preview, setPreview] = useState<PreviewImage | null>(null);
-  const referenceInput = useRef<HTMLInputElement>(null);
 
   const builder = useJewelryBuilder();
   const workspace = useGenerationWorkspace({ tool: "text_to_sketch", onRefine: (body) => refineSketch({ ...body, model, quality }) });
+  /** An optional photo the design is drawn from, separate from chat attachments. */
+  const reference = useReferencePhoto(workspace.setError);
 
   // The builder and the free text are independent: either can be used alone,
   // and typing never clobbers a selection or the other way round.
@@ -69,14 +65,6 @@ export default function TextToSketchPage() {
 
   if (!can(user, PERMISSION)) {
     return <ToolAccessNotice tool="Text to Sketch" />;
-  }
-
-  async function pickReference(file: File) {
-    try {
-      setReferenceImage(await compressImage(file));
-    } catch (err) {
-      workspace.setError(err instanceof Error ? err.message : "Could not read that file");
-    }
   }
 
   function handleGenerate() {
@@ -89,9 +77,9 @@ export default function TextToSketchPage() {
           style,
           aspect,
           count,
-          referenceImage: referenceImage ?? undefined,
+          referenceImage: reference.photo ?? undefined,
         }),
-      { count, prompt: finalDescription, images: referenceImage ? [referenceImage] : [] }
+      { count, prompt: finalDescription, images: reference.photo ? [reference.photo] : [] }
     );
   }
 
@@ -125,55 +113,7 @@ export default function TextToSketchPage() {
           <OptionChips label="Sketch Style" options={SKETCH_STYLES} value={style} onChange={setStyle} />
           <AspectChips options={ASPECTS} value={aspect} onChange={setAspect} />
 
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-cream">
-              Reference Photo <span className="font-normal normal-case text-faint">(optional)</span>
-            </p>
-            <input
-              ref={referenceInput}
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) pickReference(file);
-                event.target.value = "";
-              }}
-            />
-            {referenceImage ? (
-              <div className="relative inline-block">
-                {/* Opens the same preview-and-annotate surface the results use, so
-                    a reference can be marked up before it is drawn from. */}
-                <button
-                  type="button"
-                  onClick={() => setPreview({ src: referenceImage, key: "reference" })}
-                  title="Preview or annotate this reference"
-                  className="group relative block h-16 w-16 overflow-hidden rounded-lg border border-white/10 transition-colors hover:border-gold/40"
-                >
-                  <Image src={referenceImage} alt="Reference" fill sizes="64px" className="object-cover" />
-                  <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
-                    <Pencil size={13} className="text-white" />
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setReferenceImage(null)}
-                  aria-label="Remove reference"
-                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-surface-float text-faint transition-colors hover:text-cream"
-                >
-                  <X size={10} />
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => referenceInput.current?.click()}
-                className="flex items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-[11px] text-muted transition-colors hover:border-white/[0.14] hover:text-cream"
-              >
-                <ImagePlus size={13} /> Start from a photo
-              </button>
-            )}
-          </div>
+          <ReferencePhotoField photo={reference.photo} onPick={reference.pick} onChange={reference.setPhoto} />
 
           <div className="space-y-1">
             <PromptCard
@@ -184,25 +124,23 @@ export default function TextToSketchPage() {
               placeholder="Pick options in the Jewelry Builder, or type freely…"
               // A pasted photo is the reference photo, not text — same as
               // "Start from a photo", just without leaving the keyboard.
-              onPasteImage={pickReference}
+              onPasteImage={reference.pick}
               topSlot={builder.selectedCount > 0 ? <JewelrySelectionChips builder={builder} /> : undefined}
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={TEXT_COUNT_OPTIONS} />}
               footerEnd={<InlineModelSelect models={OPTIONAL_IMAGE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
-            <RunButton onClick={handleGenerate} icon={<Wand2 size={14} />}>
+            <RunButton
+              onClick={handleGenerate}
+              // Nothing to work from yet: the builder starts empty.
+              disabled={!finalDescription && !reference.photo}
+              icon={<Wand2 size={14} />}
+            >
               {count > 1 ? `Sketch ${count} designs` : "Sketch design"}
             </RunButton>
           </div>
         </div>
       </div>
-
-      <ImagePreviewLayer
-        preview={preview}
-        onClose={() => setPreview(null)}
-        onSave={(marked) => setReferenceImage(marked)}
-        downloadName="reference.jpg"
-      />
     </div>
   );
 }

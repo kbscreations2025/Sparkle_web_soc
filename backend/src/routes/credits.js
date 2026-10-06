@@ -108,10 +108,11 @@ router.get(
     const tenantId = req.dbUser.tenantId;
     if (!tenantId) return bad(res, "you are not a member of an organization");
 
-    const [tenant, users, accounts] = await Promise.all([
+    const [tenant, users, accounts, given] = await Promise.all([
       Tenant.findOne({ _id: tenantId, deletedAt: null }).select("name slug status"),
       User.find({ tenantId, deletedAt: null }).select("name email status role").sort({ name: 1 }).exec(),
       CreditAccount.find({ tenantId }).exec(),
+      credit.givenByTenant(tenantId),
     ]);
     if (!tenant) return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
 
@@ -124,6 +125,15 @@ router.get(
       pool: pool
         ? toAccount(pool, "Organization pool")
         : { id: null, holder: "Organization pool", balance: 0, reserved: 0, available: 0 },
+      /*
+       * The same two figures the super-admin console shows for this
+       * organization, so both sides read one number: what is left across the
+       * pool and every member, and what platform staff have given in total.
+       */
+      totals: {
+        remaining: accounts.reduce((sum, account) => sum + (account.balance || 0), 0),
+        given: given.get(String(tenantId)) ?? 0,
+      },
       canManage: Boolean(req.isSuperAdmin || hasPermission(req.dbUser, "org.credits.manage")),
       /*
        * The reader's own row leads the list, then everyone else by name.
@@ -401,10 +411,11 @@ router.get(
     // All three key off the id in the path, so none has to wait for another —
     // the sibling /my handler already does it this way.
     const tenantId = req.params.id;
-    const [tenant, users, accounts] = await Promise.all([
+    const [tenant, users, accounts, given] = await Promise.all([
       Tenant.findOne({ _id: tenantId, deletedAt: null }).select("name slug status"),
       User.find({ tenantId, deletedAt: null }).select("name email status role").sort({ name: 1 }).exec(),
       CreditAccount.find({ tenantId }).exec(),
+      credit.givenByTenant(tenantId),
     ]);
     if (!tenant) return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
 
@@ -480,6 +491,9 @@ router.get(
 
     const filter = {};
     if (tenantIds.length) filter.tenantId = { $in: tenantIds };
+    // Narrow to some kinds — the console's grant history asks for grants and revokes only.
+    const kinds = [].concat(req.query.kind || []).filter((kind) => CreditLedger.LEDGER_KINDS.includes(kind));
+    if (kinds.length) filter.kind = { $in: kinds };
 
     if (req.query.before) {
       const [iso, id] = String(req.query.before).split("_");

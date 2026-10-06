@@ -3,7 +3,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { ChevronRight, X } from "lucide-react";
 import {
-  DEFAULT_JEWELRY_TYPE,
   buildJewelryConfigurator,
   buildJewelryPrompt,
   clearJewelryTypeDependentSelections,
@@ -23,7 +22,10 @@ import { cn } from "@/lib/utils";
 
 /** The builder's state and the two derived values a page actually consumes. */
 export function useJewelryBuilder() {
-  const [selections, setSelections] = useState<Record<string, string>>({ jewelryType: DEFAULT_JEWELRY_TYPE });
+  // Starts empty: nothing is chosen for the user. With no type picked the
+  // groups below fall back to the ring options (see buildJewelryConfigurator),
+  // and nothing is written into the brief until something is selected.
+  const [selections, setSelections] = useState<Record<string, string>>({});
 
   const groups = useMemo(() => buildJewelryConfigurator(selections.jewelryType), [selections.jewelryType]);
 

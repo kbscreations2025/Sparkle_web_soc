@@ -25,6 +25,7 @@ import { Modal } from "@/components/admin/Modal";
 import { Select, type SelectOption } from "@/components/ui/Select";
 import { FilterChecklist, TableFilterBar } from "@/components/admin/TableFilterBar";
 import { useMemberFilter } from "@/components/admin/MemberFilterBar";
+import { GrantHistory } from "@/components/admin/GrantHistory";
 import { CELL, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
 import { cn } from "@/lib/utils";
 
@@ -105,6 +106,8 @@ export default function ConsolePage() {
   const [orgStatuses, setOrgStatuses] = useState<string[]>([]);
   // One filter for whichever organization is expanded — only one is open at a time.
   const memberFilter = useMemberFilter();
+  /** The organization whose grant history is open. */
+  const [historyFor, setHistoryFor] = useState<Organization | null>(null);
   const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -479,20 +482,38 @@ export default function ConsolePage() {
                             is often just work in progress. The + grants to
                             the pool without leaving the page. */}
                         <td className={cn(CELL, "text-center")} onClick={(event) => event.stopPropagation()}>
+                          {/* Remaining on top — the pool plus every member's
+                              unspent balance — and what was given beneath it.
+                              The pair opens the grant history. */}
                           <div className="inline-flex items-center gap-1.5">
-                            <span
+                            <button
+                              type="button"
+                              onClick={() => setHistoryFor(org)}
                               title={
-                                `${org.credits.balance.toLocaleString()} held in total · ` +
-                                `${org.credits.pool.toLocaleString()} in the organization pool · ` +
-                                `${org.credits.reserved.toLocaleString()} frozen by runs in progress`
+                                `${org.credits.poolAvailable.toLocaleString()} available in the pool · ` +
+                                `${org.credits.balance.toLocaleString()} still unspent, members included · ` +
+                                `${org.credits.given.toLocaleString()} given in total · ` +
+                                `${org.credits.reserved.toLocaleString()} frozen by runs in progress — click for the grant history`
                               }
-                              className={cn(
-                                "tabular-nums",
-                                org.credits.balance === 0 ? "text-error" : "text-cream"
-                              )}
+                              className="flex flex-col items-end rounded px-1 leading-tight transition-colors hover:bg-gold/[0.06]"
                             >
-                              {org.credits.balance.toLocaleString()}
-                            </span>
+                              {/* The same "Available" the organization sees on
+                                  its own Credits page: the pool, less frozen. */}
+                              <span
+                                className={cn(
+                                  "text-[14px] font-semibold tabular-nums",
+                                  org.credits.poolAvailable === 0 ? "text-error" : "text-cream"
+                                )}
+                              >
+                                {org.credits.poolAvailable.toLocaleString()}
+                              </span>
+                              {/* Beneath, small: still unspent — the pool plus every
+                                  member's balance. The total given is in the hover
+                                  text and the grant history. */}
+                              <span className="text-[10px] text-faint tabular-nums">
+                                {org.credits.balance.toLocaleString()}
+                              </span>
+                            </button>
                             <button
                               onClick={() => setGrantTarget({ orgId: org.id, orgName: org.name, userId: null, holder: `the ${org.name} pool` })}
                               title={`Grant credits to the ${org.name} pool`}
@@ -613,6 +634,16 @@ export default function ConsolePage() {
           </Modal>
         );
       })()}
+
+      {historyFor && (
+        <GrantHistory
+          tenantId={historyFor.id}
+          orgName={historyFor.name}
+          remaining={historyFor.credits.balance}
+          given={historyFor.credits.given}
+          onClose={() => setHistoryFor(null)}
+        />
+      )}
 
       {grantTarget && (
         <Modal onClose={() => !granting && setGrantTarget(null)}>

@@ -5,16 +5,22 @@ const { buildTextToImagePrompt, buildTextToImageRefinePrompt } = require("../pro
 const TEXT_TO_IMAGE_JOB = "textToImage.generate";
 
 /**
- * Text to Image: a written brief rendered as a photograph. Nothing goes in but
- * the words, so `sourceImages` is empty and the shared runner sends the prompt
- * alone.
+ * Text to Image: a written brief rendered as a photograph, optionally from a
+ * reference photo. With one, it travels in `sourceImages` and the shared
+ * runner sends it alongside the prompt; without, the prompt goes alone.
  */
 registerJobHandler(TEXT_TO_IMAGE_JOB, (context) =>
   runGenerationJob({
     ...context,
     tool: "text_to_image",
     buildPrompt: ({ data, count }) =>
-      buildTextToImagePrompt({ description: data.prompt, style: data.style, aspect: data.aspect, count }),
+      buildTextToImagePrompt({
+        description: data.prompt,
+        style: data.style,
+        aspect: data.aspect,
+        count,
+        hasReference: Boolean(data.sourceImages?.length),
+      }),
     buildRefinePrompt: buildTextToImageRefinePrompt,
   })
 );

@@ -11,6 +11,7 @@ import { OptionChips } from "@/components/studio/OptionChips";
 import { AspectChips } from "@/components/studio/AspectChips";
 import { JewelryBuilder, JewelrySelectionChips, useJewelryBuilder } from "@/components/studio/JewelryBuilder";
 import { ToolHeader } from "@/components/studio/ToolHeader";
+import { ReferencePhotoField, useReferencePhoto } from "@/components/studio/ReferencePhotoField";
 import {
   textToImage,
   refineTextToImage,
@@ -67,6 +68,8 @@ export default function TextToImagePage() {
       if (id) setModel(id);
     },
   });
+  /** An optional photo to start the design from, separate from chat attachments. */
+  const reference = useReferencePhoto(workspace.setError);
 
   // The builder and the free text are independent: either can be used alone,
   // and typing never clobbers a selection or the other way round.
@@ -77,10 +80,19 @@ export default function TextToImagePage() {
   }
 
   function handleGenerate() {
-    workspace.generate(() => textToImage({ prompt: finalDescription, model, quality, style, aspect, count }), {
-      count,
-      prompt: finalDescription,
-    });
+    workspace.generate(
+      () =>
+        textToImage({
+          prompt: finalDescription,
+          model,
+          quality,
+          style,
+          aspect,
+          count,
+          referenceImage: reference.photo ?? undefined,
+        }),
+      { count, prompt: finalDescription, images: reference.photo ? [reference.photo] : [] }
+    );
   }
 
   if (workspace.status !== "idle") {
@@ -113,6 +125,8 @@ export default function TextToImagePage() {
           <OptionChips label="Visual Style" options={STYLES} value={style} onChange={setStyle} />
           <AspectChips options={ASPECTS} value={aspect} onChange={setAspect} />
 
+          <ReferencePhotoField photo={reference.photo} onPick={reference.pick} onChange={reference.setPhoto} />
+
           <div className="space-y-1">
             <PromptCard
               label="Description"
@@ -122,6 +136,9 @@ export default function TextToImagePage() {
               // Phrased without a direction: the builder is to the left on a
               // desktop and above on a phone.
               placeholder="Pick options in the Jewelry Builder, or type freely…"
+              // A pasted photo is the reference photo, not text — same as
+              // "Start from a photo", just without leaving the keyboard.
+              onPasteImage={reference.pick}
               onIssueCount={setSpellIssueCount}
               topSlot={builder.selectedCount > 0 ? <JewelrySelectionChips builder={builder} /> : undefined}
               aside={
@@ -135,7 +152,12 @@ export default function TextToImagePage() {
               footerEnd={<InlineModelSelect models={OPTIONAL_IMAGE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
-            <RunButton onClick={handleGenerate} icon={<Wand2 size={14} />}>
+            <RunButton
+              onClick={handleGenerate}
+              // Nothing to work from yet: the builder starts empty.
+              disabled={!finalDescription && !reference.photo}
+              icon={<Wand2 size={14} />}
+            >
               {count > 1 ? `Generate ${count} images` : "Generate image"}
             </RunButton>
           </div>

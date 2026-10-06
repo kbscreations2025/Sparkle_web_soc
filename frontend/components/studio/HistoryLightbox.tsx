@@ -285,7 +285,7 @@ export function HistoryLightbox({
                   poster={active.thumbnailUrl ?? undefined}
                   controls
                   playsInline
-                  className="max-h-[58vh] max-w-[94vw] rounded md:max-h-[78vh] md:max-w-[86vw]"
+                  className="max-h-[66vh] max-w-[96vw] rounded md:max-h-[84vh] md:max-w-[90vw]"
                 />
               ) : (
                 /*
@@ -367,7 +367,7 @@ export function HistoryLightbox({
                  text but not which Marketing Kit surface wrote it, and
                  Affinity's stored output is JSON, which finds no headings
                  and correctly falls through to the plain panel. */
-              <div className="max-h-[58vh] w-[min(94vw,64rem)] overflow-y-auto md:max-h-[78vh] md:w-[min(86vw,64rem)]">
+              <div className="max-h-[66vh] w-[min(96vw,64rem)] overflow-y-auto md:max-h-[84vh] md:w-[min(90vw,64rem)]">
                 {looksLikeBrandStory(item.text) ? (
                   <BrandStoryResult text={item.text} />
                 ) : item.kitId ? (
@@ -417,21 +417,21 @@ export function HistoryLightbox({
       {/* Zoom is for a still. A video has its own controls and text has
           nothing to magnify, so the bar is absent rather than inert. */}
       {active?.type !== "video" && active && (
-        <div className="mt-3 flex items-center gap-1 rounded-full border border-white/15 bg-black/60 px-1.5 py-1 backdrop-blur-sm">
+        <div className="mt-2 flex items-center gap-0.5 rounded-full border border-white/15 bg-black/60 px-1 py-0.5 backdrop-blur-sm">
           <button
             type="button"
             onClick={zoom.zoomOut}
             disabled={zoom.atMin}
             title="Zoom out"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-30"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-30"
           >
-            <ZoomOut size={14} />
+            <ZoomOut size={12} />
           </button>
           <button
             type="button"
             onClick={zoom.reset}
             title="Reset to 100%"
-            className="w-11 select-none rounded-full text-center text-[10px] font-medium tabular-nums text-white/70 transition-colors hover:bg-white/15 hover:text-white"
+            className="w-9 select-none rounded-full text-center text-[9px] font-medium tabular-nums text-white/70 transition-colors hover:bg-white/15 hover:text-white"
           >
             {Math.round(scale * 100)}%
           </button>
@@ -440,9 +440,9 @@ export function HistoryLightbox({
             onClick={zoom.zoomIn}
             disabled={zoom.atMax}
             title="Zoom in"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-30"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-30"
           >
-            <ZoomIn size={14} />
+            <ZoomIn size={12} />
           </button>
         </div>
       )}
@@ -485,8 +485,8 @@ function fittedBox(asset: HistoryOutput): CSSProperties {
  * has loaded, and height follows from the ratio.
  */
 const FITTED_IMAGE =
-  "w-[min(94vw,calc(58vh*var(--ar)))] max-w-[94vw] max-h-[58vh] " +
-  "md:w-[min(86vw,calc(78vh*var(--ar)))] md:max-w-[86vw] md:max-h-[78vh]";
+  "w-[min(96vw,calc(66vh*var(--ar)))] max-w-[96vw] max-h-[66vh] " +
+  "md:w-[min(90vw,calc(84vh*var(--ar)))] md:max-w-[90vw] md:max-h-[84vh]";
 
 /** Coarse "N units ago" — history doesn't need second-level precision. */
 function timeAgo(iso: string) {
