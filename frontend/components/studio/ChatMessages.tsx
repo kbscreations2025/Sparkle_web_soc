@@ -166,7 +166,7 @@ function UserBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) => vo
             ))}
           </div>
         )}
-        <p className="whitespace-pre-wrap break-words text-right text-[11px] leading-snug text-cream">{msg.content}</p>
+        <p className="whitespace-pre-wrap break-words text-left text-[11px] leading-snug text-cream">{msg.content}</p>
       </div>
     </div>
   );

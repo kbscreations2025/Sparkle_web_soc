@@ -41,6 +41,18 @@ const REFINE_HINTS = [
   "Add a halo of diamonds",
 ];
 
+/** Below this long edge, small stones are only a few pixels and get lost. */
+const MIN_SKETCH_SIDE = 800;
+
+function imageSize(src: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve({ w: Infinity, h: Infinity });
+    img.src = src;
+  });
+}
+
 export default function SketchToImagePage() {
   const { user } = useAuth();
 
@@ -54,6 +66,7 @@ export default function SketchToImagePage() {
   /** Whether the blank drawing sheet is open, for a design with no sketch to upload. */
   const [drawing, setDrawing] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [smallWarning, setSmallWarning] = useState<string | null>(null);
 
   const workspace = useGenerationWorkspace({
     tool: "sketch_to_image",
@@ -70,6 +83,16 @@ export default function SketchToImagePage() {
     try {
       const compressed = await Promise.all(files.map(compressImage));
       setSketches((current) => [...current, ...compressed].slice(0, MAX_SKETCHES));
+
+      // Small stones are a few pixels in a small image — the model can't count
+      // what it can't see. Warn rather than block: it still renders.
+      const sizes = await Promise.all(compressed.map(imageSize));
+      const smallest = sizes.reduce((min, s) => (Math.max(s.w, s.h) < Math.max(min.w, min.h) ? s : min), sizes[0]);
+      setSmallWarning(
+        smallest && Math.max(smallest.w, smallest.h) < MIN_SKETCH_SIDE
+          ? `This sketch is very small (${smallest.w}×${smallest.h}px), so fine details like small diamonds may not be reproduced accurately. For best results upload a clear photo or scan at least ${MIN_SKETCH_SIDE}px wide.`
+          : null
+      );
     } catch (err) {
       workspace.setError(err instanceof Error ? err.message : "Could not read those files");
     }
@@ -231,6 +254,10 @@ export default function SketchToImagePage() {
                 </div>
               )}
             </div>
+
+            {smallWarning && sketches.length > 0 && (
+              <p className="rounded-lg border border-gold/25 bg-gold/[0.08] px-3 py-2 text-[11px] text-gold">{smallWarning}</p>
+            )}
           </section>
 
           <div className="space-y-1">
