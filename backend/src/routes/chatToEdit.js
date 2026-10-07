@@ -1,6 +1,7 @@
 const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
-const { buildChatEditPrompt } = require("../prompts");
+const { buildChatEditPrompt, buildReferenceNote, SCALE_NOTE, ANATOMY_NOTE } = require("../prompts");
+const { resolveIntent, intentForTool, refineCountFor, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
 const { recordGeneration, parseDataUri, isOwnConversation } = require("../generationService");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
@@ -70,7 +71,27 @@ router.post("/", async (req, res) => {
 
     const tenant = await loadTenantOrThrow(dbUser);
 
-    const prompt = buildChatEditPrompt(instruction.trim(), parsedReferences.length);
+    /*
+     * What the turn asks for (see prompts/intent.js): "more designs" makes
+     * several images, each told to differ from the rest; "make it a pendant"
+     * or "in rose gold" reshape the prompt. A plain edit is unchanged.
+     */
+    const intent = intentForTool(await resolveIntent(instruction.trim(), { tenant }), "chat_to_edit");
+    const count = refineCountFor(intent, "chat_to_edit");
+    const basePrompt = buildChatEditPrompt(instruction.trim(), parsedReferences.length);
+    const prompts = Array.from({ length: count }, (_, index) =>
+      applyIntentToPrompt({
+        basePrompt,
+        instruction: instruction.trim(),
+        intent,
+        tool: "chat_to_edit",
+        referenceNote: [buildReferenceNote(parsedReferences.length).trim(), SCALE_NOTE, ANATOMY_NOTE].filter(Boolean).join(" "),
+        variationIndex: index,
+        variationTotal: count,
+      })
+    );
+    const prompt = prompts.length === 1 ? prompts[0] : prompts.join("\n\n─────\n\n");
+    const intentLabel = describeIntent(intent, "chat_to_edit", count);
 
     /*
      * Charged like every other tool.
@@ -86,7 +107,7 @@ router.post("/", async (req, res) => {
       tool: "chat_to_edit",
       modelId: model,
       quality,
-      count: 1,
+      count,
     });
 
     let held = null;
@@ -115,20 +136,22 @@ router.post("/", async (req, res) => {
       }
     }
 
-    let output;
+    let outputs;
     let providerId;
     try {
-      ({ output, providerId } = await routeProviderCall({
-        tenant,
-        provider,
-        modelId: model,
-        prompt,
-        quality,
-        images: [
-          { mimeType: parsedBase.mimeType, base64: parsedBase.base64 },
-          ...parsedReferences.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),
-        ],
-      }));
+      const images = [
+        { mimeType: parsedBase.mimeType, base64: parsedBase.base64 },
+        ...parsedReferences.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),
+      ];
+      const settled = await Promise.allSettled(
+        prompts.map((variationPrompt) =>
+          routeProviderCall({ tenant, provider, modelId: model, prompt: variationPrompt, quality, images })
+        )
+      );
+      const successes = settled.filter((entry) => entry.status === "fulfilled").map((entry) => entry.value);
+      if (successes.length === 0) throw settled[0].reason;
+      outputs = successes.map((entry) => entry.output);
+      providerId = successes[0].providerId;
     } catch (err) {
       // Nothing was produced, so nothing is owed.
       if (held?.held) {
@@ -161,7 +184,7 @@ router.post("/", async (req, res) => {
           { image: parsedBase, role: parentGenerationId ? "edited" : "uploaded" },
           ...parsedReferences.map((ref) => ({ image: ref, role: "reference" })),
         ],
-        outputImages: [{ image: output, role: "generated" }],
+        outputImages: outputs.map((output) => ({ image: output, role: "generated" })),
         providerId,
         provider,
       });
@@ -171,21 +194,22 @@ router.post("/", async (req, res) => {
       console.error("chat-to-edit: could not record generation history:", err);
     }
 
-    // One image, delivered. Settled after the call rather than before, so a
-    // provider failure costs nothing — and outside the history try/catch,
-    // because the image exists whether or not the record was written.
+    // Charged for what was delivered. Settled after the call rather than
+    // before, so a provider failure costs nothing — and outside the history
+    // try/catch, because the images exist whether or not the record was written.
     if (held?.held) {
       await credit
-        .settleRun({ credits: held, jobId: null, generationId, deliveredUnits: 1 })
+        .settleRun({ credits: held, jobId: null, generationId, deliveredUnits: outputs.length })
         .catch((err) => console.error("chat-to-edit: could not settle credits:", err.message));
     }
 
     res.json({
       status: "success",
-      images: [`data:${output.mimeType};base64,${output.base64}`],
+      images: outputs.map((output) => `data:${output.mimeType};base64,${output.base64}`),
       model,
       conversationId,
       generationId,
+      intentLabel,
     });
   } catch (err) {
     logAudit({

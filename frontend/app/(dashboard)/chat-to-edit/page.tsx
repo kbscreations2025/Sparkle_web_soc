@@ -163,7 +163,12 @@ export default function ChatToEditPage() {
    * function — there is no separate "generate" vs "refine" handler.
    */
   async function send(instructionOverride?: string) {
-    const baseImage = currentImage ?? pendingImage;
+    // The picked option is the one edited next — after "more designs" there
+    // are several, and the user continues from whichever they chose. Only a
+    // data URI qualifies: a stored url would need fetching first, and the
+    // current image already holds those bytes.
+    const picked = selectedView?.startsWith("data:") ? selectedView : null;
+    const baseImage = picked ?? currentImage ?? pendingImage;
     if (!baseImage || readOnly) return;
 
     const instruction = (instructionOverride ?? chatInput).trim() || "Enhance this image.";
@@ -207,7 +212,15 @@ export default function ChatToEditPage() {
         setPendingImage(null);
         setHistory((current) => [
           ...current,
-          { id: crypto.randomUUID(), role: "assistant", content: "Updated", image: edited },
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "Updated",
+            image: edited,
+            // Several when the turn asked for more design options.
+            images: result.images,
+            note: result.intentLabel ?? undefined,
+          },
         ]);
       } else if (creditGuard(result)) {
         // The edit was priced and refused, so it never ran. Take the turn back

@@ -2,6 +2,8 @@ const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("
 const { recordGeneration } = require("../generationService");
 const { createLivePreview } = require("../storage/thumbnail");
 const User = require("../models/user");
+const { buildReferenceNote } = require("../prompts/shared");
+const { detectIntent, intentForTool, refineCountFor, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
 
 /**
  * The body every image-generating job shares.
@@ -88,24 +90,47 @@ async function runGenerationJob({
 
   if (data.isRefinement) {
     const { refineImage, references = [], instruction, displayPrompt } = data;
-    const prompt = buildRefinePrompt({ instruction, referenceCount: references.length, data });
 
-    const { output, providerId } = await withProgress({ from: 20, to: 85, phase: "generating" }, async ({ stepDone }) => {
-      const result = await routeProviderCall({
-        tenant,
-        provider,
-        modelId: model,
-        prompt,
-        quality,
-        images: [refineImage, ...references].map(({ mimeType, base64 }) => ({ mimeType, base64 })),
-      });
+    /*
+     * What the follow-up asks for was read in the route, before pricing (see
+     * prompts/intent.js) — re-read here only for a job queued before that
+     * existed. "More designs" fans out into several images, each told to
+     * differ from the rest; anything else is one image, as always.
+     */
+    const intent = intentForTool(data.intent ?? detectIntent(instruction), tool);
+    const variations = Math.max(1, Math.min(MAX_IMAGE_COUNT, Number(data.count) || refineCountFor(intent, tool)));
+    const basePrompt = buildRefinePrompt({ instruction, referenceCount: references.length, data, intent });
+    const prompts = Array.from({ length: variations }, (_, index) =>
+      applyIntentToPrompt({
+        basePrompt,
+        instruction,
+        intent,
+        tool,
+        referenceNote: buildReferenceNote(references.length).trim(),
+        variationIndex: index,
+        variationTotal: variations,
+      })
+    );
+    const images = [refineImage, ...references].map(({ mimeType, base64 }) => ({ mimeType, base64 }));
 
-      // Shown while the result is still being uploaded and recorded, so the
-      // wait ends when the model answers rather than when storage does.
-      const preview = await createLivePreview(Buffer.from(result.output.base64, "base64"));
-      await stepDone(preview?.dataUrl ?? null);
-      return result;
-    });
+    const settled = await withProgress({ from: 20, to: 85, phase: "generating", steps: variations }, ({ stepDone }) =>
+      Promise.allSettled(
+        prompts.map(async (variationPrompt) => {
+          const result = await routeProviderCall({ tenant, provider, modelId: model, prompt: variationPrompt, quality, images });
+
+          // Shown while the result is still being uploaded and recorded, so the
+          // wait ends when the model answers rather than when storage does.
+          const preview = await createLivePreview(Buffer.from(result.output.base64, "base64"));
+          await stepDone(preview?.dataUrl ?? null);
+          return result;
+        })
+      )
+    );
+
+    const successes = settled.filter((entry) => entry.status === "fulfilled").map((entry) => entry.value);
+    if (successes.length === 0) {
+      throw settled.find((entry) => entry.status === "rejected")?.reason ?? new Error("The model returned no image");
+    }
 
     await setProgress(88, "saving");
 
@@ -113,17 +138,22 @@ async function runGenerationJob({
       ...common,
       conversationId: data.conversationId,
       parentGenerationId: data.parentGenerationId,
-      prompt,
+      prompt: prompts.length === 1 ? prompts[0] : prompts.join("\n\n─────\n\n"),
       userPrompt: displayPrompt || instruction,
       inputImages: [
         { image: refineImage, role: "edited" },
         ...references.map((ref) => ({ image: ref, role: "reference" })),
       ],
-      outputImages: [{ image: output, role: "generated" }],
-      providerId,
+      outputImages: successes.map((entry) => ({ image: entry.output, role: "generated" })),
+      providerId: successes[0].providerId,
     });
 
-    return toResult(saved, { model, modelLabel, provider });
+    return {
+      ...toResult(saved, { model, modelLabel, provider }),
+      requestedCount: variations,
+      deliveredCount: successes.length,
+      intentLabel: data.intentLabel ?? describeIntent(intent, tool, successes.length),
+    };
   }
 
   const requestedCount = clampCount(data.count, data.defaultCount);

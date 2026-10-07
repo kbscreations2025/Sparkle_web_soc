@@ -4,8 +4,19 @@ const { recordGeneration } = require("../generationService");
 const { createLivePreview } = require("../storage/thumbnail");
 const { registerJobHandler } = require("./registry");
 const User = require("../models/user");
+const { detectIntent, intentForTool, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
 
 const CLEANING_JOB = "cleaning.generate";
+
+/**
+ * For a refinement whose image the user drew on. The marks are directions,
+ * not content: without this the model may treat a circle as part of the
+ * photo, or apply the change everywhere instead of where it was pointed.
+ */
+const ANNOTATION_NOTE =
+  "MARKED-UP IMAGE: the user has drawn marks on the first image (circles, arrows, boxes, lines or text) to show WHERE the requested change applies. " +
+  "Apply the change only to the marked area(s) and leave everything outside them exactly as it is. " +
+  "The marks are instructions, not part of the photograph — remove every mark completely from the result and restore the jewellery and background underneath them cleanly.";
 
 /**
  * The built-in prompt for a first-pass run, keyed by which cleaning mode's
@@ -73,13 +84,20 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
   const { provider, model, quality, modelLabel } = resolveProviderModel(requestedModel);
   const tenant = await loadTenantOrThrow(dbUser);
 
-  const prompt = buildPrompt({
+  const basePrompt = buildPrompt({
     isRefinement,
     instruction,
     customPrompt,
     variant,
     referenceCount: references.length,
   });
+
+  // A follow-up is shaped by what it asks for — "in rose gold" recolours the
+  // metal and nothing else. Cleaning works on the customer's real product, so
+  // it never redesigns it: see TOOL_PROFILES in prompts/intent.js.
+  const intent = isRefinement ? intentForTool(data.intent ?? detectIntent(instruction), "cleaning") : null;
+  const shaped = intent ? applyIntentToPrompt({ basePrompt, instruction, intent, tool: "cleaning" }) : basePrompt;
+  const prompt = data.annotated ? `${shaped}\n\n${ANNOTATION_NOTE}` : shaped;
 
   // Nearly all of a run's wall time is spent inside this one call, and the
   // providers report nothing while it is open — so the bar is walked from 20
@@ -145,6 +163,7 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
     model,
     modelLabel,
     provider,
+    intentLabel: intent ? data.intentLabel ?? describeIntent(intent, "cleaning") : null,
   };
 }
 

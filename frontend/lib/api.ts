@@ -594,8 +594,27 @@ export function defaultQualityFor(modelId: string): string {
 
 export type CleaningModelId = (typeof CLEANING_MODELS)[number]["id"];
 
-/** Model id → Sparkle label, for a history row from before the backend recorded the label itself. */
-export const MODEL_LABELS: Record<string, string> = Object.fromEntries(CLEANING_MODELS.map((m) => [m.id, m.label]));
+/**
+ * Text models — picked by the tool, never by the user, so they appear in no
+ * picker. Listed here only so their Sparkle name shows wherever a run made
+ * with one is displayed (History, Image to Text, Marketing Kit).
+ */
+const TEXT_MODEL_LABELS: Record<string, string> = {
+  "gemini-2.5-pro": "Sparkle 2.5 Pro",
+  "gemini-2.5-flash": "Sparkle 2.5 Flash",
+  "google/gemini-2.5-pro": "Sparkle 2.5 Pro",
+  "google/gemini-2.5-flash": "Sparkle 2.5 Flash",
+};
+
+/**
+ * Model id → Sparkle label, for a history row from before the backend
+ * recorded the label itself — or recorded the raw id as its label, as text
+ * runs did until they had Sparkle names.
+ */
+export const MODEL_LABELS: Record<string, string> = {
+  ...TEXT_MODEL_LABELS,
+  ...Object.fromEntries(CLEANING_MODELS.map((m) => [m.id, m.label])),
+};
 
 export const DEFAULT_CLEANING_MODEL: CleaningModelId = "gemini-3-pro-image";
 
@@ -758,6 +777,8 @@ export type QueuedJob = {
     outputUrl: string | null;
     /** Every variation this run delivered, `outputUrl` repeated as the first entry. */
     outputUrls?: string[];
+    /** How a follow-up was read — "Metal → rose gold". Null for a plain edit or a first run. */
+    intentLabel?: string | null;
     /** "video" when the url points at a clip, so a page renders a player rather than an `<img>`. */
     outputType?: "image" | "video";
     durationSeconds?: number;
@@ -841,11 +862,13 @@ export function cleanImage(body: {
 // ── chat to edit ─────────────────────────────────────────────────────────────
 
 export type ChatEditResult = {
-  /** One result image per call today — always length 1 — as a data URI. */
+  /** The results as data URIs — one for an edit, several for "more designs". */
   images?: string[];
   model?: string;
   conversationId?: string | null;
   generationId?: string | null;
+  /** How the instruction was read — "Metal → rose gold". Null for a plain edit. */
+  intentLabel?: string | null;
 };
 
 /**
@@ -932,6 +955,11 @@ export type RefineBody<TModel extends string = SparkleModelId> = {
   parentGenerationId?: string | null;
   /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
   preview?: string | null;
+  /**
+   * `refineImage` has the user's marks drawn on it. The model is then told
+   * the marks show where to change, and must not appear in the result.
+   */
+  annotated?: boolean;
 };
 
 export function refineOn<TModel extends string = SparkleModelId>(path: string) {

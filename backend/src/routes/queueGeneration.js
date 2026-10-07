@@ -2,6 +2,8 @@ const { enqueueJob, toPublicJob } = require("../queue");
 const { parseDataUri, isOwnConversation } = require("../generationService");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const credit = require("../services/credits");
+const { loadTenantOrThrow } = require("../aiRouting");
+const { resolveIntent, intentForTool, refineCountFor, describeIntent } = require("../prompts/intent");
 
 /**
  * The half of an image-generating route that never varies: hand the work to
@@ -33,11 +35,33 @@ function parseImages(value) {
 }
 
 /**
+ * Reads what a follow-up asks for and records it on the run: the intent rides
+ * in the payload for the worker's prompt, the image count decides the price,
+ * and the label is what the chat shows. A failure here is never a reason to
+ * refuse the follow-up — it just runs as a plain edit, as before.
+ */
+async function withRefineIntent({ dbUser, tool, request, payload }) {
+  try {
+    const tenant = await loadTenantOrThrow(dbUser).catch(() => null);
+    const intent = intentForTool(await resolveIntent(payload.instruction, { tenant }), tool);
+    const count = refineCountFor(intent, tool);
+    const intentLabel = describeIntent(intent, tool, count);
+    return {
+      request: { ...request, count, intentLabel },
+      payload: { ...payload, intent, count, intentLabel },
+    };
+  } catch (err) {
+    console.warn(`${tool}: could not read the follow-up's intent — running it as a plain edit:`, err.message);
+    return { request, payload };
+  }
+}
+
+/**
  * @param request A display/audit description of the run. No image bytes.
  * @param payload What the handler actually needs, images included — this goes
  *                to Redis rather than into the job document.
  */
-async function queueGeneration(req, res, { type, tool, request, payload, preview, message }) {
+async function queueGeneration(req, res, { type, tool, request, payload, preview, message: baseMessage }) {
   const { dbUser } = req;
 
   // Before the hold: a turn on someone else's conversation is refused with
@@ -51,6 +75,13 @@ async function queueGeneration(req, res, { type, tool, request, payload, preview
       code: "forbidden",
     });
   }
+
+  // A follow-up is read before it is priced: "more designs" makes several
+  // images and must be held for as several. See prompts/intent.js.
+  if (request?.isRefinement && payload?.instruction) {
+    ({ request, payload } = await withRefineIntent({ dbUser, tool, request, payload }));
+  }
+  const message = request?.intentLabel ? `${baseMessage} (${request.intentLabel})` : baseMessage;
 
   /*
    * Paid for before it is queued, never after. A job that reaches the queue

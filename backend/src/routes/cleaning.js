@@ -41,6 +41,7 @@ router.post("/", async (req, res) => {
     parentGenerationId,
     preview,
     variant,
+    annotated,
   } = req.body || {};
 
   const isRefinement = Boolean(refineImage && instruction);
@@ -91,6 +92,8 @@ router.post("/", async (req, res) => {
       requestedModel,
       isRefinement,
       instruction,
+      // The image to refine carries the user's marks — see jobs/cleaning.js.
+      annotated: isRefinement && Boolean(annotated),
       customPrompt,
       variant: resolvedVariant,
       conversationId,

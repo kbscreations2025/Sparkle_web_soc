@@ -3,6 +3,7 @@ const { registerJobHandler } = require("./registry");
 const { runTextJob, ModelRefusedError } = require("./textRunner");
 const { runGenerationJob } = require("./generationRunner");
 const kits = require("../services/marketingKits");
+const gemini = require("../providers/gemini");
 const {
   SETTING_CODE_REFERENCE,
   BRAND_STORY_SYSTEM_INSTRUCTION,
@@ -20,7 +21,7 @@ const CAMPAIGN_KIT_JOB = "marketingKit.campaign";
 const WRITING_MODEL = "gemini-2.5-pro";
 
 /** What a kit records about the model that wrote it. */
-const KIT_MODEL = { provider: "google", modelId: WRITING_MODEL, modelLabel: null };
+const KIT_MODEL = { provider: "google", modelId: WRITING_MODEL, modelLabel: gemini.labelFor(WRITING_MODEL) };
 
 const inlineData = ({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } });
 

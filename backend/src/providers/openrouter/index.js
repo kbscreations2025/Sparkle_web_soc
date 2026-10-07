@@ -24,6 +24,10 @@ const OPENROUTER_MODEL_LABELS = {
   "openai/gpt-image-1": "Sparkle GPT Image",
   "google/gemini-3-pro-image": "Sparkle 3 Pro Image",
   "google/gemini-3.1-flash-image": "Sparkle 3.1 Flash Image",
+  // The text models' OpenRouter equivalents — same names as on Gemini, since
+  // it is the same model whichever key answered.
+  "google/gemini-2.5-pro": "Sparkle 2.5 Pro",
+  "google/gemini-2.5-flash": "Sparkle 2.5 Flash",
 };
 
 function labelFor(modelId) {
@@ -195,6 +199,137 @@ async function generateImage({ apiKey, modelId, prompt, images, quality, aspectR
 }
 
 /**
+ * Gemini's structured-output schema (`Type.OBJECT`, `nullable: true`) as the
+ * standard JSON Schema OpenRouter's `response_format` takes. Lower-cases the
+ * type names and turns `nullable` into a `["type", "null"]` union; everything
+ * else (properties, items, required, enum, description) already matches.
+ */
+function toJsonSchema(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(toJsonSchema);
+
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "nullable") continue;
+    if (key === "type" && typeof value === "string") out.type = value.toLowerCase();
+    else if (key === "properties") out.properties = Object.fromEntries(Object.entries(value).map(([name, sub]) => [name, toJsonSchema(sub)]));
+    else if (key === "items") out.items = toJsonSchema(value);
+    else out[key] = value;
+  }
+  if (schema.nullable && out.type) out.type = [out.type, "null"];
+  return out;
+}
+
+/**
+ * Gemini's content parts — `{ text }` and `{ inlineData: { mimeType, data } }`,
+ * in the order the caller interleaved them — as OpenAI-style message content.
+ * Order is kept exactly: Affinity's "ITEM 1 PHOTO:", photo, "ITEM 1 SHEET:",
+ * sheet labelling only works if each label stays next to its picture.
+ */
+function toMessageContent(parts) {
+  return parts
+    .map((part) => {
+      if (typeof part.text === "string") return { type: "text", text: part.text };
+      if (part.inlineData) {
+        return { type: "image_url", image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } };
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
+/** Finish reasons that mean the answer was withheld, not merely short — same set gemini.js treats as blocked. */
+const BLOCKED_NATIVE_REASONS = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"]);
+
+/**
+ * A text-out call through OpenRouter's chat-completions endpoint — the stand-in
+ * for gemini.js's `generateText` when the tenant's Gemini keys are missing or
+ * failing (see aiRouting.js's `routeTextCall`). Same arguments, same return
+ * shape — `{ text, finishReason, blocked, truncated }` — so the text runner
+ * and every other caller can't tell which provider answered.
+ *
+ * `thinkingBudget` maps to OpenRouter's `reasoning.max_tokens` (0 turns
+ * reasoning off), and the reasoning itself is excluded from the reply: only
+ * the answer is wanted, the same as on Gemini.
+ */
+async function generateText({
+  apiKey,
+  modelId,
+  prompt,
+  images = [],
+  parts: extraParts,
+  systemInstruction,
+  responseSchema,
+  thinkingBudget = 1024,
+  maxOutputTokens = 4096,
+  temperature,
+}) {
+  const parts = extraParts ?? [
+    ...images.map(({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } })),
+    { text: prompt },
+  ];
+
+  const messages = [
+    ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+    { role: "user", content: toMessageContent(parts) },
+  ];
+
+  const body = {
+    model: modelId,
+    messages,
+    max_tokens: maxOutputTokens,
+    ...(temperature !== undefined ? { temperature } : {}),
+    reasoning: thinkingBudget > 0 ? { max_tokens: thinkingBudget, exclude: true } : { enabled: false, exclude: true },
+    ...(responseSchema
+      ? // Not `strict`: strict mode demands every property be required and
+        // `additionalProperties: false`, which Affinity's optional
+        // `sourceCode` breaks. The callers validate the parsed answer anyway.
+        { response_format: { type: "json_schema", json_schema: { name: "response", strict: false, schema: toJsonSchema(responseSchema) } } }
+      : {}),
+  };
+
+  const response = await withRetry(async () => {
+    const res = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(150_000),
+    });
+
+    if (!res.ok) {
+      const raw = await res.text().catch(() => "");
+      const err = new Error(`OpenRouter text request failed (${res.status})`);
+      err.status = res.status;
+      err.error = { message: raw || res.statusText };
+      throw err;
+    }
+
+    const json = await res.json();
+    // OpenRouter can answer 200 with an upstream error in the body.
+    if (json?.error) {
+      const err = new Error(`OpenRouter text request failed: ${json.error.message || "upstream error"}`);
+      err.status = typeof json.error.code === "number" ? json.error.code : undefined;
+      err.error = { message: json.error.message || "" };
+      throw err;
+    }
+    return json;
+  });
+
+  const choice = response.choices?.[0];
+  const finishReason = choice?.native_finish_reason || choice?.finish_reason || null;
+  const content = choice?.message?.content;
+  const text = (Array.isArray(content) ? content.map((piece) => piece?.text ?? "").join("") : content ?? "").trim();
+  const blocked = choice?.finish_reason === "content_filter" || BLOCKED_NATIVE_REASONS.has(String(choice?.native_finish_reason || "").toUpperCase());
+
+  return {
+    text,
+    finishReason,
+    blocked,
+    truncated: choice?.finish_reason === "length" || String(choice?.native_finish_reason || "").toUpperCase() === "MAX_TOKENS",
+  };
+}
+
+/**
  * Video models served through OpenRouter's `/videos` endpoint. Ids are from
  * OpenRouter's own Playground exports. The Veo ids here double as the
  * fallback for the native Gemini Veo models (see modelEquivalents.js); the
@@ -332,4 +467,6 @@ module.exports = {
   classifyError,
   withKeyFailover,
   generateImage,
+  generateText,
+  toJsonSchema,
 };

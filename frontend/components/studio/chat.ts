@@ -18,6 +18,12 @@ export type ChatMsg = {
    * them, so a tool that only ever produces one can keep ignoring this.
    */
   images?: string[];
+  /**
+   * How the server read a follow-up — "Metal → rose gold", "3 new design
+   * options". Shown under an assistant turn's images, so the user can see
+   * their request was understood the way they meant it.
+   */
+  note?: string;
   /** Reference images attached alongside `image`, inspiration only. */
   refImages?: string[];
   /** Present only on a failed assistant turn — what to restore if the user retries. */

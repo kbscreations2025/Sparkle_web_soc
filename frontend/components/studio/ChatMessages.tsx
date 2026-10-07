@@ -205,6 +205,8 @@ function AssistantBubble({
           ))}
         </div>
 
+        {msg.note && <p className="px-0.5 text-[10px] leading-snug text-gold">{msg.note}</p>}
+
         {images.length > 1 && (
           <button
             type="button"

@@ -260,21 +260,55 @@ async function routeProviderCall({ tenant, provider, modelId, prompt, images, qu
 }
 
 /**
- * Text out — Image to Text, and the writing halves of Marketing Kit.
+ * Text out — Image to Text, the writing halves of Marketing Kit, and the
+ * analysis steps of Sketch to Image, Image to Video and the follow-up reader.
  *
- * Gemini-only: nothing else this app talks to is wired for text yet, and
- * silently running a text job on a provider that can't do it would fail
- * deep inside the worker rather than here.
+ * Same candidate list as images (see `imageCandidatesFor`): the tenant's
+ * Gemini keys and — since the text models have OpenRouter equivalents — its
+ * OpenRouter keys, interleaved by the priority a super admin sets, moving to
+ * the next on a transient or key-specific error. OpenRouter's
+ * `generateText` takes the same arguments and returns the same shape as
+ * Gemini's, so callers don't change.
  *
  * `output` is `{ text, finishReason, blocked, truncated }` rather than image
  * bytes — see `gemini.generateText`.
+ *
+ * @returns {{ output, providerId, provider, modelId }} — which provider and
+ *   model id actually answered, for the history record.
  */
 async function routeTextCall({ tenant, modelId, prompt, images, parts, ...options }) {
-  return routeProviderOperation({
-    tenant,
-    provider: "gemini",
-    call: ({ apiKey, mod }) => mod.generateText({ apiKey, modelId, prompt, images, parts, ...options }),
-  });
+  const candidates = imageCandidatesFor(tenant, "gemini", modelId);
+  if (candidates.length === 0) {
+    throw new NoProviderError("This organization has no Gemini or OpenRouter key configured. Ask a super admin to add one.");
+  }
+
+  let used;
+  let output;
+  try {
+    output = await tryImageCandidates(candidates, async (candidate) => {
+      const { entry, mod, modelId: resolvedModelId } = candidate;
+      const withCredential = await Tenant.loadProvider(tenant._id, entry._id);
+      const apiKey = decryptSecret(withCredential.credential, { provider: entry.provider });
+
+      try {
+        const result = await mod.generateText({ apiKey, modelId: resolvedModelId, prompt, images, parts, ...options });
+        tenant.recordProviderSuccess(entry._id);
+        used = candidate;
+        return result;
+      } catch (err) {
+        tenant.recordProviderFailure(entry._id, mod.classifyError(err).code);
+        throw err;
+      }
+    });
+  } finally {
+    try {
+      await tenant.save();
+    } catch (err) {
+      console.error("could not record provider health:", err.message);
+    }
+  }
+
+  return { output, providerId: used.entry._id, provider: used.entry.provider, modelId: used.modelId };
 }
 
 /**

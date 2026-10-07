@@ -12,6 +12,10 @@ const OPENROUTER_EQUIVALENTS = {
   gemini: {
     "gemini-3-pro-image": "google/gemini-3-pro-image",
     "gemini-3.1-flash-image": "google/gemini-3.1-flash-image",
+    // Text models — Image to Text, Marketing Kit writing, and the analysis
+    // steps of Sketch to Image and Image to Video. See routeTextCall.
+    "gemini-2.5-pro": "google/gemini-2.5-pro",
+    "gemini-2.5-flash": "google/gemini-2.5-flash",
     // Veo, for Image to Video — see routeVideoCall.
     "veo-3.1-generate-preview": "google/veo-3.1",
     "veo-3.1-fast-generate-preview": "google/veo-3.1-fast",

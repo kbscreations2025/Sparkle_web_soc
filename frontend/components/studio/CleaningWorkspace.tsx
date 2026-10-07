@@ -231,7 +231,7 @@ export function CleaningWorkspace<TModel extends string>({
 
       if (queueJob.status === "completed" && queueJob.result) {
         delete pendingJobs.current[queueJob.id];
-        const { outputUrl, conversationId, generationId } = queueJob.result;
+        const { outputUrl, conversationId, generationId, intentLabel } = queueJob.result;
 
         if (pending.kind === "generate") {
           updateJob(pending.localJobId, {
@@ -241,11 +241,16 @@ export function CleaningWorkspace<TModel extends string>({
             preview: null,
             conversationId,
             generationId,
-            // The thread keeps its opening turn (the photo that was sent) and
-            // is not given the result: the clean already shows in the big
-            // viewer, and the suggestion hints — offered until the first
-            // answer lands in the thread — stay visible right away rather
-            // than after the first refinement.
+          });
+          // The result answers the opening turn in the thread, so the
+          // conversation reads in order: the photo sent on the right, the
+          // clean that came back on the left — the same shape a resumed
+          // thread already has.
+          appendMessage(pending.localJobId, {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "Cleaned",
+            image: outputUrl ?? undefined,
           });
         } else {
           updateJob(pending.localJobId, { cleaned: outputUrl, preview: null, generationId });
@@ -254,6 +259,7 @@ export function CleaningWorkspace<TModel extends string>({
             role: "assistant",
             content: "Updated",
             image: outputUrl ?? undefined,
+            note: intentLabel ?? undefined,
           });
           setRefining(false);
         }
@@ -388,13 +394,20 @@ export function CleaningWorkspace<TModel extends string>({
     const job = jobs.find((row) => row.id === selectedId);
     if (!job?.cleaned || job.readOnly || !text.trim()) return;
 
-    const refsThisTurn = annotatedPhoto ? [annotatedPhoto, ...referenceImages] : referenceImages;
+    // A marked-up copy IS the image this turn edits — the marks are the
+    // instruction — not an extra reference beside the clean one. Sending it as
+    // a reference showed two near-identical pictures in the thread and told
+    // the model to treat the marks as mere inspiration. Same as every other
+    // tool's refine (see useGenerationWorkspace).
+    const source = annotatedPhoto || job.cleaned;
+    const refsThisTurn = referenceImages;
     appendMessage(job.id, {
       id: crypto.randomUUID(),
       role: "user",
       content: text.trim(),
-      // The version this turn changes, so each request shows what it was about.
-      image: job.cleaned,
+      // The version this turn changes — or its marked-up copy — so each
+      // request shows what it was about.
+      image: source,
       refImages: refsThisTurn.length ? refsThisTurn : undefined,
     });
     setChatInput("");
@@ -408,10 +421,11 @@ export function CleaningWorkspace<TModel extends string>({
       // A completed job hands back a stored url, but the backend edits bytes,
       // not links — so a result that hasn't been converted yet is fetched now.
       // Same conversion resuming a thread from History already does.
-      let editable = job.cleaned;
+      let editable = source;
       if (!editable.startsWith("data:")) {
         editable = await urlToDataUrl(editable);
-        updateJob(job.id, { cleaned: editable });
+        // Only the clean result is cached back; a marked-up copy is this turn's alone.
+        if (source === job.cleaned) updateJob(job.id, { cleaned: editable });
       }
 
       const result = await refineImage({
@@ -419,6 +433,7 @@ export function CleaningWorkspace<TModel extends string>({
         instruction: text.trim(),
         model,
         referenceImages: refsThisTurn,
+        annotated: Boolean(annotatedPhoto),
         conversationId: job.conversationId,
         parentGenerationId: job.generationId,
         // The image being refined, so the rail shows the piece rather than the
@@ -583,7 +598,8 @@ export function CleaningWorkspace<TModel extends string>({
                 onSelectResult={setSelectedView}
                 onRetry={selected?.readOnly ? undefined : retry}
                 hints={
-                  !selected?.readOnly && selected?.cleaned && !selected.history.some((msg) => msg.role === "assistant")
+                  // Under the first clean, until the user sends a follow-up of their own.
+                  !selected?.readOnly && selected?.cleaned && selected.history.filter((msg) => msg.role === "user").length <= 1
                     ? REFINE_SUGGESTIONS
                     : undefined
                 }

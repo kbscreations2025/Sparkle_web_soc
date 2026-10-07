@@ -75,6 +75,9 @@ const BLOCKED_FINISH_REASONS = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLI
 const GEMINI_MODEL_LABELS = {
   "gemini-3-pro-image": "Sparkle 3 Pro Image",
   "gemini-3.1-flash-image": "Sparkle 3.1 Flash Image",
+  // Text models — Image to Text, Marketing Kit writing, analysis steps.
+  "gemini-2.5-pro": "Sparkle 2.5 Pro",
+  "gemini-2.5-flash": "Sparkle 2.5 Flash",
 };
 
 function labelFor(modelId) {

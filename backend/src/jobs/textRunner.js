@@ -93,7 +93,8 @@ async function runTextJob({
   const tenant = await loadTenantOrThrow(dbUser);
   const parts = buildParts({ data });
 
-  const { output } = await withProgress({ from: 20, to: 85, phase: "generating" }, async ({ stepDone }) => {
+  // `provider` is whichever answered — Gemini, or OpenRouter standing in for it.
+  const { output, provider, providerId } = await withProgress({ from: 20, to: 85, phase: "generating" }, async ({ stepDone }) => {
     const result = await routeTextCall({
       tenant,
       modelId,
@@ -137,7 +138,8 @@ async function runTextJob({
       parentGenerationId: data.parentGenerationId || null,
       model: modelId,
       modelLabel: gemini.labelFor(modelId),
-      provider: "gemini",
+      provider,
+      providerId,
       prompt: promptForHistory || textOf(parts),
       userPrompt,
       params: historyParams,
@@ -164,7 +166,7 @@ async function runTextJob({
     generationId: saved?.generationId ?? null,
     model: modelId,
     modelLabel: gemini.labelFor(modelId),
-    provider: "gemini",
+    provider,
     ...extra,
   };
 }

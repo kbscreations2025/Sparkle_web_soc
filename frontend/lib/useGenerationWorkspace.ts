@@ -158,7 +158,7 @@ export function useGenerationWorkspace({
       pendingJobId.current = null;
       pendingKind.current = null;
 
-      const { outputUrl, outputUrls, conversationId: cid, generationId } = job.result;
+      const { outputUrl, outputUrls, conversationId: cid, generationId, intentLabel } = job.result;
       const urls = outputUrls?.length ? outputUrls : outputUrl ? [outputUrl] : [];
       if (cid) conversationId.current = cid;
       if (generationId) parentGenerationId.current = generationId;
@@ -186,6 +186,7 @@ export function useGenerationWorkspace({
           content: kind === "generate" ? "Generated" : "Updated",
           image: urls[0],
           images: urls,
+          note: intentLabel ?? undefined,
         },
       ]);
     } else if (job.status === "failed" || job.status === "cancelled") {
