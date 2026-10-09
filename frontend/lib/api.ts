@@ -1400,7 +1400,18 @@ export type CampaignShot = {
 };
 
 /** Several photos of one piece, read as a design narrative. */
-export function brandStory(body: { images: string[]; sheetImages?: string[]; preview?: string | null }) {
+/** The voices a Brand Story can be written in — the backend's BRAND_STORY_TONES. */
+export type BrandStoryTone = "classic" | "romantic" | "modern" | "poetic" | "bold" | "heritage";
+/** How long it runs — the backend's BRAND_STORY_LENGTHS. */
+export type BrandStoryLength = "short" | "medium" | "long";
+
+export function brandStory(body: {
+  images: string[];
+  sheetImages?: string[];
+  preview?: string | null;
+  tone?: BrandStoryTone;
+  length?: BrandStoryLength;
+}) {
   return apiRequest<QueuedResult>("/api/marketing-kit/brand-story", { method: "POST", body: JSON.stringify(body) });
 }
 

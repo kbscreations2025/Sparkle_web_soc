@@ -101,8 +101,8 @@ OUTPUT FORMAT
 
 6. Emotional Closing
 
-Length: 150–250 words total
-Tone: Elegant, refined, timeless, international luxury brand voice.
+{{LENGTH}}
+{{TONE}}
 
 The result should read as if introducing a signature jewellery collection to affluent collectors in India, UAE, USA, UK, Europe, Singapore, and Hong Kong.
 
@@ -113,6 +113,42 @@ OUTPUT FORMAT RULES
 - Do not write phrases such as "Based on the image", "I can see", "Here is the report", "I am unable to"
 - Use plain text only.
 - Keep formatting clean and professional.`
+
+/**
+ * The voices a Brand Story can be written in, picked on the page. The ids are
+ * what the client sends; the text is what the model is told. "classic" is the
+ * voice this prompt always used, so a request without a choice reads as before.
+ */
+const BRAND_STORY_TONES = {
+  classic: "Elegant, refined, timeless, international luxury brand voice.",
+  romantic:
+    "Warm, romantic and emotive — speak to love, devotion and the piece as a future heirloom, while staying refined and never saccharine.",
+  modern:
+    "Contemporary, confident and understated — clean, modern luxury with crisp sentences and no ornate flourishes.",
+  poetic:
+    "Lyrical and evocative — rich imagery and rhythm, as in an art-book essay, while every image stays true to what the piece actually shows.",
+  bold: "Bold and glamorous — a statement, red-carpet voice with energy and presence, never brash or salesy.",
+  heritage:
+    "Rooted in craft and heritage — the artisan's hand, time-honoured technique and the piece's place in a lasting tradition.",
+};
+
+/**
+ * How long the narrative runs. The same six sections every time — the result
+ * page lays them out by number — only how much each one says changes.
+ */
+const BRAND_STORY_LENGTHS = {
+  short: "Length: 80–120 words total — a sentence or two per section, crisp and distilled.",
+  medium: "Length: 150–250 words total",
+  long: "Length: 350–450 words total — let each section breathe, with fuller detail on the design and craftsmanship.",
+};
+
+/** The Brand Story brief in the chosen voice and length; unknown choices fall back to the original ones. */
+function buildBrandStoryPrompt({ tone, length } = {}) {
+  return BRAND_STORY_PROMPT.replace("{{LENGTH}}", BRAND_STORY_LENGTHS[length] ?? BRAND_STORY_LENGTHS.medium).replace(
+    "{{TONE}}",
+    `Tone: ${BRAND_STORY_TONES[tone] ?? BRAND_STORY_TONES.classic}`
+  );
+}
 
 const AFFINITY_PROMPT = `Act as a world-class luxury jewellery catalog copywriter working for prestigious jewellery maisons such as Cartier, Tiffany & Co., Harry Winston, Graff, Van Cleef & Arpels, and Bulgari.
 
@@ -154,6 +190,8 @@ module.exports = {
   SETTING_CODE_REFERENCE,
   BRAND_STORY_SYSTEM_INSTRUCTION,
   AFFINITY_SYSTEM_INSTRUCTION,
-  BRAND_STORY_PROMPT,
+  buildBrandStoryPrompt,
+  BRAND_STORY_TONES,
+  BRAND_STORY_LENGTHS,
   AFFINITY_PROMPT,
 };

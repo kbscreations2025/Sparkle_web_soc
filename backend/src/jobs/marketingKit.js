@@ -8,7 +8,7 @@ const {
   SETTING_CODE_REFERENCE,
   BRAND_STORY_SYSTEM_INSTRUCTION,
   AFFINITY_SYSTEM_INSTRUCTION,
-  BRAND_STORY_PROMPT,
+  buildBrandStoryPrompt,
   AFFINITY_PROMPT,
 } = require("../prompts/marketingKit");
 const { buildCampaignKitShots, buildCampaignKitRefinePrompt } = require("../prompts/campaignKit");
@@ -59,13 +59,15 @@ async function saveKit({ kind, kitId, dbUser, generationId, save }) {
  */
 registerJobHandler(BRAND_STORY_JOB, (context) => {
   const kitId = newKitId();
+  // In the voice and length picked on the page — see buildBrandStoryPrompt.
+  const prompt = buildBrandStoryPrompt({ tone: context.data.tone, length: context.data.length });
 
   return runTextJob({
     ...context,
     tool: "marketing_kit",
     modelId: WRITING_MODEL,
     systemInstruction: BRAND_STORY_SYSTEM_INSTRUCTION,
-    // The narrative is 150–250 words (~350 tokens); the rest is headroom,
+    // The narrative is at most 450 words (~650 tokens); the rest is headroom,
     // with thinking bounded so it can never crowd the answer out. On Gemini
     // 2.5 reasoning tokens are billed against maxOutputTokens, so an
     // unbounded budget means a run that thinks and then emits nothing.
@@ -81,9 +83,9 @@ registerJobHandler(BRAND_STORY_JOB, (context) => {
         : []),
       { text: "JEWELLERY IMAGES (primary product photos):" },
       ...data.images.map(inlineData),
-      { text: BRAND_STORY_PROMPT },
+      { text: prompt },
     ],
-    promptForHistory: BRAND_STORY_PROMPT,
+    promptForHistory: prompt,
     userPrompt: "Write a brand story for this piece",
     /*
      * Only the first photo, not all of them.

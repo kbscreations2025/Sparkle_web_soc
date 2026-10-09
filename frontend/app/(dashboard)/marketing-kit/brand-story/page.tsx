@@ -1,15 +1,23 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { Check, FileText, Gem, Loader2, Paperclip, Pencil, Save } from "lucide-react";
-import { JobProgressBar } from "@/components/studio/JobProgressBar";
+import { Check, FileText, Gem, ImagePlus, Loader2, Pencil, Plus, Save, X, type LucideIcon } from "lucide-react";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import { BrandStoryResult } from "@/components/studio/BrandStoryResult";
-import { UploadZone, type UploadItem } from "@/components/studio/UploadZone";
-import { brandStory, fetchMarketingKit, updateMarketingKit, type MarketingKit } from "@/lib/api";
+import { Chip } from "@/components/studio/OptionChips";
+import type { UploadItem } from "@/components/studio/UploadZone";
+import {
+  brandStory,
+  fetchMarketingKit,
+  updateMarketingKit,
+  type BrandStoryLength,
+  type BrandStoryTone,
+  type MarketingKit,
+} from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { makeThumbnail } from "@/lib/image";
 import { filesToUploadItems, uploadErrorMessage } from "@/lib/uploads";
 import { readSheetFiles, SHEET_FILE_ACCEPT } from "@/lib/sheetFiles";
@@ -21,6 +29,22 @@ import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const PERMISSION = "tool.marketing_kit.run";
+
+/** The voices on offer, with the line shown under the chips for the one picked. */
+const TONES: { id: BrandStoryTone; label: string; description: string }[] = [
+  { id: "classic", label: "Classic luxury", description: "Elegant, refined and timeless — the voice of a great maison." },
+  { id: "romantic", label: "Romantic", description: "Warm and emotive — love, devotion, a future heirloom." },
+  { id: "modern", label: "Modern", description: "Clean, confident and understated — contemporary luxury." },
+  { id: "poetic", label: "Poetic", description: "Lyrical and rich in imagery, like an art-book essay." },
+  { id: "bold", label: "Bold & glamorous", description: "A statement voice with red-carpet energy." },
+  { id: "heritage", label: "Heritage craft", description: "The artisan's hand, technique and tradition." },
+];
+
+const LENGTHS: { id: BrandStoryLength; label: string; words: string }[] = [
+  { id: "short", label: "Short", words: "~100 words" },
+  { id: "medium", label: "Medium", words: "~200 words" },
+  { id: "long", label: "Long", words: "~400 words" },
+];
 
 export default function BrandStoryPage() {
   // `useSearchParams` suspends, and a kit link arrives as `?kitId=` — without
@@ -49,6 +73,8 @@ function BrandStoryWorkspace() {
 
   const [photos, setPhotos] = useState<UploadItem[]>([]);
   const [sheetImages, setSheetImages] = useState<string[]>([]);
+  const [tone, setTone] = useState<BrandStoryTone>("classic");
+  const [length, setLength] = useState<BrandStoryLength>("medium");
   const [kit, setKit] = useState<MarketingKit | null>(null);
   const [analysis, setAnalysis] = useState("");
   const [status, setStatus] = useState<"idle" | "writing" | "done" | "failed">("idle");
@@ -57,7 +83,6 @@ function BrandStoryWorkspace() {
   /** Whether the raw text is showing instead of the laid-out narrative. */
   const [editing, setEditing] = useState(false);
 
-  const sheetInput = useRef<HTMLInputElement>(null);
   /**
    * The run this page is following. State rather than a ref because the
    * progress bar renders from it — a ref write would not re-render, so the
@@ -137,10 +162,12 @@ function BrandStoryWorkspace() {
     return <ToolAccessNotice tool="Marketing Kit" />;
   }
 
-  async function addPhotos(files: File[]) {
+  /** One photo of the piece: a new one replaces whatever was there. */
+  async function addPhoto(file: File | undefined) {
+    if (!file) return;
     try {
-      const added = await filesToUploadItems(files);
-      setPhotos((current) => [...current, ...added]);
+      const [added] = await filesToUploadItems([file]);
+      if (added) setPhotos([added]);
     } catch (err) {
       setError(uploadErrorMessage(err));
     }
@@ -148,8 +175,12 @@ function BrandStoryWorkspace() {
 
   /** A sheet may be a photo, a PDF or a workbook — all become page images here. */
   async function addSheets(files: File[]) {
-    const { images } = await readSheetFiles(files);
-    setSheetImages((current) => [...current, ...images]);
+    try {
+      const { images } = await readSheetFiles(files);
+      setSheetImages((current) => [...current, ...images]);
+    } catch (err) {
+      setError(uploadErrorMessage(err));
+    }
   }
 
   async function handleWrite() {
@@ -159,7 +190,7 @@ function BrandStoryWorkspace() {
     setAnalysis("");
 
     const preview = await makeThumbnail(photos[0].dataUrl);
-    const res = await brandStory({ images: photos.map((item) => item.dataUrl), sheetImages, preview });
+    const res = await brandStory({ images: photos.map((item) => item.dataUrl), sheetImages, preview, tone, length });
 
     if (res.status === "queued" && res.job) {
       setJobId(res.job.id);
@@ -202,16 +233,24 @@ function BrandStoryWorkspace() {
    *
    * Editing is still a click away rather than gone: a kit is a working
    * document, and the raw text is where a person adjusts the model's words.
+   *
+   * The same page opens the moment a run starts, not when it ends: the photo
+   * is already known, so it goes in straight away, and the text side waits
+   * with placeholder lines and the run's progress until the words arrive.
+   * A run that fails drops back to the form, with the reason in the banner.
    */
-  if (status === "done" && analysis) {
+  if (writing || (status === "done" && analysis)) {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
         <ToolHeader onReset={reset} resetLabel="New story" />
         <ErrorBanner message={error} />
 
         <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
-          <div className="mx-auto max-w-7xl space-y-3">
-            <div className="flex items-center justify-end gap-2">
+          {/* Capped so the narrative's lines stay a readable length on a
+              wide screen — at full width they ran past 120 characters. */}
+          <div className="mx-auto max-w-5xl space-y-3">
+            {/* Nothing to edit or save until there is text. */}
+            <div className={cn("flex items-center justify-end gap-2", writing && "invisible")}>
               <button
                 type="button"
                 onClick={() => setEditing((open) => !open)}
@@ -234,7 +273,9 @@ function BrandStoryWorkspace() {
               )}
             </div>
 
-            {editing ? (
+            {writing ? (
+              <BrandStoryResult images={storyImages} pending={{ percent: job?.progress ?? null }} />
+            ) : editing ? (
               <textarea
                 value={analysis}
                 onChange={(event) => setAnalysis(event.target.value)}
@@ -259,56 +300,70 @@ function BrandStoryWorkspace() {
             has its own full-width layout once a run lands, so there is
             nothing to sit beside the form while it is being filled in. */}
         <div className="mx-auto max-w-2xl">
-          <div className="space-y-5">
-            <section className="space-y-3">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-cream">
-                The piece{" "}
-                <span className="font-normal normal-case tracking-normal text-faint">— several angles is better</span>
-              </h2>
-              <UploadZone
-                items={photos}
-                onAdd={addPhotos}
-                onRemove={(id) => setPhotos((current) => current.filter((item) => item.id !== id))}
+          <div className="space-y-6">
+            {/* The two things this run reads, side by side as equal squares:
+                what the piece looks like, and — optionally — what it was
+                meant to be. Each says what goes in it, so the empty page
+                explains itself. */}
+            <div className="flex flex-wrap gap-3">
+              <UploadSquare
+                icon={ImagePlus}
+                title="Photo of the piece"
+                hint="One clear photo"
+                formats="JPG or PNG"
+                accept="image/*"
+                single
+                thumbs={photos.map((item) => ({ key: item.id, src: item.dataUrl, label: item.name }))}
+                onFiles={(files) => addPhoto(files.find((file) => file.type.startsWith("image/")))}
+                onRemove={() => setPhotos([])}
               />
+              <UploadSquare
+                icon={FileText}
+                title="Production sheet"
+                optional
+                hint="Sketch or tech sheet — guides the story"
+                accept={SHEET_FILE_ACCEPT}
+                thumbs={sheetImages.map((src, index) => ({ key: `${index}-${src.slice(-24)}`, src, label: `Sheet page ${index + 1}` }))}
+                onFiles={addSheets}
+                onRemove={(index) => setSheetImages((current) => current.filter((_, at) => at !== index))}
+                formats="Image, PDF, sheet"
+              />
+            </div>
+
+            <section className="space-y-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-cream">Tone</h2>
+              <div className="flex flex-wrap gap-1.5">
+                {TONES.map((option) => (
+                  <Chip key={option.id} label={option.label} active={tone === option.id} onClick={() => setTone(option.id)} />
+                ))}
+              </div>
+              <p className="text-[11px] text-faint">{TONES.find((option) => option.id === tone)?.description}</p>
             </section>
 
             <section className="space-y-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-cream">
-                Production sheet <span className="font-normal normal-case tracking-normal text-faint">— optional</span>
-              </h2>
-              <p className="text-[11px] text-faint">
-                Sketches, mood boards or a technical sheet. When one is attached it becomes the authority on the
-                design&apos;s intent, and any printed setting code is resolved to its real terminology.
-              </p>
-
-              <input
-                ref={sheetInput}
-                type="file"
-                accept={SHEET_FILE_ACCEPT}
-                multiple
-                hidden
-                onChange={(event) => {
-                  addSheets([...(event.target.files ?? [])]);
-                  event.target.value = "";
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => sheetInput.current?.click()}
-                className="flex min-h-8 items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-white/[0.14] hover:text-cream"
-              >
-                <Paperclip size={12} /> Attach a sheet — image, PDF or spreadsheet
-              </button>
-
-              {sheetImages.length > 0 && (
-                <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                  {sheetImages.map((src, index) => (
-                    <li key={src.slice(-32)} className="relative aspect-square overflow-hidden rounded-lg border border-white/10">
-                      <Image src={src} alt={`Sheet page ${index + 1}`} fill sizes="80px" className="object-cover" />
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-cream">Length</h2>
+              {/* Segmented rather than chips: three steps along one scale,
+                  and the word count under each says what the step means. */}
+              <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-white/[0.08]">
+                {LENGTHS.map((option, index) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setLength(option.id)}
+                    aria-pressed={length === option.id}
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 px-2 py-2 text-xs transition-colors",
+                      index > 0 && "border-l border-white/[0.08]",
+                      length === option.id ? "bg-gold/10 text-gold" : "text-muted hover:bg-white/[0.04] hover:text-cream"
+                    )}
+                  >
+                    <span className="font-medium">{option.label}</span>
+                    <span className={cn("text-[10px]", length === option.id ? "text-gold/80" : "text-faint")}>
+                      {option.words}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </section>
 
             <RunButton
@@ -318,12 +373,169 @@ function BrandStoryWorkspace() {
             >
               {writing ? "Writing the narrative…" : "Write the brand story"}
             </RunButton>
-
-            {writing && job && <JobProgressBar percent={job.progress} />}
+            {/* Says why the button is off, rather than leaving a faded button
+                to be clicked at and wondered about. */}
+            {photos.length === 0 && !writing && (
+              <p className="-mt-3 text-center text-[11px] text-faint">Add a photo of the piece to write its story.</p>
+            )}
           </div>
 
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * One square upload target: empty, it says what belongs in it; filled, it
+ * shows what was added as small tiles inside the same square, with a "+" to
+ * add more. Click or drop, either way.
+ *
+ * Square and equal to its neighbour so the two inputs read as a pair at a
+ * glance — the photos the story is about, and the optional sheet behind it.
+ */
+function UploadSquare({
+  icon: Icon,
+  title,
+  hint,
+  optional = false,
+  single = false,
+  formats,
+  accept,
+  thumbs,
+  onFiles,
+  onRemove,
+}: {
+  icon: LucideIcon;
+  title: string;
+  hint: string;
+  optional?: boolean;
+  /**
+   * Takes one file: the picker allows only one, and once filled the square
+   * is that picture, edge to edge, with Replace and remove on it.
+   */
+  single?: boolean;
+  /** Which files it takes, said in the empty square. */
+  formats: string;
+  accept: string;
+  thumbs: { key: string; src: string; label: string }[];
+  onFiles: (files: File[]) => void;
+  onRemove: (index: number) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const filled = thumbs.length > 0;
+
+  function handleDrop(event: DragEvent) {
+    event.preventDefault();
+    setDragging(false);
+    const files = [...event.dataTransfer.files];
+    if (files.length) onFiles(files);
+  }
+
+  return (
+    <div
+      onDrop={handleDrop}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      className={cn(
+        "relative flex h-40 w-40 shrink-0 flex-col overflow-hidden rounded-xl border transition-colors",
+        dragging
+          ? "border-gold/50 bg-gold/[0.06]"
+          : filled
+            ? "border-white/[0.1] bg-surface-raised"
+            : "border-dashed border-white/15 hover:border-gold/30 hover:bg-white/[0.03]"
+      )}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        multiple={!single}
+        hidden
+        onChange={(event) => {
+          onFiles([...(event.target.files ?? [])]);
+          // Cleared so picking the same file twice still fires onChange.
+          event.target.value = "";
+        }}
+      />
+
+      {filled && single ? (
+        <div className="group relative flex-1">
+          <Image src={thumbs[0].src} alt={thumbs[0].label} fill sizes="160px" className="object-cover" />
+          <div className="absolute inset-x-1.5 bottom-1.5 flex items-center justify-between gap-1">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="rounded-md bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm transition-colors hover:bg-black/75"
+            >
+              Replace
+            </button>
+            <button
+              type="button"
+              onClick={() => onRemove(0)}
+              title={`Remove ${thumbs[0].label}`}
+              aria-label={`Remove ${thumbs[0].label}`}
+              className="flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white/85 backdrop-blur-sm transition-colors hover:text-white"
+            >
+              <X size={10} />
+            </button>
+          </div>
+        </div>
+      ) : filled ? (
+        <>
+          <div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-2.5">
+            <p className="min-w-0 truncate text-[11px] font-medium text-cream">
+              {title} <span className="text-faint">· {thumbs.length}</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-gold/80 transition-colors hover:bg-gold/10 hover:text-gold"
+            >
+              <Plus size={11} /> Add
+            </button>
+          </div>
+          <ul className="thin-scrollbar grid min-h-0 flex-1 auto-rows-min grid-cols-3 gap-1.5 overflow-y-auto p-3">
+            {thumbs.map((thumb, index) => (
+              <li
+                key={thumb.key}
+                className="group relative aspect-square overflow-hidden rounded-md border border-white/10 bg-surface-deep"
+              >
+                <Image src={thumb.src} alt={thumb.label} fill sizes="100px" className="object-cover" />
+                <button
+                  type="button"
+                  onClick={() => onRemove(index)}
+                  title={`Remove ${thumb.label}`}
+                  aria-label={`Remove ${thumb.label}`}
+                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white/85 opacity-0 transition-opacity hover:text-white focus:opacity-100 group-hover:opacity-100"
+                >
+                  <X size={10} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="flex flex-1 flex-col items-center justify-center gap-1.5 p-3 text-center"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.04]">
+            <Icon size={15} className="text-gold/80" />
+          </span>
+          <span className="text-[12px] font-medium leading-tight text-cream">
+            {title}
+            {optional && <span className="block text-[10px] font-normal text-faint">optional</span>}
+          </span>
+          <span className="text-[10px] leading-snug text-faint">{hint}</span>
+          <span className="text-[10px] font-medium leading-snug text-gold/70">Click or drop · {formats}</span>
+        </button>
+      )}
     </div>
   );
 }

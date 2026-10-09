@@ -4,6 +4,7 @@ const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri, resolveInlineImage } = require("../generationService");
 const { queueGeneration, parseImages } = require("./queueGeneration");
 const { BRAND_STORY_JOB, AFFINITY_JOB, CAMPAIGN_KIT_JOB } = require("../jobs/marketingKit");
+const { BRAND_STORY_TONES, BRAND_STORY_LENGTHS } = require("../prompts/marketingKit");
 const { MARKETING_KIT_TYPES } = require("../models/marketingKit");
 const kits = require("../services/marketingKits");
 const lifestyleModels = require("../services/lifestyleModels");
@@ -22,6 +23,10 @@ const MAX_AFFINITY_ITEMS = 8;
 
 router.post("/brand-story", async (req, res) => {
   const { images, sheetImages, preview, conversationId } = req.body || {};
+  // Unknown or absent choices fall back to the original voice and length
+  // rather than refusing — they only ever shape the wording.
+  const tone = Object.hasOwn(BRAND_STORY_TONES, req.body?.tone) ? req.body.tone : "classic";
+  const length = Object.hasOwn(BRAND_STORY_LENGTHS, req.body?.length) ? req.body.length : "medium";
 
   const parsedImages = parseImages(images);
   if (parsedImages.length === 0) {
@@ -37,11 +42,15 @@ router.post("/brand-story", async (req, res) => {
       modelLabel: "Sparkle 2.5 Pro",
       kind: "brand_story",
       imageCount: parsedImages.length,
+      tone,
+      length,
     },
     payload: {
       images: parsedImages,
       sheetImages: parseImages(sheetImages),
       conversationId: conversationId || null,
+      tone,
+      length,
     },
     preview,
     message: "queued a Brand Story narrative",
