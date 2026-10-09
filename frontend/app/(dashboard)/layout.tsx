@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { usePreloadRoutes } from "@/lib/usePreloadRoutes";
 import { CreditGuardProvider } from "@/lib/credit-guard";
 import { JobsProvider } from "@/lib/jobs-context";
 import { PageToolbarProvider } from "@/lib/page-toolbar-context";
@@ -13,6 +14,8 @@ import { JobToasts } from "@/components/studio/JobToasts";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  // Every tool page loaded in the background, so switching between them is instant.
+  usePreloadRoutes();
 
   // The proxy guarantees a signed-in user before this ever renders, so this is
   // only the brief gap while a signed-out visitor is being sent to /login.

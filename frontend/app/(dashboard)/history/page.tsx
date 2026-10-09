@@ -4,25 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { io } from "socket.io-client";
-import {
-  CalendarRange,
-  ChevronDown,
-  Film,
-  Gauge,
-  Copy,
-  Download,
-  History,
-  Loader2,
-  type LucideIcon,
-  MessageCircle,
-  MoreHorizontal,
-  Eye,
-  ArrowUp,
-  Newspaper,
-  SlidersHorizontal,
-  Trash2,
-  Users,
-} from "lucide-react";
+import { CalendarRange, ChevronDown, Film, Gauge, Copy, Download, History, Loader2, type LucideIcon, MessageCircle, MoreHorizontal, Eye, ArrowUp, Newspaper, SlidersHorizontal, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import {
   BACKEND_URL,
@@ -41,6 +23,7 @@ import { usePageToolbar } from "@/lib/page-toolbar-context";
 import { fetchHistoryFacets } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
+import { getPageCache, pageCacheKey, setPageCache } from "@/lib/pageCache";
 import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 import { HistoryLightbox } from "@/components/studio/HistoryLightbox";
@@ -111,6 +94,55 @@ function useMinWidth(px: number) {
   return matches;
 }
 
+/**
+ * What the server is being asked for. Every filter is in here, because the
+ * server applies all of them — the cursor has to walk the filtered set, not
+ * the whole collection.
+ *
+ * `scope: "team"` is always safe to ask for: the server only honours it for
+ * someone holding `result.read.others` and quietly falls back to their own
+ * work otherwise.
+ *
+ * A plain function rather than inline in the page, because the page needs it
+ * twice: once for the fetch, and once before its first render to look up what
+ * it showed last time for the same filters.
+ */
+function buildHistoryQuery(
+  tools: string[],
+  members: string[],
+  qualities: string[],
+  types: string[],
+  range: DateRange
+) {
+  return {
+    scope: "team" as const,
+    tools: tools.length ? tools : undefined,
+    members: members.length ? members : undefined,
+    qualities: qualities.length ? qualities : undefined,
+    types: types.length ? types : undefined,
+    /*
+     * Sent as exact instants, not as bare dates.
+     *
+     * "From the 1st" means from midnight where the person is, and a bare
+     * `2026-09-01` is parsed as midnight UTC — which in this timezone is
+     * half past six the evening before, quietly pulling in a chunk of the
+     * previous day. Resolving the boundary here, where the timezone is
+     * known, keeps the range meaning what the picker showed. `to` covers
+     * the whole of its day, as the picker implies.
+     */
+    from: range.from ? new Date(`${range.from}T00:00:00`).toISOString() : undefined,
+    to: range.to ? new Date(`${range.to}T23:59:59.999`).toISOString() : undefined,
+  };
+}
+
+/** The grid as last shown for one set of filters — what a revisit opens on. */
+type HistorySnapshot = {
+  items: HistoryItem[];
+  nextCursor: string | null;
+  serverTotal: number | null;
+  canReadTeam: boolean;
+};
+
 /** 2 columns on mobile, 4 on tablet, 6 on desktop. */
 function useResponsiveColumns() {
   const tablet = useMinWidth(640);
@@ -177,18 +209,37 @@ export default function HistoryPage() {
     searchParams.get("view") === "kits" ? "kits" : "history"
   );
 
-  const [items, setItems] = useState<HistoryItem[]>([]);
+  /** Where this person's grid for one set of filters is kept between visits. */
+  const userId = user?.user_id;
+  const historyKey = useCallback(
+    (query: ReturnType<typeof buildHistoryQuery>) => pageCacheKey(userId, "history", query),
+    [userId]
+  );
+
+  /*
+   * What this page showed last time for the filters it is opening with, if
+   * anything. Read once, before the first paint, so a revisit opens straight
+   * onto the grid instead of a skeleton; the fetch below then refreshes it.
+   */
+  const [initialKey] = useState(() =>
+    historyKey(buildHistoryQuery(selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange))
+  );
+  const [initial] = useState(() => getPageCache<HistorySnapshot>(initialKey));
+  /** The query the rows on screen were fetched for — see the cache write below. */
+  const dataKeyRef = useRef<string | null>(initial ? initialKey : null);
+
+  const [items, setItems] = useState<HistoryItem[]>(() => initial?.items ?? []);
   /**
    * Colleagues' new results, fetched but held back because the reader is
    * scrolled down the grid — slotting them in above would shove what they
    * are looking at out from under them. Shown as a "N new" pill instead.
    */
   const [pendingNew, setPendingNew] = useState<HistoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initial);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [serverTotal, setServerTotal] = useState<number | null>(null);
-  const [canReadTeam, setCanReadTeam] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(initial?.nextCursor ?? null);
+  const [serverTotal, setServerTotal] = useState<number | null>(initial?.serverTotal ?? null);
+  const [canReadTeam, setCanReadTeam] = useState(initial?.canReadTeam ?? false);
   const [selected, setSelected] = useState<HistoryItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
@@ -202,8 +253,18 @@ export default function HistoryPage() {
    * a second request against a collection that is nothing to do with the
    * grid.
    */
-  const [kits, setKits] = useState<MarketingKitSummary[] | null>(null);
+  const kitsKey = pageCacheKey(userId, "history-kits");
+  const [kits, setKits] = useState<MarketingKitSummary[] | null>(
+    () => getPageCache<MarketingKitSummary[]>(kitsKey) ?? null
+  );
   const [kitsLoading, setKitsLoading] = useState(false);
+  /** Whether this visit has asked the server yet — a cached list is shown, but still refreshed once. */
+  const kitsFetchedRef = useRef(false);
+
+  // Kept in step with deletes and refreshes, so the next visit opens on the current list.
+  useEffect(() => {
+    if (kits) setPageCache(kitsKey, kits);
+  }, [kits, kitsKey]);
 
   const columns = useResponsiveColumns();
   // Which form the filter row takes — see `filterControls`.
@@ -272,35 +333,8 @@ export default function HistoryPage() {
     syncUrl({ tools: nextTools, members: nextMembers });
   }
 
-  /*
-   * What the server is being asked for. Every filter is in here, because the
-   * server applies all of them — the cursor has to walk the filtered set, not
-   * the whole collection.
-   *
-   * `scope: "team"` is always safe to ask for: the server only honours it for
-   * someone holding `result.read.others` and quietly falls back to their own
-   * work otherwise.
-   */
   const historyQuery = useMemo(
-    () => ({
-      scope: "team" as const,
-      tools: selectedTools.length ? selectedTools : undefined,
-      members: selectedMembers.length ? selectedMembers : undefined,
-      qualities: selectedQualities.length ? selectedQualities : undefined,
-      types: selectedTypes.length ? selectedTypes : undefined,
-      /*
-       * Sent as exact instants, not as bare dates.
-       *
-       * "From the 1st" means from midnight where the person is, and a bare
-       * `2026-09-01` is parsed as midnight UTC — which in this timezone is
-       * half past six the evening before, quietly pulling in a chunk of the
-       * previous day. Resolving the boundary here, where the timezone is
-       * known, keeps the range meaning what the picker showed. `to` covers
-       * the whole of its day, as the picker implies.
-       */
-      from: dateRange.from ? new Date(`${dateRange.from}T00:00:00`).toISOString() : undefined,
-      to: dateRange.to ? new Date(`${dateRange.to}T23:59:59.999`).toISOString() : undefined,
-    }),
+    () => buildHistoryQuery(selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange),
     [selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange]
   );
 
@@ -313,7 +347,20 @@ export default function HistoryPage() {
 
   useEffect(() => {
     const id = ++requestId.current;
-    setLoading(true);
+    const key = historyKey(historyQuery);
+    // Seen this exact question before: show that answer now and refresh it
+    // quietly, rather than blanking the grid to a skeleton.
+    const cached = getPageCache<HistorySnapshot>(key);
+    if (cached) {
+      dataKeyRef.current = key;
+      setItems(cached.items);
+      setNextCursor(cached.nextCursor);
+      setServerTotal(cached.serverTotal);
+      setCanReadTeam(cached.canReadTeam);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     // Page one of the new question already includes anything held back.
     setPendingNew([]);
 
@@ -322,6 +369,7 @@ export default function HistoryPage() {
       // A newer set of filters already superseded this request.
       if (id !== requestId.current) return;
       if (res.status === "success") {
+        dataKeyRef.current = key;
         // Replaced, not appended: this is page one of a different question.
         setItems(res.items ?? []);
         setNextCursor(res.nextCursor ?? null);
@@ -330,7 +378,19 @@ export default function HistoryPage() {
       }
       setLoading(false);
     })();
-  }, [historyQuery]);
+  }, [historyQuery, historyKey]);
+
+  /*
+   * Mirrors the grid into the cache as it changes — after a fetch, a further
+   * page, a live arrival or a delete — so the next visit opens on exactly what
+   * was last on screen. Filed under the query the rows were fetched for, which
+   * the ref tracks: while a new filter's first page is still in flight, the
+   * rows on screen still belong to the old one.
+   */
+  useEffect(() => {
+    if (loading || !dataKeyRef.current) return;
+    setPageCache<HistorySnapshot>(dataKeyRef.current, { items, nextCursor, serverTotal, canReadTeam });
+  }, [loading, items, nextCursor, serverTotal, canReadTeam]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
@@ -355,8 +415,10 @@ export default function HistoryPage() {
    * filtered for at all, and the list collapsed to one name the moment a
    * filter was applied.
    */
-  const [facetMembers, setFacetMembers] = useState<string[]>([]);
-  const [facetQualities, setFacetQualities] = useState<string[]>([]);
+  const facetsKey = pageCacheKey(userId, "history-facets");
+  const [cachedFacets] = useState(() => getPageCache<{ members: string[]; qualities: string[] }>(facetsKey));
+  const [facetMembers, setFacetMembers] = useState<string[]>(cachedFacets?.members ?? []);
+  const [facetQualities, setFacetQualities] = useState<string[]>(cachedFacets?.qualities ?? []);
 
   useEffect(() => {
     let cancelled = false;
@@ -364,11 +426,12 @@ export default function HistoryPage() {
       if (cancelled || res.status !== "success") return;
       setFacetMembers(res.members ?? []);
       setFacetQualities(res.qualities ?? []);
+      setPageCache(facetsKey, { members: res.members ?? [], qualities: res.qualities ?? [] });
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [facetsKey]);
 
   // Kits are still filtered in the browser, so their authors have to be
   // offered too — the facets call only covers generations.
@@ -439,11 +502,11 @@ export default function HistoryPage() {
       kits === null
         ? null
         : kits.filter(
-            (kit) =>
-              withinRange(kit.updatedAt, dateRange) &&
-              (selectedKinds.length === 0 || selectedKinds.includes(kit.kind)) &&
-              (selectedMembers.length === 0 || selectedMembers.includes(kit.userName))
-          ),
+          (kit) =>
+            withinRange(kit.updatedAt, dateRange) &&
+            (selectedKinds.length === 0 || selectedKinds.includes(kit.kind)) &&
+            (selectedMembers.length === 0 || selectedMembers.includes(kit.userName))
+        ),
     [kits, dateRange, selectedKinds, selectedMembers]
   );
 
@@ -600,7 +663,7 @@ export default function HistoryPage() {
    * the grid's own filters — the server applies scope and filters, so what
    * comes back is exactly what a reload would have added.
    */
-  const fetchNewerRef = useRef<() => void>(() => {});
+  const fetchNewerRef = useRef<() => void>(() => { });
   useEffect(() => {
     fetchNewerRef.current = async () => {
       const id = requestId.current;
@@ -621,12 +684,19 @@ export default function HistoryPage() {
     };
   });
 
-  /** Loads the kits the first time that tab is opened, and not again. */
+  /**
+   * Loads the kits the first time that tab is opened on this visit, and not
+   * again. A list cached from an earlier visit is already on screen, so it is
+   * swapped for the fresh one in a single step rather than shrinking to the
+   * first page and growing back.
+   */
   useEffect(() => {
-    if (view !== "kits" || kits !== null) return;
+    if (view !== "kits" || kitsFetchedRef.current) return;
+    kitsFetchedRef.current = true;
     let cancelled = false;
+    const hadCache = getPageCache(kitsKey) !== undefined;
 
-    setKitsLoading(true);
+    if (!hadCache) setKitsLoading(true);
     // Same reach as the grid, so the Members filter carries across the two
     // tabs — the server narrows `team` back to own work for anyone without
     // the permission for it.
@@ -637,23 +707,32 @@ export default function HistoryPage() {
     (async () => {
       let all: MarketingKitSummary[] = [];
       let cursor: string | undefined;
+      let failed = false;
       do {
         const res = await listMarketingKits({ limit: 50, scope: "team", cursor });
         if (cancelled) return;
-        if (res.status !== "success") break;
+        if (res.status !== "success") {
+          failed = true;
+          break;
+        }
         all = [...all, ...(res.kits ?? [])];
-        setKits(all);
-        setKitsLoading(false);
+        if (!hadCache) {
+          setKits(all);
+          setKitsLoading(false);
+        }
         cursor = res.nextCursor ?? undefined;
       } while (cursor);
-      setKits(all);
+      // A refresh that failed keeps the cached list rather than emptying it.
+      if (!(failed && hadCache)) setKits(all);
       setKitsLoading(false);
     })();
 
     return () => {
       cancelled = true;
+      // Interrupted before it finished — let the next visit to the tab try again.
+      kitsFetchedRef.current = false;
     };
-  }, [view, kits]);
+  }, [view, kitsKey]);
 
   const showView = useCallback(
     (next: "history" | "kits") => {
@@ -739,68 +818,68 @@ export default function HistoryPage() {
      the tab that is showing: images under History, saved decks under
      Marketing Kits. */
   const renderViewTabs = (compact: boolean) => (
-        <div className="flex items-center rounded-md border border-white/10">
-          <ViewTab
-            icon={History}
-            label="History"
-            side="left"
-            compact={compact}
-            active={view === "history"}
-            onClick={() => showView("history")}
-            badge={view === "history" ? badgeCount : undefined}
-            badgeLabel={`${badgeCount} images`}
-          />
-          <ViewTab
-            icon={Newspaper}
-            label="Marketing Kits"
-            side="right"
-            compact={compact}
-            active={view === "kits"}
-            onClick={() => showView("kits")}
-            badge={view === "kits" ? badgeCount : undefined}
-            badgeLabel={`${badgeCount} kits`}
-          />
-        </div>
+    <div className="flex items-center rounded-md border border-white/10">
+      <ViewTab
+        icon={History}
+        label="History"
+        side="left"
+        compact={compact}
+        active={view === "history"}
+        onClick={() => showView("history")}
+        badge={view === "history" ? badgeCount : undefined}
+        badgeLabel={`${badgeCount} images`}
+      />
+      <ViewTab
+        icon={Newspaper}
+        label="Marketing Kits"
+        side="right"
+        compact={compact}
+        active={view === "kits"}
+        onClick={() => showView("kits")}
+        badge={view === "kits" ? badgeCount : undefined}
+        badgeLabel={`${badgeCount} kits`}
+      />
+    </div>
   );
 
   const renderSecondaryFilters = (compact: boolean) => (
     <>
-        {/* Unlike the two below, this one shows on both tabs: a date range
+      {/* Unlike the two below, this one shows on both tabs: a date range
             narrows a list of documents exactly as well as a grid of
             pictures. */}
-        <DateFilter range={dateRange} onChange={updateRange} compact={compact} />
+      <DateFilter range={dateRange} onChange={updateRange} compact={compact} />
 
-        {canReadTeam && (
-          <MemberFilter
-            members={knownMembers}
-            selected={selectedMembers}
-            onChange={(next) => updateFilters(selectedTools, next)}
+      {canReadTeam && (
+        <MemberFilter
+          members={knownMembers}
+          selected={selectedMembers}
+          onChange={(next) => updateFilters(selectedTools, next)}
+          compact={compact}
+        />
+      )}
+
+      {/* History only — a kit has no resolution and is never a video. */}
+      {view === "history" && (
+        <>
+          <QualityFilter
+            options={facetQualities}
+            selected={selectedQualities}
+            onChange={(next) => {
+              setSelectedQualities(next);
+              syncUrl({ qualities: next });
+            }}
             compact={compact}
           />
-        )}
-
-        {/* History only — a kit has no resolution and is never a video. */}
-        {view === "history" && (
-          <>
-            <QualityFilter
-              options={facetQualities}
-              selected={selectedQualities}
-              onChange={(next) => {
-                setSelectedQualities(next);
-                syncUrl({ qualities: next });
-              }}
-              compact={compact}
-            />
-            <TypeFilter
-              selected={selectedTypes}
-              onChange={(next) => {
-                setSelectedTypes(next);
-                syncUrl({ types: next });
-              }}
-              compact={compact}
-            />
-          </>
-        )}
+          <TypeFilter
+            selected={selectedTypes}
+            onChange={(next) => {
+              setSelectedTypes(next);
+              syncUrl({ types: next });
+            }}
+            compact={compact}
+          />
+        </>
+      )}
     </>
   );
 
@@ -808,22 +887,22 @@ export default function HistoryPage() {
      dimension actually separates the rows there: which tool made a result,
      or which kind a kit is. */
   const renderToolFilter = (compact: boolean) =>
-      view === "history" ? (
-        <ToolFilter
-          selected={selectedTools}
-          onChange={(next) => updateFilters(next, selectedMembers)}
-          compact={compact}
-        />
-      ) : (
-        <KindFilter
-          selected={selectedKinds}
-          onChange={(next) => {
-            setSelectedKinds(next);
-            syncUrl({ kinds: next });
-          }}
-          compact={compact}
-        />
-      );
+    view === "history" ? (
+      <ToolFilter
+        selected={selectedTools}
+        onChange={(next) => updateFilters(next, selectedMembers)}
+        compact={compact}
+      />
+    ) : (
+      <KindFilter
+        selected={selectedKinds}
+        onChange={(next) => {
+          setSelectedKinds(next);
+          syncUrl({ kinds: next });
+        }}
+        compact={compact}
+      />
+    );
 
   /*
    * Icons only on tablets and small laptops, labels from `xl` up. The
@@ -920,7 +999,7 @@ export default function HistoryPage() {
               ))}
             </div>
           )}
-  
+
           {view === "history" && loadingMore && (
             <div className="pt-1">
               <SkeletonGrid rows={1} />

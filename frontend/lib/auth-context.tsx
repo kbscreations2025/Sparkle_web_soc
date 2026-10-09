@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { io } from "socket.io-client";
 import { getCurrentUser, logout as apiLogout, clearLocalSession, BACKEND_URL, type ApiUser } from "./api";
 import { LOGIN_PATH } from "./shell";
+import { clearPageCache } from "./pageCache";
 
 type AuthContextValue = {
   user: ApiUser | null;
@@ -72,6 +73,7 @@ export function AuthProvider({
     socket.on("disconnect", () => setLiveConnected(false));
     socket.on("auth:revoked", () => {
       setUser(null);
+      clearPageCache();
       // Clearing the cookies is what actually ends it here. The access token
       // stays valid at the central login for up to 15 minutes after the
       // session was killed, so without this the proxy would verify it on the
@@ -96,6 +98,7 @@ export function AuthProvider({
       await apiLogout();
     } finally {
       setUser(null);
+      clearPageCache();
       // Must be cleared: the recovery effect above is gated on it, so leaving
       // it true would disable the "no user → re-fetch me" fallback for the
       // rest of this tab's life.

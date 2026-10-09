@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
+import { getPageCache, pageCacheKey, setPageCache } from "@/lib/pageCache";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 import { DailyAllowanceControl } from "@/components/admin/DailyAllowanceControl";
 import { MemberRows } from "@/components/admin/MemberRows";
@@ -69,7 +70,11 @@ export default function CreditsPage() {
  * one act that stays with whoever carries the cost.
  */
 function StaffCredits() {
-  const [tenants, setTenants] = useState<CreditTenantSummary[] | null>(null);
+  const cacheKey = useCreditsCacheKey("tenants");
+  // Last visit's table shows at once; `load` below refreshes it.
+  const [tenants, setTenants] = useState<CreditTenantSummary[] | null>(
+    () => getPageCache<CreditTenantSummary[]>(cacheKey) ?? null
+  );
   const [openTenantId, setOpenTenantId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -77,11 +82,12 @@ function StaffCredits() {
     const res = await fetchCreditTenants();
     if (res.status === "success") {
       setTenants(res.tenants);
+      setPageCache(cacheKey, res.tenants);
       setError("");
     } else {
       setError(res.message || "Could not load organizations.");
     }
-  }, []);
+  }, [cacheKey]);
 
   useEffect(() => {
     load();
@@ -176,9 +182,17 @@ function StaffCredits() {
  * what is in the pool — an organization that has run out has to ask
  * platform staff for more.
  */
+type MyOrgSnapshot = {
+  data: Awaited<ReturnType<typeof fetchMyOrgCredits>>;
+  roster: Awaited<ReturnType<typeof fetchOrgMembers>> | null;
+};
+
 function MyOrgCredits() {
-  const [data, setData] = useState<Awaited<ReturnType<typeof fetchMyOrgCredits>> | null>(null);
-  const [roster, setRoster] = useState<Awaited<ReturnType<typeof fetchOrgMembers>> | null>(null);
+  const cacheKey = useCreditsCacheKey("my-org");
+  // Last visit's pool and roster show at once; `load` below refreshes both.
+  const [cached] = useState(() => getPageCache<MyOrgSnapshot>(cacheKey));
+  const [data, setData] = useState<MyOrgSnapshot["data"] | null>(cached?.data ?? null);
+  const [roster, setRoster] = useState<MyOrgSnapshot["roster"]>(cached?.roster ?? null);
   const [error, setError] = useState("");
   const [pending, setPending] = useState<{
     userId: string;
@@ -205,9 +219,11 @@ function MyOrgCredits() {
       setError(res.message || "Could not load your organization's credits.");
       return;
     }
+    const nextRoster = people.status === "success" ? people : null;
     setData(res);
-    setRoster(people.status === "success" ? people : null);
-  }, []);
+    setRoster(nextRoster);
+    setPageCache<MyOrgSnapshot>(cacheKey, { data: res, roster: nextRoster });
+  }, [cacheKey]);
 
   useEffect(() => {
     load();
@@ -383,7 +399,10 @@ function MyOrgCredits() {
 
 /** One organization: the pool, every member, and the statement. */
 function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => void }) {
-  const [data, setData] = useState<Awaited<ReturnType<typeof fetchCreditTenant>> | null>(null);
+  const cacheKey = useCreditsCacheKey("tenant", tenantId);
+  const [data, setData] = useState<Awaited<ReturnType<typeof fetchCreditTenant>> | null>(
+    () => getPageCache<Awaited<ReturnType<typeof fetchCreditTenant>>>(cacheKey) ?? null
+  );
   // Bumped after a grant or revoke, so the logs re-read along with the balances.
   const [error, setError] = useState("");
   const [pending, setPending] = useState<{
@@ -396,9 +415,11 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
 
   const load = useCallback(async () => {
     const detail = await fetchCreditTenant(tenantId);
-    if (detail.status === "success") setData(detail);
-    else setError(detail.message || "Could not load that organization.");
-  }, [tenantId]);
+    if (detail.status === "success") {
+      setData(detail);
+      setPageCache(cacheKey, detail);
+    } else setError(detail.message || "Could not load that organization.");
+  }, [tenantId, cacheKey]);
 
   useEffect(() => {
     load();
@@ -625,6 +646,12 @@ function MemberRow({
       </div>
     </div>
   );
+}
+
+/** This person's cache slot for one part of the page — see `lib/pageCache`. */
+function useCreditsCacheKey(...parts: string[]) {
+  const { user } = useAuth();
+  return pageCacheKey(user?.user_id, "credits", ...parts);
 }
 
 function Figure({ label, value, muted = false }: { label: string; value: number; muted?: boolean }) {
