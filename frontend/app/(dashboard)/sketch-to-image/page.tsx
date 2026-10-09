@@ -19,6 +19,7 @@ import {
   type ImageEditModelId,
 } from "@/lib/api";
 import { PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT } from "@/lib/jewelryConfigurator";
+import { useStoredImageCount } from "@/lib/useStoredImageCount";
 import { compressImage, makeThumbnail } from "@/lib/image";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
@@ -60,7 +61,8 @@ export default function SketchToImagePage() {
   const [notes, setNotes] = useState("");
   const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
   const [quality, setQuality] = useModelQuality(model);
-  const [count, setCount] = useState<number>(DEFAULT_PHOTO_COUNT);
+  // Shared with the other photo tools — see useStoredImageCount.
+  const [count, setCount] = useStoredImageCount("photo", PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   /** Whether the blank drawing sheet is open, for a design with no sketch to upload. */

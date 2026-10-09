@@ -177,5 +177,5 @@ export function clearJewelryTypeDependentSelections(sel: Record<string, string>)
 }
 
 /** Text-driven tools — Text to Image and Text to Sketch — offer a run of 2 to 5. */
-export const TEXT_COUNT_OPTIONS = [2, 3, 4, 5] as const;
+export const TEXT_COUNT_OPTIONS = [1, 2, 3, 4] as const;
 export const DEFAULT_IMAGE_COUNT = 2;

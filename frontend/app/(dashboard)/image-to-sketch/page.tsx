@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useStoredImageCount } from "@/lib/useStoredImageCount";
 import Image from "next/image";
 import { Maximize2, PenLine, Upload, X } from "lucide-react";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
@@ -49,7 +50,8 @@ export default function ImageToSketchPage() {
   const [style, setStyle] = useState<SketchStyleId>("pencil");
   const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
   const [quality, setQuality] = useModelQuality(model);
-  const [count, setCount] = useState<number>(DEFAULT_PHOTO_COUNT);
+  // Shared with the other photo tools — see useStoredImageCount.
+  const [count, setCount] = useStoredImageCount("photo", PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);

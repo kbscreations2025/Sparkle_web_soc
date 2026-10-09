@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useStoredImageCount } from "@/lib/useStoredImageCount";
 import { Wand2 } from "lucide-react";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
 import { PromptCard } from "@/components/studio/PromptCard";
@@ -70,7 +71,8 @@ export default function TextToSketchPage() {
   const [aspect, setAspect] = useState<AspectId>("square");
   const [model, setModel] = useState<OptionalImageModelId>(DEFAULT_OPTIONAL_IMAGE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
-  const [count, setCount] = useState<number>(DEFAULT_IMAGE_COUNT);
+  // Remembered in this browser until changed — see useStoredImageCount.
+  const [count, setCount] = useStoredImageCount("text", TEXT_COUNT_OPTIONS, DEFAULT_IMAGE_COUNT);
   const [views, setViews] = useState<ViewId[]>([]);
 
   function toggleView(id: ViewId) {
