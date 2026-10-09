@@ -289,7 +289,30 @@ const OUTFIT_SHOWCASE = {
   "Corset Top": "a structured sweetheart neckline with bare shoulders and collarbone, striking for a statement necklace and earrings",
 };
 
-const OUTFIT_FALLBACK = Object.keys(OUTFIT_SHOWCASE);
+/*
+ * No longer offered in the builder — the product serves users well beyond
+ * India — but kept in OUTFIT_SHOWCASE so models already saved with one still
+ * regenerate with their own styling note. Never picked at random.
+ */
+const RETIRED_OUTFITS = new Set(["Anarkali Suit", "Bridal Ensemble", "Kanjeevaram Drape"]);
+
+/** What an unpicked outfit is drawn from — the builder's own lists, per gender. */
+const OUTFIT_FALLBACK_FEMALE = Object.keys(OUTFIT_SHOWCASE).filter((outfit) => !RETIRED_OUTFITS.has(outfit));
+// Mirrors OUTFITS_MALE in frontend/lib/lifestyleOptions.ts. Before this a male
+// model with no outfit picked was drawn from the gowns above.
+const OUTFIT_FALLBACK_MALE = [
+  "Tailored Suit",
+  "Blazer & Trousers",
+  "Dress Shirt (open collar)",
+  "Dress Shirt & Tie",
+  "Turtleneck Sweater",
+  "Henley Shirt",
+  "Polo Shirt",
+  "Bomber Jacket",
+  "Waistcoat & Shirt",
+  "Overcoat",
+  "Linen Shirt (open collar)",
+];
 
 /**
  * Model photos are always portrait — this is a base plate meant to have
@@ -323,7 +346,9 @@ function buildLifestyleModelPrompt(attrs = {}, notes) {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const outfit = pickRandom(chosen.length > 0 ? chosen : OUTFIT_FALLBACK);
+  const outfit = pickRandom(
+    chosen.length > 0 ? chosen : isFemale ? OUTFIT_FALLBACK_FEMALE : OUTFIT_FALLBACK_MALE
+  );
   const showcase = OUTFIT_SHOWCASE[outfit] ?? "an elegant neckline that keeps the collarbone and shoulders open for jewelry";
   const aspectNote = pickRandom(MODEL_ASPECTS);
 

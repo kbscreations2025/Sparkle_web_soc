@@ -3,7 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { Globe, Loader2, Lock, type LucideIcon, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Globe, Loader2, Lock, type LucideIcon, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
 import { Chip } from "./OptionChips";
 import { Lightbox } from "./Lightbox";
 import { ConfirmDialog } from "./ToolChrome";
@@ -166,20 +166,26 @@ function PendingModelTile({ percent }: { percent: number }) {
 }
 
 /**
- * The builder, as a sheet up from the bottom of the window.
+ * The builder, as a dialog in the middle of the window.
  *
- * It is a long form — eight attribute rows — and inlining it pushed the
- * whole page down and left the grid it belongs to off screen. Portalled to
- * <body> so the page's own scroll containers can't clip or scroll it.
+ * A full-width sheet stretched nine short attribute rows across the whole
+ * screen, so the eye had to sweep a metre of chips to read one choice. A
+ * column about as wide as a form reads top to bottom, in the order the
+ * choices are made, and on a phone it is a sheet from the bottom as before.
+ *
+ * The title stays pinned at the top and the name and Build button at the
+ * bottom, so the form scrolls between them and the one thing left to do is
+ * always in view. Portalled to <body> so the page's own scroll containers
+ * can't clip or scroll it.
  */
 function ModelBuilderDrawer({
   onClose,
-  header,
+  footer,
   children,
 }: {
   onClose: () => void;
-  /** Sits in the sticky bar beside the title — the name, the note and Build. */
-  header: ReactNode;
+  /** The name field and the Build button, pinned under the form. */
+  footer: ReactNode;
   children: ReactNode;
 }) {
   useEscapeKey(onClose);
@@ -187,31 +193,38 @@ function ModelBuilderDrawer({
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center sm:p-6"
+      onClick={onClose}
+    >
       <div
         role="dialog"
         aria-label="Build a model"
         onClick={(event) => event.stopPropagation()}
-        className="animate-drawer-up max-h-[85vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/[0.08] bg-surface-deep shadow-2xl"
+        className="animate-drawer-up flex max-h-[90vh] w-full flex-col overflow-hidden rounded-t-2xl border border-white/[0.08] bg-surface-deep shadow-2xl sm:max-h-[85vh] sm:max-w-2xl sm:rounded-2xl"
       >
-        {/* Naming it and building it ride in the sticky bar: they are the
-            two things you reach for last, and putting them at the foot of a
-            form this wide means scrolling back down past every chip. */}
-        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-surface-deep px-4 py-2.5">
-          <h3 className="flex shrink-0 items-center gap-2 text-xs font-semibold uppercase tracking-wider text-cream">
-            <Wand2 size={13} className="text-gold/70" /> Build a model
-          </h3>
-          {header}
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-3.5">
+          <div className="min-w-0">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-cream">
+              <Wand2 size={14} className="text-gold/70" /> Build a model
+            </h3>
+            <p className="mt-0.5 text-[11px] text-faint">
+              Pick only what matters to you — anything you leave blank is chosen for you.
+            </p>
+          </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close the builder"
             className="shrink-0 rounded-lg p-1 text-faint transition-colors hover:text-cream"
           >
-            <X size={15} />
+            <X size={16} />
           </button>
         </div>
-        <div className="space-y-4 p-4">{children}</div>
+
+        <div className="thin-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">{children}</div>
+
+        <div className="shrink-0 border-t border-white/[0.06] px-5 py-3">{footer}</div>
       </div>
     </div>,
     document.body
@@ -461,18 +474,25 @@ function StepSlider({
   );
 }
 
-/** Gender sits in the drawer's header; everything else in the grid below it. */
-const GENDER_ATTR = MODEL_ATTRS.find((attr) => attr.key === "gender");
-const BODY_ATTRS = MODEL_ATTRS.filter((attr) => attr.key !== "gender");
+const ATTRS_BY_KEY = Object.fromEntries(MODEL_ATTRS.map((attr) => [attr.key, attr]));
+
+/** Attributes that take one value — the rest can blend several. */
+const SINGLE_PICK = new Set(["gender", "age", "skinTone", "hairColor", "height", "outfit"]);
 
 /**
- * Attributes that take the grid's full width.
+ * The form, grouped the way a person describes someone: who they are, then
+ * their skin, their hair, and what they are wearing. Within a group the
+ * fields sit two to a row, so the dialog stays narrow without getting long.
  *
- * Not a count of options but a measure of their labels: the wardrobe has
- * thirty, and hair colour only six, but "Light blonde / platinum (Level
- * 9–10)" wraps to three lines in a quarter-width column.
+ * The wardrobe is the one long list, so it has its section to itself.
  */
-const FULL_WIDTH_ATTRS = new Set(["outfit", "hairColor", "skinTone"]);
+const SECTIONS: { title: string; fields: string[] }[] = [
+  { title: "Basics", fields: ["gender", "body", "age", "height"] },
+  { title: "Skin", fields: ["skinTone", "skinFinish"] },
+  { title: "Hair", fields: ["hairStyle", "hairColor"] },
+  { title: "Outfit", fields: ["outfit"] },
+];
+
 
 /**
  * Describe a person, get a model.
@@ -493,8 +513,12 @@ function ModelBuilder({
   const [picks, setPicks] = useState<Record<string, string[]>>({});
   const [notes, setNotes] = useState("");
   const [name, setName] = useState("");
-
-  const SINGLE_PICK = new Set(["gender", "age", "skinTone", "hairColor", "height"]);
+  /**
+   * The wardrobe starts folded. Most people are happy with a random outfit
+   * (see the backend's fallback), and twenty-odd chips were the bulk of the
+   * form — so it is one line until someone asks to choose.
+   */
+  const [outfitOpen, setOutfitOpen] = useState(false);
 
   function toggle(key: string, option: string) {
     setPicks((current) => {
@@ -523,34 +547,19 @@ function ModelBuilder({
   return (
     <ModelBuilderDrawer
       onClose={onClose}
-      header={
-        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
-          {/* Gender rides up here with them: it is the one attribute that
-              changes what every other pick means, so it is picked first. */}
-          {GENDER_ATTR && (
-            <div className="mr-auto flex shrink-0 items-center gap-1.5">
-              {GENDER_ATTR.options.map((option) => (
-                <Chip
-                  key={option}
-                  label={option}
-                  size="sm"
-                  active={(picks[GENDER_ATTR.key] ?? []).includes(option)}
-                  onClick={() => toggle(GENDER_ATTR.key, option)}
-                />
-              ))}
-            </div>
-          )}
+      footer={
+        <div className="flex flex-wrap items-center gap-2">
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Name this model (optional)"
-            className="min-h-8 w-40 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[12px] text-cream placeholder:text-faint focus:border-gold/30 focus:outline-none sm:max-w-[220px]"
+            className="min-h-9 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[12px] text-cream placeholder:text-faint focus:border-gold/30 focus:outline-none"
           />
           <button
             type="button"
             onClick={build}
             disabled={busy}
-            className="flex min-h-8 shrink-0 items-center justify-center gap-2 rounded-lg border border-gold/30 bg-gold/15 px-4 text-xs font-semibold text-gold transition-colors hover:bg-gold/25 disabled:opacity-50"
+            className="flex min-h-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-gold/30 bg-gold/15 px-4 text-xs font-semibold text-gold transition-colors hover:bg-gold/25 disabled:opacity-50"
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
             {busy ? "Building…" : "Build this model"}
@@ -558,63 +567,115 @@ function ModelBuilder({
         </div>
       }
     >
-      {/*
-       * Columns rather than one tall list.
-       *
-       * Eight of the nine attributes are two to six chips — stacked, they
-       * made a form twice the height of the window for maybe 400px of
-       * actual content. Side by side they all fit at once, which is what
-       * this form wants: the picks are read together, not in order.
-       *
-       * The one long list (the wardrobe) keeps the full width to itself and
-       * wraps there.
-       */}
-      <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-        {BODY_ATTRS.map((attr) => (
-          <div
-            key={attr.key}
-            className={cn("space-y-1.5", FULL_WIDTH_ATTRS.has(attr.key) && "sm:col-span-2")}
-          >
-            <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
-              {attr.label}
-              {attr.note && <span className="ml-1.5 normal-case tracking-normal text-faint/60">{attr.note}</span>}
-            </p>
-            {SLIDER_ATTRS.has(attr.key) ? (
-              <StepSlider
-                attrKey={attr.key}
-                options={attr.options}
-                value={picks[attr.key]?.[0]}
-                onChange={(option) => toggle(attr.key, option)}
-              />
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {(attr.key === "outfit" ? outfitsFor(picks[GENDER_ATTR?.key ?? "gender"]) : attr.options).map(
-                  (option) => (
-                    <Chip
-                      key={option}
-                      label={option}
-                      size="sm"
-                      active={(picks[attr.key] ?? []).includes(option)}
-                      onClick={() => toggle(attr.key, option)}
-                    />
-                  )
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+      {SECTIONS.map((section) => (
+        <section key={section.title} className="space-y-3">
+          <h4 className="border-b border-white/[0.06] pb-1.5 text-[11px] font-semibold uppercase tracking-widest text-cream/80">
+            {section.title}
+          </h4>
+          <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+            {section.fields.map((key) => {
+              const attr = ATTRS_BY_KEY[key];
+              if (!attr) return null;
+              const chosen = picks[key] ?? [];
+              // The wardrobe follows gender — see `outfitsFor`.
+              const options = key === "outfit" ? outfitsFor(picks.gender) : attr.options;
+              const isOutfit = key === "outfit";
 
-      <div className="space-y-1.5">
-        <p className="text-[10px] font-medium uppercase tracking-widest text-faint">Anything else about her look</p>
+              return (
+                <div key={key} className={cn("space-y-2", isOutfit && "sm:col-span-2")}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-[11px] font-medium text-muted">
+                      {attr.label}
+                      {/* Says how many it takes, so a second click on a
+                          slider doesn't read as the first one being lost. */}
+                      <span className="ml-1.5 text-[10px] font-normal text-faint">
+                        {SINGLE_PICK.has(key) ? "pick one" : "pick any"}
+                      </span>
+                    </p>
+                    {isOutfit && chosen.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setPicks((current) => ({ ...current, outfit: [] }))}
+                        className="text-[10px] text-gold/80 transition-colors hover:text-gold"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {attr.note && <p className="-mt-1 text-[10px] text-faint/70">{attr.note}</p>}
+
+                  {isOutfit && !outfitOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => setOutfitOpen(true)}
+                      aria-expanded={false}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-left transition-colors hover:border-white/[0.16]"
+                    >
+                      <span className="min-w-0 truncate text-[12px] text-cream">
+                        {chosen.length ? chosen.join(", ") : "Random"}
+                        {!chosen.length && (
+                          <span className="ml-1.5 text-[11px] text-faint">— a different outfit is chosen for you</span>
+                        )}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-gold/80">
+                        {chosen.length ? "Change" : "Choose"} <ChevronDown size={12} />
+                      </span>
+                    </button>
+                  ) : SLIDER_ATTRS.has(key) ? (
+                    <StepSlider attrKey={key} options={options} value={chosen[0]} onChange={(option) => toggle(key, option)} />
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {options.map((option) => (
+                        <Chip
+                          key={option}
+                          label={option}
+                          size="sm"
+                          active={chosen.includes(option)}
+                          onClick={() => {
+                            toggle(key, option);
+                            // One outfit, so picking it is the end of the choice — fold the list back up.
+                            if (isOutfit && !chosen.includes(option)) setOutfitOpen(false);
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {isOutfit && outfitOpen && (
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] text-faint">
+                        Pick one outfit, or leave it unpicked for a random one.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setOutfitOpen(false)}
+                        aria-expanded
+                        className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-gold/80 transition-colors hover:text-gold"
+                      >
+                        Done <ChevronUp size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+
+      <section className="space-y-2">
+        <h4 className="border-b border-white/[0.06] pb-1.5 text-[11px] font-semibold uppercase tracking-widest text-cream/80">
+          Anything else <span className="font-normal normal-case tracking-normal text-faint">(optional)</span>
+        </h4>
         <textarea
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
-          rows={3}
+          rows={2}
           placeholder="e.g. freckles across the nose, a small gap between the front teeth, warm undertones…"
           className="w-full resize-none rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[12px] leading-relaxed text-cream placeholder:text-faint focus:border-gold/30 focus:outline-none"
         />
-      </div>
+      </section>
     </ModelBuilderDrawer>
   );
 }

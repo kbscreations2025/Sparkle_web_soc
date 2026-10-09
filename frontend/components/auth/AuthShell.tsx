@@ -9,10 +9,17 @@ interface AuthShellProps {
   children: ReactNode;
 }
 
-/** Full-bleed video-background card layout shared by every auth step. */
+/**
+ * Full-bleed video-background card layout shared by every auth step.
+ *
+ * `min-h-dvh`, not `min-h-screen`: on a phone `100vh` is the height with the
+ * browser's address bar hidden, so a page exactly that tall overflows the
+ * visible area by the bar's height and scrolls. The dynamic viewport unit is
+ * whatever is actually on screen.
+ */
 export function AuthShell({ eyebrow, children }: AuthShellProps) {
   return (
-    <div className="relative min-h-screen flex flex-col lg:flex-row overflow-hidden bg-black">
+    <div className="relative min-h-dvh flex flex-col lg:flex-row overflow-hidden bg-black">
       <video autoPlay muted loop playsInline className="absolute inset-0 w-full h-full object-cover opacity-90">
         <source src="/bg_video/shared_1.mp4" type="video/mp4" />
       </video>
@@ -128,7 +135,9 @@ export function AuthField({
         placeholder={placeholder ?? label}
         autoFocus={autoFocus}
         required
-        className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all duration-200"
+        // 16px on phones: iOS zooms the whole page into any field smaller
+        // than that on focus, which pans the layout off to the side.
+        className="w-full rounded-xl px-4 py-2.5 text-base outline-none transition-all duration-200 sm:text-sm"
         style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.9)" }}
         onFocus={(e) => {
           e.currentTarget.style.border = "1px solid rgba(196,168,106,0.40)";
