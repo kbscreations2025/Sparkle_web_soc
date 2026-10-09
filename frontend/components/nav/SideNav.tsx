@@ -95,7 +95,21 @@ export function SideNav() {
         onMouseEnter={canHover ? () => setPeeking(true) : undefined}
         onMouseLeave={canHover ? () => setPeeking(false) : undefined}
         onFocus={canHover ? () => setPeeking(true) : undefined}
-        onBlur={canHover ? () => setPeeking(false) : undefined}
+        // Only when focus has actually left the rail, and the pointer has too.
+        // Clicking from one link to the next blurs the first before focusing
+        // the second, and collapsing in between unmounted the label under the
+        // pointer mid-click — the browser then drops the click, which is why
+        // a second link took two clicks to open. Likewise a page that grabs
+        // focus on arrival must not fold the rail shut under the cursor.
+        onBlur={
+          canHover
+            ? (event) => {
+                const next = event.relatedTarget as Node | null;
+                if (event.currentTarget.contains(next) || event.currentTarget.matches(":hover")) return;
+                setPeeking(false);
+              }
+            : undefined
+        }
         className={cn(
           // `glass-raised` is the top bar's surface: the two meet at a corner,
           // so sharing one class is what keeps them the same colour in both
