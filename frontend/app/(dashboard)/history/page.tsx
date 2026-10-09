@@ -73,6 +73,32 @@ const TILE_ACTION_ICON = "h-2.5 w-2.5 text-white/85 md:h-3 md:w-3";
 /** Row gap between tiles, kept as one constant since both the CSS grid and the row-height estimate must agree. */
 const GRID_GAP = 10;
 
+/**
+ * When the browser last went Back or Forward.
+ *
+ * The grid is returned to where it was left only on Back — opening History
+ * from the nav is a fresh start, at the top — and a `popstate` is the one
+ * signal that tells the two apart: a link pushes history, Back pops it. Set
+ * at module level because the page is unmounted at the moment it fires and
+ * mounts just after, so the stamp has to outlive it.
+ */
+let poppedAt = 0;
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => {
+    poppedAt = Date.now();
+  });
+}
+/** How soon after a Back the page must mount to count as arriving by it. */
+const BACK_WINDOW_MS = 5000;
+
+/**
+ * The tile at the top of the grid when it was left. A tile rather than a
+ * pixel offset: the column count can change between visits (a resized
+ * window), and results can arrive or vanish above it, and either would leave
+ * a saved offset pointing at different pictures.
+ */
+type ScrollAnchor = { id: string };
+
 /** The Sparkle label for a model, falling back through the known id map to the raw value the server sent. */
 function modelLabelFor(model?: string | null) {
   if (!model) return null;
@@ -370,9 +396,48 @@ export default function HistoryPage() {
       if (id !== requestId.current) return;
       if (res.status === "success") {
         dataKeyRef.current = key;
-        // Replaced, not appended: this is page one of a different question.
-        setItems(res.items ?? []);
-        setNextCursor(res.nextCursor ?? null);
+        const fresh = res.items ?? [];
+        let next = fresh;
+        let cursor = res.nextCursor ?? null;
+
+        /*
+         * Refreshing a grid that was already on screen from the cache. Page
+         * one is authoritative for its own time range — it brings in anything
+         * new and drops anything deleted there — but the older pages the
+         * reader had scrolled through are kept below it, cursor and all.
+         * Replacing them with page one alone would cut the grid back to the
+         * top, and with it the spot a reader coming Back is returned to.
+         */
+        if (cached?.items.length && fresh.length && res.nextCursor) {
+          const freshIds = new Set(fresh.map((row) => row.id));
+          const oldestFresh = fresh[fresh.length - 1].createdAt;
+          const older = cached.items.filter((row) => row.createdAt < oldestFresh && !freshIds.has(row.id));
+          if (older.length) {
+            next = [...fresh, ...older];
+            cursor = cached.nextCursor;
+          }
+        }
+
+        /*
+         * Results that arrived while the reader was elsewhere. At the top of
+         * the grid they simply slot in; scrolled down — as a reader returned
+         * to their spot is — they wait behind the "N new" pill, exactly as a
+         * live arrival would, rather than shoving the grid out from under
+         * them.
+         */
+        if (cached?.items.length && !atTopRef.current) {
+          const known = new Set(cached.items.map((row) => row.id));
+          const newest = cached.items[0].createdAt;
+          const arrived = next.filter((row) => !known.has(row.id) && row.createdAt > newest);
+          if (arrived.length) {
+            const held = new Set(arrived.map((row) => row.id));
+            next = next.filter((row) => !held.has(row.id));
+            setPendingNew(arrived);
+          }
+        }
+
+        setItems(next);
+        setNextCursor(cursor);
         setServerTotal(res.totalImages ?? null);
         setCanReadTeam(Boolean(res.canReadTeam));
       }
@@ -460,14 +525,119 @@ export default function HistoryPage() {
     return chunks;
   }, [visibleItems, columns]);
 
+  /** Where to put the grid back to, when this visit arrived by Back — see below. */
+  const [restoreAnchor] = useState<ScrollAnchor | null>(() =>
+    initial && Date.now() - poppedAt < BACK_WINDOW_MS
+      ? (getPageCache<ScrollAnchor | null>(`${initialKey}:anchor`) ?? null)
+      : null
+  );
+  /** Still being applied — cleared once the layout settles or the reader scrolls. */
+  const pendingAnchor = useRef(restoreAnchor);
+  const [restoring, setRestoring] = useState(Boolean(restoreAnchor));
+
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 200,
     overscan: 6,
     gap: GRID_GAP,
+    // A jump to a row far down mounts and measures that row's tiles inside
+    // React's commit, where the virtualizer's synchronous re-render is
+    // refused. Off only for the jump; ordinary scrolling keeps it.
+    useFlushSync: !restoring,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
+
+  /*
+   * ── Returning to where the reader was ────────────────────────────────────
+   *
+   * Opening a result's chat leaves this page, and coming Back rebuilt the
+   * grid at the top — a reader 200 results down had to scroll all the way
+   * back. Now the tile at the top of the screen is remembered as they scroll,
+   * and a Back lands on it again. Opening History from the nav still starts
+   * at the top.
+   */
+  // Spent: a later Back to some other page must not count as one here.
+  useEffect(() => {
+    poppedAt = 0;
+  }, []);
+
+  /*
+   * Applied on every change to the rows while pending, not once: the column
+   * count starts at the narrowest and corrects itself after the first paint,
+   * and the background refresh can reshape the rows again — each moves the
+   * anchor tile to a different row.
+   */
+  useEffect(() => {
+    const anchor = pendingAnchor.current;
+    if (!anchor || view !== "history") return;
+    const index = rows.findIndex((row) => row.some((item) => item.id === anchor.id));
+    if (index < 0) return;
+    // Next frame, not here: the virtualizer re-renders synchronously
+    // (`flushSync`) as it scrolls, which React refuses mid-commit.
+    const frame = requestAnimationFrame(() => rowVirtualizer.scrollToIndex(index, { align: "start" }));
+    return () => cancelAnimationFrame(frame);
+  }, [rows, view, rowVirtualizer]);
+
+  // The reader taking over, or a moment passing, ends the restore.
+  useEffect(() => {
+    if (!pendingAnchor.current) return;
+    const el = scrollRef.current;
+    const stop = () => {
+      pendingAnchor.current = null;
+      setRestoring(false);
+    };
+    const timer = setTimeout(stop, 1500);
+    el?.addEventListener("wheel", stop, { passive: true });
+    el?.addEventListener("touchstart", stop, { passive: true });
+    window.addEventListener("keydown", stop);
+    return () => {
+      clearTimeout(timer);
+      el?.removeEventListener("wheel", stop);
+      el?.removeEventListener("touchstart", stop);
+      window.removeEventListener("keydown", stop);
+    };
+  }, []);
+
+  // Read by the scroll handler below, which outlives any one render.
+  const rowsRef = useRef(rows);
+  const virtualizerRef = useRef(rowVirtualizer);
+  useEffect(() => {
+    rowsRef.current = rows;
+    virtualizerRef.current = rowVirtualizer;
+  });
+
+  /*
+   * Remembers the top tile as the reader scrolls — once a frame at most —
+   * filed beside the rows themselves, so each set of filters keeps its own
+   * place and a filter change starts fresh at the top.
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let frame = 0;
+    const save = () => {
+      frame = 0;
+      // Mid-restore, the position is ours rather than the reader's.
+      if (pendingAnchor.current || !dataKeyRef.current) return;
+      const key = `${dataKeyRef.current}:anchor`;
+      if (el.scrollTop < 48) {
+        setPageCache<ScrollAnchor | null>(key, null);
+        return;
+      }
+      const top = virtualizerRef.current.getVirtualItems().find((row) => row.end > el.scrollTop);
+      const tile = top ? rowsRef.current[top.index]?.[0] : undefined;
+      if (tile) setPageCache<ScrollAnchor | null>(key, { id: tile.id });
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(save);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
 
   // Infinite scroll driven by the virtualizer's own rendered range, rather
   // than a separate sentinel/IntersectionObserver — the moment scrolling

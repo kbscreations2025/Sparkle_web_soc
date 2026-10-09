@@ -17,7 +17,18 @@ import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
 import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import { turnImages, type ChatMsg } from "@/components/studio/chat";
-import { cleanImage, refineImage, fetchConversationForTool, resolveModelId, toModelOptions } from "@/lib/api";
+import {
+  cleanImage,
+  checkCleaningDuplicates,
+  refineImage,
+  fetchConversationForTool,
+  resolveModelId,
+  toModelOptions,
+  type CleaningDuplicate,
+} from "@/lib/api";
+import { fingerprintDataUrl, fingerprintFile } from "@/lib/fingerprint";
+import { workspacePathFor } from "@/lib/nav";
+import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useCreditGuard } from "@/lib/credit-guard";
@@ -65,6 +76,13 @@ type Job = {
   readOnly?: { ownerName: string | null };
 };
 
+/**
+ * A photo waiting in the upload box, with its fingerprints: the original
+ * file's and the resized upload's. Either can be null where the browser
+ * couldn't hash (an insecure origin) — that photo just isn't checked.
+ */
+type CleaningUpload = UploadItem & { sourceChecksum: string | null; checksum: string | null };
+
 /** The first turn of a cleaning thread: the instruction, with the photo it was about. */
 function openingTurn(id: string, original: string, content: string): ChatMsg {
   return { id, role: "user", content, image: original || undefined };
@@ -94,7 +112,12 @@ export function CleaningWorkspace<TModel extends string>({
 }) {
   const { user } = useAuth();
 
-  const [items, setItems] = useState<UploadItem[]>([]);
+  const [items, setItems] = useState<CleaningUpload[]>([]);
+  /** Photos from the latest drop that were cleaned before, waiting on the person's answer. */
+  const [duplicates, setDuplicates] = useState<{
+    added: CleaningUpload[];
+    flagged: { item: CleaningUpload; inBatch: string | null; earlier: CleaningDuplicate | null }[];
+  } | null>(null);
   const [model, setModel] = useState<TModel>(defaultModel);
   const [useCustomPrompt, setUseCustomPrompt] = useState(false);
   const [customPrompt, setCustomPrompt] = useState("");
@@ -291,20 +314,77 @@ export function CleaningWorkspace<TModel extends string>({
     setJobs((current) => current.map((job) => (job.id === id ? { ...job, ...patch } : job)));
   }
 
+  /**
+   * Reads the dropped photos, then checks whether any of them has been
+   * cleaned before — already in this batch, or by anyone in the organization
+   * — and asks before adding those. Never blocks: a failed check just adds
+   * them, and confirming adds them anyway. Whether to pay for it twice is the
+   * person's call; the point is that they know.
+   */
   async function handleAdd(files: File[]) {
     setError("");
+    let added: CleaningUpload[];
     try {
-      const added = await Promise.all(
-        files.map(async (file) => ({
-          id: crypto.randomUUID(),
-          name: file.name,
-          dataUrl: await compressImage(file),
-        }))
+      added = await Promise.all(
+        files.map(async (file) => {
+          const dataUrl = await compressImage(file);
+          const [sourceChecksum, checksum] = await Promise.all([fingerprintFile(file), fingerprintDataUrl(dataUrl)]);
+          return { id: crypto.randomUUID(), name: file.name, dataUrl, sourceChecksum, checksum };
+        })
       );
-      setItems((current) => [...current, ...added]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read those files");
+      return;
     }
+
+    // Already waiting in this batch — or picked twice in the same drop.
+    const inBatch = new Map<string, string>();
+    for (const item of items) {
+      const key = item.sourceChecksum ?? item.checksum;
+      if (key) inBatch.set(key, item.name);
+    }
+    const repeats: Record<string, string> = {};
+    for (const item of added) {
+      const key = item.sourceChecksum ?? item.checksum;
+      if (!key) continue;
+      if (inBatch.has(key)) repeats[item.id] = inBatch.get(key)!;
+      else inBatch.set(key, item.name);
+    }
+
+    // Cleaned before, anywhere in the organization.
+    let earlier: Record<string, CleaningDuplicate> = {};
+    const checks = added.flatMap((item) =>
+      item.sourceChecksum && item.checksum
+        ? [{ id: item.id, sourceChecksum: item.sourceChecksum, checksum: item.checksum }]
+        : []
+    );
+    if (checks.length) {
+      try {
+        const res = await checkCleaningDuplicates(checks);
+        if (res.status === "success") earlier = res.matches ?? {};
+      } catch {
+        // No answer is no warning — the upload goes ahead as it always did.
+      }
+    }
+
+    const flagged = added
+      .filter((item) => repeats[item.id] || earlier[item.id])
+      .map((item) => ({ item, inBatch: repeats[item.id] ?? null, earlier: earlier[item.id] ?? null }));
+
+    if (!flagged.length) {
+      setItems((current) => [...current, ...added]);
+      return;
+    }
+    setDuplicates({ added, flagged });
+  }
+
+  /** The person's answer to the "used before" dialog. */
+  function resolveDuplicates(uploadAnyway: boolean) {
+    if (!duplicates) return;
+    const skipped = new Set(duplicates.flagged.map(({ item }) => item.id));
+    const keep = uploadAnyway ? duplicates.added : duplicates.added.filter((item) => !skipped.has(item.id));
+    setItems((current) => [...current, ...keep]);
+    setDuplicates(null);
   }
 
   /**
@@ -342,6 +422,9 @@ export function CleaningWorkspace<TModel extends string>({
           model,
           // So the queue rail can show this photo rather than a bare spinner.
           preview: await makeThumbnail(item.dataUrl),
+          // Stored with the upload, so the next time this photo is dropped
+          // here it is recognised — see handleAdd.
+          sourceChecksum: item.sourceChecksum,
           ...(useCustomPrompt && customPrompt.trim() ? { customPrompt: customPrompt.trim() } : { variant: promptVariant }),
         });
 
@@ -663,8 +746,92 @@ export function CleaningWorkspace<TModel extends string>({
       )}
 
       <AnnotationLayer attachments={attach} lightboxSrc={lightboxSrc} onCloseLightbox={() => setLightboxSrc(null)} />
+
+      <ConfirmDialog
+        open={Boolean(duplicates)}
+        title={
+          duplicates && duplicates.flagged.length > 1
+            ? `${duplicates.flagged.length} of these photos were used before`
+            : "This photo was used before"
+        }
+        message={duplicates ? <DuplicateList flagged={duplicates.flagged} /> : null}
+        confirmLabel="Upload anyway"
+        cancelLabel={duplicates && duplicates.flagged.length > 1 ? "Skip these" : "Don't upload"}
+        destructive={false}
+        onConfirm={() => resolveDuplicates(true)}
+        onCancel={() => resolveDuplicates(false)}
+      />
     </div>
   );
+}
+
+/**
+ * What the "used before" dialog says about each photo: who cleaned it and
+ * when, or that it is already in this batch — with a way to look at the
+ * earlier result, which opens in a new tab so the upload in progress here
+ * isn't lost.
+ */
+function DuplicateList({
+  flagged,
+}: {
+  flagged: { item: CleaningUpload; inBatch: string | null; earlier: CleaningDuplicate | null }[];
+}) {
+  return (
+    <div className="space-y-3">
+      <ul className="max-h-60 space-y-2 overflow-y-auto">
+        {flagged.map(({ item, inBatch, earlier }) => {
+          const href =
+            earlier?.latest.conversationId && workspacePathFor("cleaning", earlier.latest.modelLabel)
+              ? `${workspacePathFor("cleaning", earlier.latest.modelLabel)}?conversationId=${earlier.latest.conversationId}`
+              : null;
+          const others = earlier ? earlier.people.filter((person) => person !== earlier.latest.userName) : [];
+
+          return (
+            <li key={item.id} className="flex items-start gap-2.5">
+              <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border border-white/10 bg-surface-raised">
+                <Image src={item.dataUrl} alt={item.name} fill sizes="40px" className="object-cover" />
+              </span>
+              <span className="min-w-0 space-y-0.5">
+                <span className="block truncate text-[11px] font-medium text-cream">{item.name}</span>
+                {earlier && (
+                  <span className="block text-[11px] text-muted">
+                    Cleaned by{" "}
+                    <span className="font-medium text-cream">
+                      {earlier.latest.isOwn ? "you" : earlier.latest.userName}
+                    </span>{" "}
+                    on {formatDay(earlier.latest.createdAt)}
+                    {earlier.times > 1 && ` · ${earlier.times} times`}
+                    {others.length > 0 && ` · also ${others.join(", ")}`}
+                    {href && (
+                      <>
+                        {" · "}
+                        <a href={href} target="_blank" rel="noreferrer" className="text-gold hover:underline">
+                          View result
+                        </a>
+                      </>
+                    )}
+                  </span>
+                )}
+                {inBatch && (
+                  <span className="block text-[11px] text-muted">
+                    Already added in this batch{inBatch !== item.name ? ` as ${inBatch}` : ""}
+                  </span>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[11px] text-faint">Cleaning it again uses credits again. You can still upload it if you need to.</p>
+    </div>
+  );
+}
+
+/** "3 Oct" this year, "3 Oct 2025" otherwise. */
+function formatDay(iso: string) {
+  const date = new Date(iso);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
 function PromptModeButton({

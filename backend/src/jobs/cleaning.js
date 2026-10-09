@@ -143,7 +143,9 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
     prompt,
     userPrompt: isRefinement ? instruction : customPrompt?.trim() || null,
     inputImages: [
-      { image, role: isRefinement ? "edited" : "uploaded" },
+      // The original file's fingerprint rides on the uploaded photo, so a later
+      // upload of the same one can be recognised — see routes/cleaning.js.
+      { image, role: isRefinement ? "edited" : "uploaded", sourceChecksum: isRefinement ? null : data.sourceChecksum ?? null },
       ...references.map((ref) => ({ image: ref, role: "reference" })),
     ],
     outputImages: [{ image: output, role: "generated" }],

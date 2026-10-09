@@ -53,7 +53,10 @@ async function recordGeneration({
   quality,
   prompt,
   userPrompt,
-  /** `[{ image: { mimeType, base64 }, role }]` — role from ASSET_ROLES. */
+  /**
+   * `[{ image: { mimeType, base64 }, role, sourceChecksum? }]` — role from
+   * ASSET_ROLES; `sourceChecksum` only where the page sent the original file's.
+   */
   inputImages,
   /**
    * Same shape, and not necessarily images: a `video/*` mime is written as a
@@ -102,7 +105,9 @@ async function recordGeneration({
   const commonAssetFields = { tenant, user, tool, conversationId: conversation._id, generationId, model: modelLabel || model, quality };
 
   const inputAssets = await Promise.all(
-    inputImages.map(({ image, role }) => createAsset({ ...commonAssetFields, role, kind: "input", image }))
+    inputImages.map(({ image, role, sourceChecksum }) =>
+      createAsset({ ...commonAssetFields, role, kind: "input", image, sourceChecksum })
+    )
   );
 
   /**
@@ -236,6 +241,8 @@ async function createAsset({
   quality,
   posterSource = null,
   durationMs = null,
+  /** The original file's sha256, where the page sent one — see Asset.sourceChecksum. */
+  sourceChecksum = null,
 }) {
   const buffer = Buffer.from(image.base64, "base64");
   /*
@@ -311,6 +318,7 @@ async function createAsset({
     height: dimensions.height,
     thumbnail,
     checksum: crypto.createHash("sha256").update(buffer).digest("hex"),
+    sourceChecksum,
   });
 
   const url = publicUrlFor(key);

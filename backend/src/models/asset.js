@@ -85,6 +85,17 @@ const assetSchema = new mongoose.Schema(
     /** sha256 of the bytes. Detects a re-upload of the same file, and proves S3 still holds what we wrote. */
     checksum: { type: String, required: true },
 
+    /**
+     * sha256 of the file as it was on the user's disk, before the browser
+     * resized and re-encoded it — so only on an uploaded photo whose page
+     * sends one (Image Cleaning, for now).
+     *
+     * `checksum` alone can't recognise a re-upload reliably: it hashes the
+     * re-encoded bytes, and two browsers encode the same photo differently.
+     * The original file hashes the same wherever it is picked from.
+     */
+    sourceChecksum: { type: String, default: null },
+
     status: { type: String, enum: ASSET_STATUSES, default: "ready", required: true },
 
     // Soft delete: the S3 object goes first, this row stays so a generation
@@ -102,5 +113,12 @@ assetSchema.index({ generationId: 1 });
 assetSchema.index({ tenantId: 1, tool: 1, _id: -1 });
 assetSchema.index({ tenantId: 1, userId: 1, _id: -1 });
 assetSchema.index({ checksum: 1 });
+// "Has anyone in this organization uploaded this photo before?" — see
+// POST /api/cleaning/duplicates. Partial: only uploads that sent one are
+// indexed — `sparse` would still index every row's stored null.
+assetSchema.index(
+  { tenantId: 1, sourceChecksum: 1 },
+  { partialFilterExpression: { sourceChecksum: { $type: "string" } } }
+);
 
 module.exports = mongoose.model("Asset", assetSchema);

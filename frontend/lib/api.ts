@@ -852,10 +852,41 @@ export function cleanImage(body: {
   conversationId?: string | null;
   /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
   preview?: string | null;
+  /** sha256 of the original file, so a later re-upload of it can be recognised. */
+  sourceChecksum?: string | null;
 }) {
   return apiRequest<QueuedResult>("/api/cleaning", {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+/** An earlier cleaning of the same photo, somewhere in the organization. */
+export type CleaningDuplicate = {
+  /** How many times it has been cleaned. */
+  times: number;
+  /** Everyone who has cleaned it, most recent first. */
+  people: string[];
+  latest: {
+    userName: string;
+    isOwn: boolean;
+    createdAt: string;
+    /** Decides which cleaning page reopens it. */
+    modelLabel: string | null;
+    /** Null when this reader may not open that chat. */
+    conversationId: string | null;
+  };
+};
+
+/**
+ * Which of these photos have been cleaned before, by anyone in the
+ * organization. Keyed by the `id` each check was sent with; a photo with no
+ * earlier cleaning is simply absent.
+ */
+export function checkCleaningDuplicates(checks: { id: string; sourceChecksum: string; checksum: string }[]) {
+  return apiRequest<{ matches: Record<string, CleaningDuplicate> }>("/api/cleaning/duplicates", {
+    method: "POST",
+    body: JSON.stringify({ checks }),
   });
 }
 
