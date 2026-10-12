@@ -24,6 +24,9 @@ const orgMemberRoutes = require("./routes/orgMembers");
 const { initSocket } = require("./socket");
 const { startQueueEventsBridge, closeQueue } = require("./queue");
 const { closeRedisConnections, isRedisReady } = require("./redis");
+const { startMemoryLog } = require("./memoryLog");
+
+startMemoryLog("api");
 
 const app = express();
 

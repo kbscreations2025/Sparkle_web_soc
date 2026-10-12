@@ -4,9 +4,9 @@
   "private": true,
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node --max-old-space-size=360 src/server.js",
     "dev": "nodemon src/server.js",
-    "worker": "node src/worker.js",
+    "worker": "node --max-old-space-size=360 src/worker.js",
     "worker:dev": "nodemon src/worker.js",
     "backfill:thumbnails": "node src/scripts/backfillThumbnails.js",
     "seed:pricing": "node src/scripts/seedPricing.js"

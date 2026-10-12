@@ -1,5 +1,14 @@
 const sharp = require("sharp");
 
+// libvips keeps a cache of recent operations and decoded pixels, and runs a
+// thread pool sized to the host's cores. Neither pays off here — every image
+// is seen once — but both hold native memory that Node's GC can't reclaim, so
+// on a 512MB instance RSS ratchets up with every job until the host kills it.
+// These settings are process-wide, so setting them where sharp is first
+// required covers every caller.
+sharp.cache(false);
+sharp.concurrency(1);
+
 /**
  * Builds the small grid-tile copy of an image.
  *

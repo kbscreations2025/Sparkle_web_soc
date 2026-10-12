@@ -385,6 +385,7 @@ module.exports = { startWorker, processJob };
 // is what runs as a Render background worker alongside the web service.
 if (require.main === module) {
   const { connectDb } = require("./db");
+  require("./memoryLog").startMemoryLog("worker");
 
   (async () => {
     await connectDb();
