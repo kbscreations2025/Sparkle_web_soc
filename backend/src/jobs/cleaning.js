@@ -27,8 +27,7 @@ const ANNOTATION_NOTE =
  */
 const BUILT_IN_PROMPTS = {
   default: IMAGE_CLEANING_PROMPT,
-  new: NEW_CLEANING_PROMPT,
-};
+  new: NEW_CLEANING_PROMPT,};
 
 /**
  * A first-pass run sends the built-in prompt for its variant unless the user

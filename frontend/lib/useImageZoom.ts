@@ -111,6 +111,9 @@ export function useImageZoom({
   const panHandlers = {
     onPointerDown: (event: React.PointerEvent) => {
       if (scale <= 1 || event.button !== 0) return;
+      // A press on a control (close, zoom, download…) is a click, not a pan:
+      // capturing the pointer here would retarget that click to the frame.
+      if ((event.target as Element).closest("button, a")) return;
       dragRef.current = { x: event.clientX - offset.x, y: event.clientY - offset.y };
       setDragging(true);
       event.currentTarget.setPointerCapture(event.pointerId);

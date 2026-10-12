@@ -292,6 +292,7 @@ export default function LoginPage() {
           autoComplete="email"
           placeholder="name@company.com"
           autoFocus
+          domains={["kbscreations.com", "gmail.com"]}
         />
         <AuthField
           label="PASSWORD"

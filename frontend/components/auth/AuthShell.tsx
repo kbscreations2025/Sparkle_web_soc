@@ -1,8 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Loader2 } from "lucide-react";
 
 interface AuthShellProps {
   eyebrow: string;
@@ -113,6 +113,7 @@ export function AuthField({
   autoComplete,
   placeholder,
   autoFocus,
+  domains,
 }: {
   label: string;
   type: string;
@@ -121,14 +122,30 @@ export function AuthField({
   autoComplete?: string;
   placeholder?: string;
   autoFocus?: boolean;
+  /**
+   * Email domains offered as one-tap completions ("@gmail.com"). Shown once
+   * something is typed, filtered by whatever follows an "@", and hidden when
+   * the address is already complete.
+   */
+  domains?: string[];
 }) {
+  const [revealed, setRevealed] = useState(false);
+  const isPassword = type === "password";
+
+  const [local, typedDomain] = value.split("@");
+  const suggestions =
+    domains && local && !value.includes(" ")
+      ? domains.filter((domain) => typedDomain === undefined || (domain.startsWith(typedDomain) && domain !== typedDomain))
+      : [];
+
   return (
     <div>
       <label className="block text-[10px] font-semibold uppercase tracking-[0.18em] mb-1.5" style={{ color: "rgba(255,255,255,0.35)" }}>
         {label}
       </label>
+      <div className="relative">
       <input
-        type={type}
+        type={isPassword && revealed ? "text" : type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoComplete={autoComplete}
@@ -137,7 +154,7 @@ export function AuthField({
         required
         // 16px on phones: iOS zooms the whole page into any field smaller
         // than that on focus, which pans the layout off to the side.
-        className="w-full rounded-xl px-4 py-2.5 text-base outline-none transition-all duration-200 sm:text-sm"
+        className={`w-full rounded-xl px-4 py-2.5 text-base outline-none transition-all duration-200 sm:text-sm ${isPassword ? "pr-11" : ""}`}
         style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.9)" }}
         onFocus={(e) => {
           e.currentTarget.style.border = "1px solid rgba(196,168,106,0.40)";
@@ -148,6 +165,37 @@ export function AuthField({
           e.currentTarget.style.background = "rgba(255,255,255,0.06)";
         }}
       />
+      {isPassword && (
+        <button
+          type="button"
+          onClick={() => setRevealed((shown) => !shown)}
+          aria-label={revealed ? "Hide password" : "Show password"}
+          title={revealed ? "Hide password" : "Show password"}
+          className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl transition-colors"
+          style={{ color: "rgba(255,255,255,0.45)" }}
+        >
+          {revealed ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      )}
+      </div>
+
+      {suggestions.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {suggestions.map((domain) => (
+            <button
+              key={domain}
+              type="button"
+              // Before the input's blur, so the tap isn't lost to a re-render.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onChange(`${local}@${domain}`)}
+              className="rounded-lg px-2.5 py-1 text-[11px] transition-colors"
+              style={{ color: "rgba(196,168,106,0.9)", background: "rgba(196,168,106,0.08)", border: "1px solid rgba(196,168,106,0.22)" }}
+            >
+              @{domain}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -634,6 +634,7 @@ export function CleaningWorkspace<TModel extends string>({
                     ? "Write the full retouch prompt yourself — e.g. “pure white background, remove dust and scratches, keep the design exactly”…"
                     : "Small changes on top of the default — e.g. “soft shadow under the ring”, “make the diamonds brighter”, “rose gold metal”…"
                 }
+                onPasteImage={running ? undefined : (file) => handleAdd([file])}
                 footerEnd={<InlineModelSelect models={modelOptions} value={model} onChange={setModel} showQuality />}
               />
             </section>
