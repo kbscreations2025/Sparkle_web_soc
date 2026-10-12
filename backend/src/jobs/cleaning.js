@@ -44,7 +44,18 @@ const BUILT_IN_PROMPTS = {
  * plays no part here: once a thread exists, a refinement is the same
  * instruction wrapper regardless of which mode started it.
  */
-function buildPrompt({ isRefinement, instruction, customPrompt, variant, referenceCount = 0 }) {
+function buildPrompt({ isRefinement, instruction, customPrompt, variant, extraNotes, referenceCount = 0 }) {
+  if (!isRefinement && !customPrompt?.trim() && extraNotes?.trim()) {
+    // "Default" plus the user's own extras: the built-in prompt still governs
+    // (it is what preserves the design), with their wishes added on top.
+    return (
+      `${BUILT_IN_PROMPTS[variant] || IMAGE_CLEANING_PROMPT}\n\n` +
+      "ADDITIONAL REQUESTS FROM THE USER — apply these as well, on top of everything above. " +
+      "Where one asks for something the instructions above would otherwise prevent (for example a different metal colour, " +
+      "a shadow, or brighter stones), the user's request wins for that one point only; everything else above still applies:\n" +
+      extraNotes.trim()
+    );
+  }
   if (isRefinement) {
     return (
       `Modify this jewelry photograph (the first image) as follows: ${instruction}. ` +
@@ -69,7 +80,7 @@ function buildPrompt({ isRefinement, instruction, customPrompt, variant, referen
  * `{ mimeType, base64 }` by the route, so the worker never re-parses a data URI.
  */
 async function runCleaningJob({ job, data, setProgress, withProgress }) {
-  const { image, references = [], requestedModel, isRefinement, instruction, customPrompt, variant } = data;
+  const { image, references = [], requestedModel, isRefinement, instruction, customPrompt, variant, extraNotes } = data;
 
   // The worker has no request context, so the actor is re-loaded from the job.
   // `.lean()` is deliberately NOT used: recordGeneration reads `user.name`/
@@ -89,6 +100,7 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
     instruction,
     customPrompt,
     variant,
+    extraNotes,
     referenceCount: references.length,
   });
 
@@ -141,7 +153,7 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
     modelLabel,
     quality,
     prompt,
-    userPrompt: isRefinement ? instruction : customPrompt?.trim() || null,
+    userPrompt: isRefinement ? instruction : customPrompt?.trim() || extraNotes?.trim() || null,
     inputImages: [
       // The original file's fingerprint rides on the uploaded photo, so a later
       // upload of the same one can be recognised — see routes/cleaning.js.

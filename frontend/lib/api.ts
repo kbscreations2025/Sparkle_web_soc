@@ -848,6 +848,11 @@ export function cleanImage(body: {
    * set, and irrelevant to a refinement, which never reads either.
    */
   variant?: "default" | "new";
+  /**
+   * What the user also wants in the image, added on top of the built-in
+   * prompt (unlike `customPrompt`, which replaces it). Ignored with `customPrompt`.
+   */
+  extraNotes?: string;
   /** Set to keep a retry in the same thread as the run it follows. */
   conversationId?: string | null;
   /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */

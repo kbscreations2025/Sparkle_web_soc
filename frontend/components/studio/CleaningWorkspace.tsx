@@ -6,15 +6,14 @@ import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Loader2, PenLine, Sparkles, Wand2 } from "lucide-react";
 import { UploadZone, type UploadItem } from "@/components/studio/UploadZone";
-import { ModelSelector } from "@/components/studio/ModelSelector";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatMessages } from "@/components/studio/ChatMessages";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
 import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
-import { SpellCheckedTextarea } from "@/components/studio/SpellCheckedTextarea";
 import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
-import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
+import { PromptCard } from "@/components/studio/PromptCard";
+import { InlineModelSelect } from "@/components/studio/InlineModelSelect";import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import { turnImages, type ChatMsg } from "@/components/studio/chat";
 import {
@@ -121,6 +120,11 @@ export function CleaningWorkspace<TModel extends string>({
   const [model, setModel] = useState<TModel>(defaultModel);
   const [useCustomPrompt, setUseCustomPrompt] = useState(false);
   const [customPrompt, setCustomPrompt] = useState("");
+  /**
+   * Optional extras for "Default": added on top of the built-in retouch
+   * instructions rather than replacing them, unlike "Write my own".
+   */
+  const [extraNotes, setExtraNotes] = useState("");
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
@@ -410,7 +414,17 @@ export function CleaningWorkspace<TModel extends string>({
       status: "queued",
       // Opens with what was sent, photo included, so the thread shows the
       // before as well as the after.
-      history: [openingTurn(item.id, item.dataUrl, customPrompt.trim() && useCustomPrompt ? customPrompt.trim() : "Clean this image")],
+      history: [
+        openingTurn(
+          item.id,
+          item.dataUrl,
+          useCustomPrompt && customPrompt.trim()
+            ? customPrompt.trim()
+            : extraNotes.trim()
+              ? `Clean this image — ${extraNotes.trim()}`
+              : "Clean this image"
+        ),
+      ],
     }));
     setJobs(queued);
     setSelectedId(queued[0]?.id ?? null);
@@ -425,7 +439,9 @@ export function CleaningWorkspace<TModel extends string>({
           // Stored with the upload, so the next time this photo is dropped
           // here it is recognised — see handleAdd.
           sourceChecksum: item.sourceChecksum,
-          ...(useCustomPrompt && customPrompt.trim() ? { customPrompt: customPrompt.trim() } : { variant: promptVariant }),
+          ...(useCustomPrompt && customPrompt.trim()
+            ? { customPrompt: customPrompt.trim() }
+            : { variant: promptVariant, ...(extraNotes.trim() ? { extraNotes: extraNotes.trim() } : {}) }),
         });
 
         if (result.status === "queued" && result.job) {
@@ -587,11 +603,6 @@ export function CleaningWorkspace<TModel extends string>({
             />
 
             <section className="space-y-2">
-              <h2 className="text-[10px] font-semibold uppercase tracking-wider text-faint">Model</h2>
-              <ModelSelector models={modelOptions} value={model} onChange={setModel} disabled={running} />
-            </section>
-
-            <section className="space-y-2">
               <div className="flex flex-wrap items-center gap-1.5">
                 <h2 className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">
                   Instructions
@@ -604,34 +615,33 @@ export function CleaningWorkspace<TModel extends string>({
                 </PromptModeButton>
               </div>
 
-              {useCustomPrompt ? (
-                <SpellCheckedTextarea
-                  value={customPrompt}
-                  onChange={setCustomPrompt}
-                  rows={4}
-                  // Grows as it is written instead of needing the drag handle
-                  // the plain textarea had.
-                  autoGrowMaxHeight={320}
-                  placeholder="Describe the retouch you want. This replaces the built-in cleaning instructions entirely."
-                  className="rounded-lg border border-white/10 bg-white/[0.06] transition-colors focus-within:border-gold/40"
-                  textClassName="w-full px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap break-words"
-                />
-              ) : (
-                <p className="text-[11px] text-faint">
-                  {/* TODO: describe New Cleaning's own instructions once NEW_CLEANING_PROMPT is
-                      written — this line is what "Default" (the built-in-prompt option) shows
-                      as its description on this page. */}
-                  {promptVariant === "new"
-                    ? "Uses this mode's own retouch instructions."
-                    : "Uses the standard jewellery retouch — preserves the design exactly and only fixes the photography."}
-                </p>
-              )}
+              <p className="text-[11px] text-faint">
+                {useCustomPrompt
+                  ? "Your own prompt from scratch — the built-in retouch prompt is not used at all."
+                  : "The built-in retouch prompt, plus any small changes you add below (optional)."}
+              </p>
+
+              {/* The same description card the other tools use, model picker in
+                  its footer. Default: optional extras added to the built-in
+                  instructions. Write my own: the whole instruction. */}
+              <PromptCard
+                label={useCustomPrompt ? "Your prompt" : "Changes (optional)"}
+                value={useCustomPrompt ? customPrompt : extraNotes}
+                onChange={useCustomPrompt ? setCustomPrompt : setExtraNotes}
+                rows={4}
+                placeholder={
+                  useCustomPrompt
+                    ? "Write the full retouch prompt yourself — e.g. “pure white background, remove dust and scratches, keep the design exactly”…"
+                    : "Small changes on top of the default — e.g. “soft shadow under the ring”, “make the diamonds brighter”, “rose gold metal”…"
+                }
+                footerEnd={<InlineModelSelect models={modelOptions} value={model} onChange={setModel} showQuality />}
+              />
             </section>
 
             <button
               onClick={handleGenerate}
               disabled={running || items.length === 0 || (useCustomPrompt && !customPrompt.trim())}
-              className="flex items-center justify-center gap-2 rounded-lg border border-gold/30 bg-gold/15 px-4 py-2.5 text-xs font-semibold text-gold transition-colors hover:bg-gold/25 disabled:opacity-50"
+              className="ml-auto flex items-center justify-center gap-2 rounded-lg border border-gold/30 bg-gold/15 px-4 py-2.5 text-xs font-semibold text-gold transition-colors hover:bg-gold/25 disabled:opacity-50"
             >
               {running ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
               {items.length > 1 ? `Clean ${items.length} photos` : "Clean photo"}

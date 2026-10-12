@@ -143,9 +143,15 @@ router.post("/", async (req, res) => {
     variant,
     annotated,
     sourceChecksum,
+    extraNotes,
   } = req.body || {};
 
   const isRefinement = Boolean(refineImage && instruction);
+
+  // Only alongside the built-in prompt: "Write my own" replaces it outright,
+  // and a refinement carries its own instruction. Bounded so a pasted essay
+  // can't crowd out the instructions it is added to.
+  const notes = !isRefinement && !customPrompt?.trim() && typeof extraNotes === "string" ? extraNotes.trim().slice(0, 2000) : "";
   const sourceImage = isRefinement ? refineImage : image;
   // Unknown or absent falls back to "default" rather than refusing the
   // request — the same behaviour as the job's own BUILT_IN_PROMPTS lookup.
@@ -182,6 +188,7 @@ router.post("/", async (req, res) => {
       isRefinement,
       instruction: isRefinement ? instruction : null,
       customPrompt: customPrompt?.trim() || null,
+      extraNotes: notes || null,
       variant: isRefinement ? null : resolvedVariant,
       referenceCount: parsedReferences.length,
       conversationId: conversationId || null,
@@ -196,6 +203,7 @@ router.post("/", async (req, res) => {
       // The image to refine carries the user's marks — see jobs/cleaning.js.
       annotated: isRefinement && Boolean(annotated),
       customPrompt,
+      extraNotes: notes,
       variant: resolvedVariant,
       conversationId,
       parentGenerationId,
