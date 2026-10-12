@@ -12,7 +12,7 @@ const router = express.Router();
 router.use(requireAuth, requirePermission("tool.cleaning.run"));
 
 /** Which built-in prompt a first-pass run falls back to — see jobs/cleaning.js. */
-const VARIANTS = ["default", "new"];
+const VARIANTS = ["default", "new", "shank"];
 
 const isChecksum = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 

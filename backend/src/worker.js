@@ -7,7 +7,7 @@ const { estimateDurationMs } = require("./jobs/estimate");
 const { classifyProviderError } = require("./aiRouting");
 const { logAudit } = require("./auditLog");
 const credit = require("./services/credits");
-const { startCreditReaper } = require("./services/creditReaper");
+const { closeInterruptedJobs } = require("./services/creditReaper");
 const Job = require("./models/job");
 
 // Registers every handler. Required for its side effect, before any job runs.
@@ -330,14 +330,15 @@ async function processJob(bullJob) {
  * friendlier than making `npm run dev` mean two terminals.
  */
 function startWorker() {
+  // Before consuming: end whatever the previous worker left mid-run and
+  // return its credits. Once, here only — a crashed worker is what leaves
+  // credits frozen, and this is the process that comes back up.
+  closeInterruptedJobs().catch((err) => console.error("[credits] startup cleanup failed:", err.message));
+
   // One consumer per lane (see jobs/lanes.js). They share this process and
   // this handler — the lanes exist to keep slow work from occupying the
   // slots fast work needs, not to run different code.
   const workers = LANE_IDS.map(startLaneWorker);
-
-  // Runs here rather than in the API process: a crashed worker is what
-  // leaves credits frozen, and this is the process that comes back up.
-  const reaper = startCreditReaper();
 
   // Daily allowances: return yesterday's leftovers to the pool and pay out
   // today's. Idempotent per account per day, so extra worker replicas are safe.
@@ -346,7 +347,6 @@ function startWorker() {
   return {
     /** Closes every lane, so callers can keep treating this as one worker. */
     close: () => {
-      reaper.stop();
       stopDailyResets();
       return Promise.all(workers.map((worker) => worker.close()));
     },

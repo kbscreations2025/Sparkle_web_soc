@@ -13,7 +13,8 @@ const NAV_LABEL_BY_HREF: Record<string, string> = Object.fromEntries(
 /** One level below a tool's own href — pages `useNavItems` doesn't know about. */
 const SUB_LABELS: Record<string, string> = {
   "/cleaning/default": "Default",
-  "/cleaning/new": "High-Res Image Generation",  // The three cards on the Marketing Kit page — named as the cards name them.
+  "/cleaning/new": "High-Res Image Generation",
+  "/cleaning/shank": "Shank Cleaning",  // The three cards on the Marketing Kit page — named as the cards name them.
   "/marketing-kit/brand-story": "Brand Story",
   "/marketing-kit/affinity": "Affinity",
   "/marketing-kit/campaign": "Campaign Kit",

@@ -107,7 +107,7 @@ export function CleaningWorkspace<TModel extends string>({
   modelOptions: readonly (ModelOption & { id: TModel })[];
   defaultModel: TModel;
   /** Which built-in prompt "Default" instructions resolve to — see above. */
-  promptVariant?: "default" | "new";
+  promptVariant?: "default" | "new" | "shank";
 }) {
   const { user } = useAuth();
 

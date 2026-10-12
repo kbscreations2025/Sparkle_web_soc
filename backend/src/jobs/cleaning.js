@@ -1,4 +1,4 @@
-const { IMAGE_CLEANING_PROMPT, NEW_CLEANING_PROMPT, buildReferenceNote } = require("../prompts");
+const { IMAGE_CLEANING_PROMPT, NEW_CLEANING_PROMPT, SHANK_CLEANING_PROMPT, buildReferenceNote } = require("../prompts");
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
 const { createLivePreview } = require("../storage/thumbnail");
@@ -27,7 +27,9 @@ const ANNOTATION_NOTE =
  */
 const BUILT_IN_PROMPTS = {
   default: IMAGE_CLEANING_PROMPT,
-  new: NEW_CLEANING_PROMPT,};
+  new: NEW_CLEANING_PROMPT,
+  shank: SHANK_CLEANING_PROMPT,
+};
 
 /**
  * A first-pass run sends the built-in prompt for its variant unless the user

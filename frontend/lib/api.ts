@@ -847,7 +847,7 @@ export function cleanImage(body: {
    * or "new", one per cleaning mode's page. Ignored once `customPrompt` is
    * set, and irrelevant to a refinement, which never reads either.
    */
-  variant?: "default" | "new";
+  variant?: "default" | "new" | "shank";
   /**
    * What the user also wants in the image, added on top of the built-in
    * prompt (unlike `customPrompt`, which replaces it). Ignored with `customPrompt`.

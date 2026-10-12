@@ -70,9 +70,9 @@ const jobSchema = new mongoose.Schema(
      *
      * Kept on the document rather than only in the Redis payload because the
      * payload is discarded the moment the job settles, and a hold that was
-     * never closed out has to be findable after that — see the reaper in
-     * services/creditReaper.js. `settled` is stamped once the charge or the
-     * refund has been recorded, so a sweep can tell an open hold from a
+     * never closed out has to be findable after that — see the worker's
+     * startup cleanup in services/creditReaper.js. `settled` is stamped once
+     * the charge or the refund has been recorded, so the cleanup can tell an open hold from a
      * closed one without re-reading the ledger.
      */
     credits: {
@@ -124,10 +124,10 @@ jobSchema.index({ tenantId: 1, createdAt: -1 });
 // the way into every job, so it must not be a collection scan.
 jobSchema.index({ type: 1, "request.model": 1, status: 1, finishedAt: -1 });
 /*
- * The credit reaper's sweep (services/creditReaper.js), which runs every ten
- * minutes and again at worker startup. Without this it was a full scan of
- * every job ever created — and startup is exactly when the queue is backed
- * up after a crash.
+ * The worker's startup cleanup (services/creditReaper.js) looking for
+ * finished jobs with an open hold. Without this it was a full scan of every
+ * job ever created — and startup is exactly when the queue is backed up after
+ * a crash.
  *
  * Partial on purpose: a job queued with no price keeps `held: 0` and
  * `settled: false` forever, so an unfiltered index would match almost the
@@ -137,6 +137,9 @@ jobSchema.index(
   { "credits.settled": 1, status: 1, createdAt: 1 },
   { partialFilterExpression: { "credits.held": { $gt: 0 } } }
 );
+// The same cleanup's other half: jobs a crashed worker left `running`. Only
+// ever a handful, so a partial index on just those stays tiny.
+jobSchema.index({ status: 1 }, { partialFilterExpression: { status: "running" } });
 
 module.exports = mongoose.model("Job", jobSchema);
 module.exports.JOB_STATUSES = JOB_STATUSES;

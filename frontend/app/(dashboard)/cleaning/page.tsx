@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Eraser, Sparkles, type LucideIcon } from "lucide-react";
+import { CircleDashed, Eraser, Sparkles, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
@@ -41,6 +41,13 @@ const MODES: CleaningMode[] = [
     description: "The standard retouch — upload, clean, then ask for changes",
     icon: Sparkles,
     href: "/cleaning/default",
+  },
+  {
+    id: "shank",
+    label: "Shank Cleaning",
+    description: "Cleans and polishes only the ring's band — everything else stays as it is",
+    icon: CircleDashed,
+    href: "/cleaning/shank",
   },
 ];
 

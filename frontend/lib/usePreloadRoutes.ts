@@ -10,7 +10,8 @@ import { useNavItems } from "./nav";
  */
 const EXTRA_ROUTES = [
   "/cleaning/default",
-  "/cleaning/new",  "/marketing-kit/brand-story",
+  "/cleaning/new",
+  "/cleaning/shank",  "/marketing-kit/brand-story",
   "/marketing-kit/affinity",
   "/marketing-kit/campaign",
   "/credits",
