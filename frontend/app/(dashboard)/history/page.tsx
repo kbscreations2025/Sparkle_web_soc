@@ -1353,7 +1353,8 @@ function KitsGrid({
   if (kits.length === 0) {
     return (
       <p className="px-2 py-10 text-center text-sm text-faint">
-        No kits yet — a Brand Story, Affinity deck or Campaign Kit is saved here to reopen and edit.
+        No kits yet — a Brand Story, Affinity deck, Collection Story, Campaign Kit or Festive Poster is saved here to
+        reopen and edit.
       </p>
     );
   }
@@ -1873,7 +1874,9 @@ function TypeFilter({
 }
 
 /** The kit kinds, labelled as the rest of the app labels them. */
-const KIND_OPTIONS: FilterOption[] = (["brand_story", "affinity", "campaign"] as const).map((kind) => ({
+const KIND_OPTIONS: FilterOption[] = (
+  ["brand_story", "affinity", "collection_story", "campaign", "festive"] as const
+).map((kind) => ({
   id: kind,
   label: KIT_LABEL[kind],
 }));

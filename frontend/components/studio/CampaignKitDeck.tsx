@@ -14,7 +14,14 @@ import { downloadImage } from "@/lib/image";
  * editing this record. Which is why only `caption` is sent on a save: the
  * backend refuses the rest for the same reason.
  */
-export function CampaignKitDeck({ kit }: { kit: MarketingKit }) {
+export function CampaignKitDeck({
+  kit,
+  /** What one picture is called — a Festive kit holds posters, not shots. */
+  noun = "shot",
+}: {
+  kit: MarketingKit;
+  noun?: string;
+}) {
   const [shots, setShots] = useState<CampaignShot[]>(kit.campaign?.shots ?? []);
   const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState("");
@@ -52,7 +59,8 @@ export function CampaignKitDeck({ kit }: { kit: MarketingKit }) {
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold text-cream">{kit.title}</h2>
           <p className="text-[11px] text-faint">
-            {shots.length} shot{shots.length === 1 ? "" : "s"} · {new Date(kit.createdAt).toLocaleDateString()}
+            {shots.length} {noun}
+            {shots.length === 1 ? "" : "s"} · {new Date(kit.createdAt).toLocaleDateString()}
           </p>
         </div>
         <button

@@ -3,7 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { ChevronDown, ChevronUp, Globe, Loader2, Lock, type LucideIcon, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Globe, Loader2, Lock, type LucideIcon, Maximize2, Trash2, Upload, Wand2, X } from "lucide-react";
 import { Chip } from "./OptionChips";
 import { Lightbox } from "./Lightbox";
 import { ConfirmDialog } from "./ToolChrome";
@@ -83,6 +83,7 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
             label={`Model ${preset.number}`}
             active={choice?.kind === "preset" && choice.number === preset.number}
             onSelect={() => setChoice({ kind: "preset", number: preset.number, src: preset.src })}
+            onPreview={() => setPreview(preset.src)}
           />
         ))}
 
@@ -302,12 +303,63 @@ function ModelTile({
       >
         <Image src={src} alt={label} fill sizes="140px" className="object-cover" />
         {!renaming && (
-          <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent px-1.5 pb-1 pt-4 text-left text-[10px] font-medium text-white/85">
-            {label}
-            {shared && <span className="ml-1 text-gold/70">· shared</span>}
+          <span
+            className={cn(
+              "absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent pb-1 pl-1.5 pt-4 text-left text-[10px] font-medium text-white/85",
+              // Room for the corner pill when it is always on show (a shared
+              // model), so a long name truncates before it rather than under it.
+              shared ? "pr-8" : "pr-1.5"
+            )}
+          >
+            {/* Kept for the gradient's height when the name is its own button below. */}
+            <span className={onRename ? "invisible" : undefined}>{label}</span>
           </span>
         )}
       </button>
+
+      {/* Whoever may rename clicks the name itself — no separate pencil.
+          Outside the tile's button, since a button can't hold another. */}
+      {!renaming && onRename && (
+        <button
+          type="button"
+          onClick={onRename}
+          title={`Rename ${label}`}
+          aria-label={`Rename ${label}`}
+          className={cn(
+            "absolute bottom-1 left-1.5 max-w-[calc(100%-0.75rem)] cursor-text truncate rounded-sm text-left text-[10px] font-medium leading-[15px] text-white/85 decoration-white/40 underline-offset-2 hover:underline",
+            shared && "max-w-[calc(100%-2.5rem)]"
+          )}
+        >
+          {label}
+        </button>
+      )}
+
+      {/* Bottom-right: whether the model is shared. The globe stays visible on
+          a shared model, since it is the "shared" label; for an admin it is
+          also the toggle, and an unshared model shows the lock on hover. */}
+      {!renaming && (shared || onShare) && (
+        <div
+          className={cn(
+            "absolute bottom-1 right-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/60 p-0.5 backdrop-blur-sm transition-opacity",
+            !shared && "opacity-0 focus-within:opacity-100 group-hover:opacity-100"
+          )}
+        >
+          {onShare ? (
+            <TileAction
+              icon={shared ? Globe : Lock}
+              label={shared ? `Shared with the organization — stop sharing ${label}` : `Share ${label} with the organization`}
+              active={shared}
+              onClick={onShare}
+            />
+          ) : (
+            shared && (
+              <span title="Shared with the organization" aria-label="Shared with the organization" className="flex h-5 w-5 items-center justify-center text-gold">
+                <Globe size={11} />
+              </span>
+            )
+          )}
+        </div>
+      )}
 
       {/* Renaming happens where the name is, rather than in a dialog — it is
           one short field, and the picture is the context for it. */}
@@ -332,17 +384,9 @@ function ModelTile({
 
       {/* The actions, pooled in one pill on hover — three separate circles
           over a ~100px tile is more chrome than picture. */}
-      {(onRename || onShare || onDelete) && (
+      {(onPreview || onDelete) && (
         <div className="absolute right-1 top-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/60 p-0.5 opacity-0 backdrop-blur-sm transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          {onRename && <TileAction icon={Pencil} label={`Rename ${label}`} onClick={onRename} />}
-          {onShare && (
-            <TileAction
-              icon={shared ? Globe : Lock}
-              label={shared ? `Stop sharing ${label} with the organization` : `Share ${label} with the organization`}
-              active={shared}
-              onClick={onShare}
-            />
-          )}
+          {onPreview && <TileAction icon={Maximize2} label={`Preview ${label}`} onClick={onPreview} />}
           {onDelete && <TileAction icon={Trash2} label={`Delete ${label}`} onClick={onDelete} danger />}
         </div>
       )}

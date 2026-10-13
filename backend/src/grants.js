@@ -172,6 +172,15 @@ const ADMIN_ONLY_GRANTS = GRANT_GROUPS.find((group) => group.id === "organizatio
  */
 const BASELINE_GRANTS = ["result.read.own"];
 
+/**
+ * The tools a newly added member can use from day one, when whoever adds
+ * them names no permissions of their own. Every tool except Image to Video —
+ * the expensive one, switched on per person. An admin ticks or unticks any of
+ * these afterwards in the member's permissions; this is only the start.
+ */
+const DEFAULT_MEMBER_TOOLS = TOOL_KEYS.filter((key) => key !== "image_to_video");
+const DEFAULT_MEMBER_GRANTS = DEFAULT_MEMBER_TOOLS.map((key) => `tool.${key}.run`);
+
 /** Adds the grants nobody has to ask for. */
 function withBaselineGrants(permissions) {
   const set = new Set(permissions || []);
@@ -246,6 +255,7 @@ module.exports = {
   ALL_GRANTS,
   ADMIN_ONLY_GRANTS,
   BASELINE_GRANTS,
+  DEFAULT_MEMBER_GRANTS,
   demoteGrants,
   withScopeGrant,
   withBaselineGrants,

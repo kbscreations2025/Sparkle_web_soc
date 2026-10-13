@@ -3,8 +3,16 @@ const { requireAuth, requirePermission } = require("../middleware/auth");
 const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri, resolveInlineImage } = require("../generationService");
 const { queueGeneration, parseImages } = require("./queueGeneration");
-const { BRAND_STORY_JOB, AFFINITY_JOB, CAMPAIGN_KIT_JOB } = require("../jobs/marketingKit");
+const {
+  BRAND_STORY_JOB,
+  AFFINITY_JOB,
+  COLLECTION_STORY_JOB,
+  CAMPAIGN_KIT_JOB,
+  FESTIVE_POSTER_JOB,
+} = require("../jobs/marketingKit");
 const { BRAND_STORY_TONES, BRAND_STORY_LENGTHS } = require("../prompts/marketingKit");
+const { FESTIVE_EVENT_IDS, FESTIVE_ASPECT_RATIOS, eventLabel } = require("../prompts/festivePoster");
+const { clampCount } = require("../jobs/generationRunner");
 const { MARKETING_KIT_TYPES } = require("../models/marketingKit");
 const kits = require("../services/marketingKits");
 const lifestyleModels = require("../services/lifestyleModels");
@@ -61,7 +69,16 @@ router.post("/brand-story", async (req, res) => {
  * ── Affinity ────────────────────────────────────────────────────────────────
  */
 
-router.post("/affinity", async (req, res) => {
+/*
+ * Collection Story is Affinity under its own name: the same request, its own
+ * job type and kit kind (see jobs/marketingKit.js).
+ */
+router.post("/affinity", (req, res) => queueAffinityRun(req, res, { type: AFFINITY_JOB, kind: "affinity", name: "Affinity deck" }));
+router.post("/collection-story", (req, res) =>
+  queueAffinityRun(req, res, { type: COLLECTION_STORY_JOB, kind: "collection_story", name: "Collection Story" })
+);
+
+async function queueAffinityRun(req, res, { type, kind, name }) {
   const { items, preview, conversationId } = req.body || {};
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -88,21 +105,21 @@ router.post("/affinity", async (req, res) => {
   }
 
   return queueGeneration(req, res, {
-    type: AFFINITY_JOB,
+    type,
     tool: "marketing_kit",
     request: {
       provider: "gemini",
       model: "gemini-2.5-pro",
       modelLabel: "Sparkle 2.5 Pro",
-      kind: "affinity",
+      kind,
       itemCount: parsedItems.length,
       withSheets: parsedItems.filter((item) => item.sheetImages.length || item.sheetExcelText.length).length,
     },
     payload: { items: parsedItems, conversationId: conversationId || null },
     preview,
-    message: `queued an Affinity deck (${parsedItems.length} piece${parsedItems.length > 1 ? "s" : ""})`,
+    message: `queued a ${name} (${parsedItems.length} piece${parsedItems.length > 1 ? "s" : ""})`,
   });
-});
+}
 
 /*
  * ── Campaign Kit ────────────────────────────────────────────────────────────
@@ -221,6 +238,122 @@ router.post("/campaign", async (req, res) => {
   });
 });
 
+/*
+ * ── Festive Poster ──────────────────────────────────────────────────────────
+ */
+
+/** Six is where every piece can still be seen clearly in one frame. */
+const MAX_FESTIVE_PIECES = 6;
+/** Each variation is a separately charged image. */
+const MAX_FESTIVE_VARIATIONS = 4;
+
+router.post("/festive", async (req, res) => {
+  const {
+    jewelryImages,
+    event,
+    customEvent,
+    description,
+    aspect,
+    count,
+    model: requestedModel,
+    quality: requestedQuality,
+    refineImage,
+    referenceImages,
+    instruction,
+    displayPrompt,
+    conversationId,
+    parentGenerationId,
+    preview,
+  } = req.body || {};
+
+  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
+
+  // Retouching one poster costs one image and edits it — no new kit.
+  if (refineImage && instruction) {
+    const parsed = parseDataUri(refineImage);
+    if (!parsed) {
+      return res.status(400).json({ status: "error", message: "refine image must be a data URI", code: "invalid" });
+    }
+    const references = parseImages(referenceImages);
+
+    return queueGeneration(req, res, {
+      type: FESTIVE_POSTER_JOB,
+      tool: "marketing_kit",
+      request: { provider, model, modelLabel, quality, kind: "festive", isRefinement: true, conversationId: conversationId || null },
+      payload: {
+        isRefinement: true,
+        refineImage: parsed,
+        references,
+        instruction,
+        displayPrompt,
+        requestedModel,
+        requestedQuality,
+        conversationId,
+        parentGenerationId,
+      },
+      message: `queued a Festive Poster retouch on ${modelLabel}`,
+    });
+  }
+
+  const pieces = parseImages(jewelryImages);
+  if (pieces.length === 0) {
+    return res.status(400).json({ status: "error", message: "add at least one jewellery photo", code: "invalid" });
+  }
+  if (pieces.length > MAX_FESTIVE_PIECES) {
+    return res.status(400).json({
+      status: "error",
+      message: `use at most ${MAX_FESTIVE_PIECES} pieces in one poster`,
+      code: "too_many_items",
+    });
+  }
+
+  const custom = typeof customEvent === "string" ? customEvent.trim().slice(0, 200) : "";
+  if (!custom && !FESTIVE_EVENT_IDS.includes(event)) {
+    return res.status(400).json({ status: "error", message: "choose an event, or type your own", code: "invalid" });
+  }
+
+  const options = {
+    eventId: custom ? null : event,
+    customEvent: custom || null,
+    description: typeof description === "string" ? description.slice(0, 1000) : "",
+    aspect: Object.hasOwn(FESTIVE_ASPECT_RATIOS, aspect) ? aspect : "square",
+  };
+  const variations = Math.min(MAX_FESTIVE_VARIATIONS, clampCount(count, 1));
+
+  return queueGeneration(req, res, {
+    type: FESTIVE_POSTER_JOB,
+    tool: "marketing_kit",
+    preview,
+    request: {
+      provider,
+      model,
+      modelLabel,
+      quality,
+      kind: "festive",
+      isRefinement: false,
+      event: eventLabel(options),
+      jewelryCount: pieces.length,
+      aspect: options.aspect,
+      count: variations,
+      conversationId: conversationId || null,
+    },
+    payload: {
+      isRefinement: false,
+      sourceImages: pieces,
+      options,
+      count: variations,
+      defaultCount: 1,
+      // The frame shape itself, not only the words — see gemini generateImage.
+      aspectRatio: FESTIVE_ASPECT_RATIOS[options.aspect],
+      userPrompt: `${eventLabel(options)} poster${options.description ? ` — ${options.description}` : ""}`,
+      requestedModel,
+      requestedQuality,
+      conversationId: conversationId || null,
+    },
+    message: `queued a ${eventLabel(options)} poster (${variations} image${variations > 1 ? "s" : ""}) on ${modelLabel}`,
+  });
+});
+
 /** At most two picks per option — one per shot in its pair. */
 function asIdList(value) {
   return (Array.isArray(value) ? value : []).filter((id) => typeof id === "string").slice(0, 2);
@@ -244,6 +377,19 @@ async function resolveBaseModel({ dbUser, modelNumber, modelId, modelImage }) {
   }
   return null;
 }
+
+/*
+ * ── Setting codes ───────────────────────────────────────────────────────────
+ * The table the catalog copy decodes sheet setting codes with, so the upload
+ * preview can show a sheet's settings in the same words the deck will use.
+ */
+const SETTING_CODE_NAMES = Object.fromEntries(require("../prompts/settingCodes.json").map((entry) => [entry.code, entry.brief]));
+
+router.get("/setting-codes", (req, res) => {
+  // Static for the life of the process; let the browser keep it a day.
+  res.set("Cache-Control", "private, max-age=86400");
+  res.json({ status: "success", codes: SETTING_CODE_NAMES });
+});
 
 /*
  * ── Saved kits ──────────────────────────────────────────────────────────────

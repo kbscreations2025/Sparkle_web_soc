@@ -12,10 +12,13 @@ const {
   AFFINITY_PROMPT,
 } = require("../prompts/marketingKit");
 const { buildCampaignKitShots, buildCampaignKitRefinePrompt } = require("../prompts/campaignKit");
+const { buildFestivePosterPrompt, buildFestivePosterRefinePrompt, eventLabel } = require("../prompts/festivePoster");
 
 const BRAND_STORY_JOB = "marketingKit.brandStory";
 const AFFINITY_JOB = "marketingKit.affinity";
+const COLLECTION_STORY_JOB = "marketingKit.collectionStory";
 const CAMPAIGN_KIT_JOB = "marketingKit.campaign";
+const FESTIVE_POSTER_JOB = "marketingKit.festive";
 
 /** The writing halves both run on the reasoning model, never a picker's choice. */
 const WRITING_MODEL = "gemini-2.5-pro";
@@ -123,8 +126,15 @@ registerJobHandler(BRAND_STORY_JOB, (context) => {
 /**
  * Affinity: several pieces, each with its own photo and optionally its own
  * production sheet, turned into catalog copy for the set.
+ *
+ * Collection Story is the same run under its own name — its own job type (so
+ * the queue rail reopens it on its own page) and its own kit kind (so its
+ * decks are listed apart), with everything else shared.
  */
-registerJobHandler(AFFINITY_JOB, (context) => {
+registerJobHandler(AFFINITY_JOB, (context) => runAffinityJob(context, "affinity"));
+registerJobHandler(COLLECTION_STORY_JOB, (context) => runAffinityJob(context, "collection_story"));
+
+function runAffinityJob(context, kind) {
   const kitId = newKitId();
 
   return runTextJob({
@@ -145,18 +155,20 @@ registerJobHandler(AFFINITY_JOB, (context) => {
       .filter((item) => item.image)
       .slice(0, 1)
       .map((item) => ({ image: item.image, role: "uploaded" })),
-    historyParams: { kitId: String(kitId) },
+    // `kitKind` so History opens a Collection Story on its own page, not Affinity's.
+    historyParams: { kitId: String(kitId), kitKind: kind },
     // Reading the answer is its own step, before anything is recorded: a
     // deck the model didn't actually produce must not leave a history row.
     parse: ({ text, data }) => parseAffinityResult(text, data),
     persist: async ({ parsed, data, dbUser, generationId }) => {
       const kit = await saveKit({
-        kind: "affinity",
+        kind,
         kitId,
         dbUser,
         generationId,
         save: () =>
           kits.saveAffinityKit({
+            kind,
             dbUser,
             kitId,
             generationId,
@@ -182,7 +194,7 @@ registerJobHandler(AFFINITY_JOB, (context) => {
       return { result: parsed, ...kit };
     },
   });
-});
+}
 
 /**
  * The response shape, as a contract with the API rather than a request in
@@ -387,4 +399,59 @@ registerJobHandler(CAMPAIGN_KIT_JOB, (context) => {
   });
 });
 
-module.exports = { BRAND_STORY_JOB, AFFINITY_JOB, CAMPAIGN_KIT_JOB };
+/**
+ * Festive Poster: the user's pieces together in one event-themed campaign
+ * image — or several variations of it, each composed differently.
+ *
+ * Saved as a kit in the Campaign Kit shape (inputs + produced shots, no model
+ * photo), so it reopens from the rail and History like every other kit.
+ */
+registerJobHandler(FESTIVE_POSTER_JOB, (context) => {
+  const kitId = newKitId();
+  const options = context.data.options || {};
+
+  return runGenerationJob({
+    ...context,
+    tool: "marketing_kit",
+    buildShots: ({ data, count }) =>
+      Array.from({ length: count }, (_, index) => ({
+        id: `poster${index + 1}`,
+        label: count > 1 ? `Poster ${index + 1}` : "Poster",
+        prompt: buildFestivePosterPrompt({ ...data.options, pieceCount: data.sourceImages.length, index, total: count }),
+        images: data.sourceImages,
+      })),
+    buildRefinePrompt: buildFestivePosterRefinePrompt,
+    params: { ...options, kitId: String(kitId) },
+    // A retouch edits one poster inside an existing kit — only a first run writes one.
+    persist: context.data.isRefinement
+      ? undefined
+      : ({ saved, delivered, data, dbUser, provider, model, modelLabel }) =>
+          saveKit({
+            kind: "festive",
+            kitId,
+            dbUser,
+            generationId: saved.generationId,
+            save: () =>
+              kits.saveCampaignKit({
+                kind: "festive",
+                title: `${eventLabel(data.options || {})} poster`,
+                dbUser,
+                kitId,
+                generationId: saved.generationId,
+                model: { provider, modelId: model, modelLabel },
+                modelImage: null,
+                sourceImages: data.sourceImages,
+                shots: delivered.map((shot, index) => ({
+                  id: shot.id,
+                  label: shot.label,
+                  assetId: saved.outputs[index]?.assetId ?? null,
+                  url: saved.outputs[index]?.url,
+                  caption: "",
+                })),
+                options: data.options,
+              }),
+          }),
+  });
+});
+
+module.exports = { BRAND_STORY_JOB, AFFINITY_JOB, COLLECTION_STORY_JOB, CAMPAIGN_KIT_JOB, FESTIVE_POSTER_JOB };

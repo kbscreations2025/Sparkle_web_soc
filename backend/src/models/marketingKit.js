@@ -15,7 +15,16 @@ const mongoose = require("mongoose");
  * inline and would breach MongoDB's 16MB document ceiling outright.
  */
 
-const MARKETING_KIT_TYPES = ["brand_story", "affinity", "campaign"];
+/*
+ * Two of these share another kind's document shape rather than adding one:
+ *   · `collection_story` is Affinity under its own name — same pieces, same
+ *     catalog copy — and lives in `affinity`.
+ *   · `festive` is a set of event posters made from several pieces, which is a
+ *     Campaign Kit's shape (inputs + generated shots) without the model photo,
+ *     and lives in `campaign`.
+ * Readers key off which sub-document is present, not off `kind`.
+ */
+const MARKETING_KIT_TYPES = ["brand_story", "affinity", "campaign", "collection_story", "festive"];
 const MARKETING_KIT_STATUSES = ["draft", "ready", "failed"];
 const MARKETING_KIT_IMAGE_ROLES = ["product", "sheet", "model"];
 

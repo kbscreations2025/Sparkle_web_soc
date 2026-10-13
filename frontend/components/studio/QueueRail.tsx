@@ -15,9 +15,34 @@ import { type QueuedJob } from "@/lib/api";
 import { describeJob, useNow } from "@/lib/job-progress";
 import { useCancelJob, useJobs, useQueueList } from "@/lib/jobs-context";
 import { conversationHref, TOOL_LABELS } from "@/lib/nav";
+import { kitHref } from "@/lib/marketingKits";
+import type { MarketingKitKind } from "@/lib/api";
 import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 import { JobProgressBar } from "./JobProgressBar";
+
+/** A Marketing Kit job's type → which of the three surfaces it came from. */
+const KIT_KIND_BY_JOB_TYPE: Record<string, MarketingKitKind> = {
+  "marketingKit.brandStory": "brand_story",
+  "marketingKit.affinity": "affinity",
+  "marketingKit.campaign": "campaign",
+  "marketingKit.collectionStory": "collection_story",
+  "marketingKit.festive": "festive",
+};
+
+/**
+ * Where clicking a row takes you: the run's own results.
+ *
+ * Marketing Kit is three pages under one tool, and each reopens a result by
+ * its saved kit (`?kitId=`), not by conversation — a conversation link lands on
+ * the kit picker, which shows nothing of the run. Until the kit exists (still
+ * running, or it failed) the row falls back to the conversation link.
+ */
+function jobHref(job: QueuedJob, model?: string) {
+  const kind = KIT_KIND_BY_JOB_TYPE[job.type];
+  if (kind && job.result?.kitId) return kitHref({ id: job.result.kitId, kind });
+  return conversationHref(job.tool, job.result?.conversationId || job.request?.conversationId, model);
+}
 
 /** How many finished jobs stay listed under whatever is still running. */
 const SETTLED_SHOWN = 6;
@@ -195,7 +220,7 @@ const RailRow = memo(function RailRow({
   // — not only once it finishes, like a first pass.
   // `model` is passed so a GPT cleaning run reopens in the workspace that
   // produced it rather than the Gemini one — both record under `cleaning`.
-  const href = conversationHref(job.tool, job.result?.conversationId || job.request?.conversationId, model);
+  const href = jobHref(job, model);
 
   function handleCancel(event: React.MouseEvent) {
     // The row is a link; cancelling must not also navigate.

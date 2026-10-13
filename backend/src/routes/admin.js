@@ -4,7 +4,7 @@ const config = require("../config");
 const loginApi = require("../loginApi");
 const { requireAuth, requireSuperAdmin } = require("../middleware/auth");
 const { liveSessionCounts, forceLogout } = require("../socket");
-const { GRANT_GROUPS, TOOL_KEYS, unknownGrants } = require("../grants");
+const { GRANT_GROUPS, TOOL_KEYS, DEFAULT_MEMBER_GRANTS, unknownGrants } = require("../grants");
 const { logAudit, requestMeta, actorFrom } = require("../auditLog");
 const { handle, bad, notFound, isId, toMember, validateScope } = require("./_shared");
 const Tenant = require("../models/tenant");
@@ -343,7 +343,9 @@ router.get(
 router.post(
   "/organizations/:id/members",
   handle(async (req, res) => {
-    const { email, name, role, authUserId, permissions = [], dataScope } = req.body || {};
+    // No `permissions` in the body (the console's "add" sends none) means the
+    // default tool set; an explicit list — even an empty one — is used as given.
+    const { email, name, role, authUserId, permissions = DEFAULT_MEMBER_GRANTS, dataScope } = req.body || {};
     if (!email?.trim()) return bad(res, "email is required");
 
     const unknown = unknownGrants(permissions);

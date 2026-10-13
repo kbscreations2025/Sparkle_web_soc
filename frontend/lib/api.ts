@@ -1311,7 +1311,11 @@ export function imageToVideo(body: {
 
 // ── marketing kit ────────────────────────────────────────────────────────────
 
-export type MarketingKitKind = "brand_story" | "affinity" | "campaign";
+/**
+ * `collection_story` is an Affinity deck under its own name, and `festive` a
+ * set of event posters — they arrive in the `affinity` and `campaign` fields.
+ */
+export type MarketingKitKind = "brand_story" | "affinity" | "campaign" | "collection_story" | "festive";
 
 /** One entry in the saved-kits rail. Summaries only — a full kit is large. */
 export type MarketingKitSummary = {
@@ -1395,9 +1399,10 @@ export type MarketingKit = MarketingKitSummary & {
   } | null;
 };
 
-/** One of a Campaign Kit's four shots. Points at an Asset, not its own copy. */
+/** One of a Campaign Kit's four shots (or a Festive kit's posters). Points at an Asset, not its own copy. */
 export type CampaignShot = {
-  id: "lifestyleWarm" | "lifestyleDramatic" | "studioClean" | "studioLuxury";
+  /** A Campaign Kit shot id, or `poster1`… for a Festive kit. */
+  id: string;
   label: string;
   assetId: string | null;
   url: string;
@@ -1429,12 +1434,37 @@ export function brandStory(body: {
  * text. Keeping the parser client-side is what stops the backend carrying a
  * spreadsheet library for one tool.
  */
-export function affinity(body: {
-  items: { image: string; sheetImages?: string[]; sheetExcelText?: string[] }[];
+export function affinity(
+  body: {
+    items: { image: string; sheetImages?: string[]; sheetExcelText?: string[] }[];
+    preview?: string | null;
+  },
+  /** Collection Story is the same run under its own name and endpoint. */
+  kind: "affinity" | "collection_story" = "affinity"
+) {
+  const path = kind === "collection_story" ? "/api/marketing-kit/collection-story" : "/api/marketing-kit/affinity";
+  return apiRequest<QueuedResult>(path, { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Up to six pieces together in one event-themed poster, optionally in several variations. */
+export function festivePoster(body: {
+  jewelryImages: string[];
+  /** A `FESTIVE_EVENTS` id; ignored when `customEvent` is set. */
+  event?: string;
+  customEvent?: string;
+  description?: string;
+  aspect: string;
+  count: number;
+  /** An `IMAGE_EDIT_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
+  quality?: string;
   preview?: string | null;
 }) {
-  return apiRequest<QueuedResult>("/api/marketing-kit/affinity", { method: "POST", body: JSON.stringify(body) });
+  return apiRequest<QueuedResult>("/api/marketing-kit/festive", { method: "POST", body: JSON.stringify(body) });
 }
+
+/** Retouching one festive poster. */
+export const refineFestivePoster = refineOn<string>("/api/marketing-kit/festive");
 
 /** Four shots in one run — two of the piece worn, two of it alone. */
 export function campaignKit(body: {
@@ -1477,6 +1507,11 @@ export function listMarketingKits(
 
 export function fetchMarketingKit(id: string) {
   return apiRequest<{ kit?: MarketingKit }>(`/api/marketing-kit/kits/${id}`);
+}
+
+/** The catalog's setting-code table — code → the words the deck uses for it. */
+export function fetchSettingCodes() {
+  return apiRequest<{ codes?: Record<string, string> }>("/api/marketing-kit/setting-codes");
 }
 
 /**
@@ -1578,6 +1613,8 @@ export type HistoryItem = {
    * Affinity run's stored text actually is.
    */
   kitId?: string | null;
+  /** Which surface wrote that deck. Null on older runs, which are all Affinity. */
+  kitKind?: MarketingKitKind | null;
 };
 
 export type ConversationAsset = { url: string; thumbnailUrl: string; role: string };

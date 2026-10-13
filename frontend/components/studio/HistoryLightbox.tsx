@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { AssetThumb } from "./AssetThumb";
 import { BrandStoryResult } from "./BrandStoryResult";
 import { looksLikeBrandStory } from "@/lib/brandStory";
+import { kitHref } from "@/lib/marketingKits";
 
 /**
  * One control in the header's action pill.
@@ -380,7 +381,7 @@ export function HistoryLightbox({
                       This run produced a catalog deck. Open it to read, edit and export it.
                     </p>
                     <a
-                      href={`/marketing-kit/affinity?kitId=${item.kitId}`}
+                      href={kitHref({ id: item.kitId, kind: item.kitKind ?? "affinity" })}
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/15 px-3 text-xs font-semibold text-gold transition-colors hover:bg-gold/25"
                     >
                       Open the deck

@@ -18,6 +18,8 @@ const SUB_LABELS: Record<string, string> = {
   "/marketing-kit/brand-story": "Brand Story",
   "/marketing-kit/affinity": "Affinity",
   "/marketing-kit/campaign": "Campaign Kit",
+  "/marketing-kit/collection-story": "Collection Story",
+  "/marketing-kit/festive": "Festive Poster",
 };
 
 /** Dashboard → tool → sub-page, derived from the current route. */

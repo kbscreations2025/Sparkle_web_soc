@@ -127,7 +127,18 @@ async function saveBrandStoryKit({ dbUser, kitId, model, images, sheetImages, an
  * An Affinity kit: every piece with its own photo and sheet, plus the
  * catalog copy written for the set.
  */
-async function saveAffinityKit({ dbUser, kitId, model, collectionName, tagline, items, pieces, generationId = null }) {
+async function saveAffinityKit({
+  dbUser,
+  kitId,
+  model,
+  collectionName,
+  tagline,
+  items,
+  pieces,
+  generationId = null,
+  // "collection_story" is the same deck under its own name — see the model.
+  kind = "affinity",
+}) {
   const common = { tenantId: dbUser.tenantId, userId: dbUser._id, kitId };
 
   const storedPieces = await Promise.all(
@@ -153,7 +164,7 @@ async function saveAffinityKit({ dbUser, kitId, model, collectionName, tagline, 
     tenantId: dbUser.tenantId,
     userId: dbUser._id,
     userName: dbUser.name || dbUser.email,
-    kind: "affinity",
+    kind,
     title: collectionName || "Untitled Collection",
     status: "ready",
     model,
@@ -190,6 +201,9 @@ async function saveCampaignKit({
   shots,
   options,
   generationId = null,
+  // "festive" stores its posters in this same shape, with no model photo.
+  kind = "campaign",
+  title,
 }) {
   const common = { tenantId: dbUser.tenantId, userId: dbUser._id, kitId };
 
@@ -203,8 +217,8 @@ async function saveCampaignKit({
     tenantId: dbUser.tenantId,
     userId: dbUser._id,
     userName: dbUser.name || dbUser.email,
-    kind: "campaign",
-    title: options?.description?.trim()?.slice(0, 300) || "Campaign Kit",
+    kind,
+    title: (title || options?.description?.trim() || "Campaign Kit").slice(0, 300),
     status: "ready",
     model,
     generationId,
@@ -280,13 +294,14 @@ async function saveKitSafely(save, { kind, kitId, dbUser, model, generationId = 
  * reason those copies exist.
  */
 function toKitSummary(kit) {
-  const cover =
-    kit.kind === "brand_story"
-      ? kit.brandStory?.images?.[0]
-      : kit.kind === "affinity"
-        ? kit.affinity?.pieces?.find((piece) => piece.productImage)?.productImage
-        : // A campaign kit leads with what it produced, not what went in.
-          kit.campaign?.shots?.[0] ?? kit.campaign?.sourceImages?.[0];
+  // By which document is present, so the kinds that share a shape (see the
+  // model) need no case of their own.
+  const cover = kit.brandStory
+    ? kit.brandStory.images?.[0]
+    : kit.affinity
+      ? kit.affinity.pieces?.find((piece) => piece.productImage)?.productImage
+      : // A campaign-shaped kit leads with what it produced, not what went in.
+        kit.campaign?.shots?.[0] ?? kit.campaign?.sourceImages?.[0];
 
   return {
     id: String(kit._id),
@@ -304,8 +319,8 @@ function toKitSummary(kit) {
 
 /** What "how much is in here" means for each kind. */
 function countFor(kit) {
-  if (kit.kind === "affinity") return kit.affinity?.pieces?.length ?? 0;
-  if (kit.kind === "campaign") return kit.campaign?.shots?.length ?? 0;
+  if (kit.affinity) return kit.affinity.pieces?.length ?? 0;
+  if (kit.campaign) return kit.campaign.shots?.length ?? 0;
   return kit.brandStory?.images?.length ?? 0;
 }
 
