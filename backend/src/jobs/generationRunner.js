@@ -231,7 +231,10 @@ async function runGenerationJob({
   const saved = await recordGeneration({
     ...common,
     conversationId: data.conversationId,
-    parentGenerationId: null,
+    // Set only when a follow-up is run as a fresh render — Sketch to Image,
+    // when the turn was typed on the sketch itself — so it still hangs off
+    // the turn before it.
+    parentGenerationId: data.parentGenerationId ?? null,
     prompt,
     userPrompt: data.userPrompt ?? null,
     // What the run was given, if anything — the sketch, the photo, the
@@ -255,6 +258,9 @@ async function runGenerationJob({
     ...toResult(saved, { model, modelLabel, provider }),
     requestedCount: count,
     deliveredCount: successes.length,
+    // What the route read the request as, when it read one ("3 design
+    // variations") — the chat shows it under the result.
+    ...(data.intentLabel ? { intentLabel: data.intentLabel } : {}),
     ...extra,
   };
 }

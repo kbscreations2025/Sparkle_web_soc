@@ -169,6 +169,14 @@ function emptyIntent() {
   return { kinds: [], metals: [], gem: null, cut: null, carat: null, targetType: null, source: "keywords" };
 }
 
+const NUMBER_WORDS = { two: 2, three: 3, four: 4, five: 5, six: 6 };
+
+/** "make 4 more designs" → 4: the number of designs asked for, before any cap. Null when none is named. */
+function askedExploreCount(t) {
+  const asked = t.match(/\b([2-6]|two|three|four|five|six)\s+(?:more\s+|new\s+|different\s+|other\s+)?(?:[\w-]+\s+)?(?:options?|designs?|variations?|variants?|versions?|ideas?|concepts?)\b/);
+  return asked ? NUMBER_WORDS[asked[1]] ?? Number(asked[1]) : null;
+}
+
 /**
  * Keyword pass. Synchronous and free, so it runs on every follow-up.
  *
@@ -192,11 +200,8 @@ function detectIntent(text) {
   if (EXPLORE_RES.some((re) => re.test(t))) {
     intent.kinds.push("explore");
     // "make 4 more designs" — the number they asked for, capped per tool later.
-    const asked = t.match(/\b([2-6]|two|three|four|five|six)\s+(?:more\s+|new\s+|different\s+|other\s+)?(?:[\w-]+\s+)?(?:options?|designs?|variations?|variants?|versions?|ideas?|concepts?)\b/);
-    if (asked) {
-      const words = { two: 2, three: 3, four: 4, five: 5, six: 6 };
-      intent.exploreCount = words[asked[1]] ?? Number(asked[1]);
-    }
+    const asked = askedExploreCount(t);
+    if (asked) intent.exploreCount = asked;
   }
 
   // ── type change
@@ -377,6 +382,116 @@ async function resolveIntent(text, { tenant } = {}) {
   }
 }
 
+// ── Sketch to Image: the sketch itself, or designs grown from it ───────────
+
+/*
+ * The notes typed beside a sketch either say how to make *that* design —
+ * metal, stones, finish, "a realistic image of the attached pendant" — or ask
+ * for other designs that grow out of it. The sketch is the user's own work,
+ * so the first is the default and the bar for leaving it is high: "based on
+ * this sketch" and "like the attached design" still mean this design, which is
+ * why the follow-up vocabulary above is too eager to use here.
+ */
+
+/** Words that could mean "other designs". A note with none of them is a render, decided for free. */
+const SKETCH_EXPLORE_HINT_RE =
+  /\b(?:variations?|variants?|alternat\w*|options?|ideas?|concepts?|versions?|designs|styles|looks|explor\w*|inspir\w*|creative|different|similar|new|more|other|another|several|multiple|alag|naye|naya|nayi|dusr\w*|doosr\w*)\b/;
+
+/** Unambiguous asks for other designs — the fallback when the model can't be asked. */
+const SKETCH_EXPLORE_RES = [
+  /\b(?:more|few|some|other|another|different|new|alternate|alternative|similar|extra|additional|fresh|several|multiple|[2-6]|two|three|four|five|six)\s+(?:[\w-]+\s+)?(?:options|designs|variations|variants|versions|ideas|concepts|styles|looks)\b/,
+  /\b(?:variations?|variants?|alternatives?)\b/,
+  /\binspired\s+by\b/,
+  /\bexplore\b/,
+  /\baur\s+(?:designs?|options?)\b/,
+];
+
+/** "No variations", "don't change the design" — keeping the design, said in the words of changing it. */
+const KEEP_DESIGN_RE =
+  /\b(?:no|not|without|don'?t|do\s+not|never|avoid)\b(?:\s+[\w'-]+){0,3}?\s+(?:variations?|variants?|alternatives?|changes?|creativ\w*|redesign\w*|(?:new|other|different)\s+designs?)\b/;
+
+const SKETCH_MODE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    mode: { type: "STRING", enum: ["render", "variations"] },
+    count: { type: "INTEGER", description: "how many designs they ask for, or 0 if they name no number" },
+  },
+  required: ["mode", "count"],
+};
+
+const SKETCH_MODE_PROMPT = `A jewellery designer uploaded a design sketch and typed the note below. Decide what they want.
+
+- "render": a photograph of THIS design as drawn. Notes about metal, stones, finish, size or one specific change to the design are still "render", and so are "based on this sketch", "like the attached design" and "a realistic image of this".
+- "variations": NEW, different designs that grow out of the sketch — variations, alternatives, options, ideas, more designs, "inspired by this".
+When unsure, answer "render".
+count: the number of designs they ask for, or 0 if they name no number.
+
+Notes may be in English, Hindi or Hinglish. Note:
+`;
+
+/**
+ * `{ mode: "render" | "variations", count }` for the notes typed beside a
+ * sketch, where `count` is a number the user named, or null.
+ *
+ * A note with no hint of "other designs" is decided here, free and instantly.
+ * The rest get one quick model call, because "is sketch ke 3 alag design" and
+ * "no variations, exactly as drawn" are both beyond keywords. If that call
+ * fails the keywords decide — leaning to "render", the safe side to be wrong
+ * on when someone has drawn exactly what they want.
+ */
+async function resolveSketchMode(text, { tenant } = {}) {
+  const render = { mode: "render", count: null };
+  const t = normalise(text);
+  if (!t || !SKETCH_EXPLORE_HINT_RE.test(t)) return render;
+
+  const byKeywords =
+    !KEEP_DESIGN_RE.test(t) && SKETCH_EXPLORE_RES.some((re) => re.test(t))
+      ? { mode: "variations", count: askedExploreCount(t) }
+      : render;
+  if (!tenant) return byKeywords;
+
+  try {
+    // Lazily, as in resolveIntent: prompt builders load this module too.
+    const { routeTextCall } = require("../aiRouting");
+    const { output } = await routeTextCall({
+      tenant,
+      modelId: CLASSIFIER_MODEL,
+      prompt: SKETCH_MODE_PROMPT + JSON.stringify(String(text)),
+      responseSchema: SKETCH_MODE_SCHEMA,
+      temperature: 0,
+      thinkingBudget: 0,
+      maxOutputTokens: 100,
+    });
+    if (output.blocked || !output.text) return byKeywords;
+
+    const answer = JSON.parse(output.text);
+    if (answer.mode !== "variations") return render;
+    const named = Math.round(Number(answer.count));
+    return { mode: "variations", count: named > 0 ? named : askedExploreCount(t) };
+  } catch (err) {
+    console.warn("[intent] sketch-notes classifier failed — deciding from keywords:", err.message);
+    return byKeywords;
+  }
+}
+
+/**
+ * How many designs a "variations" run makes: the number the user named (up
+ * to MAX_ASKED_EXPLORE — each image is charged), else the picker's count when
+ * it asks for several, else the tool's usual spread. One variation is rarely
+ * what "show me variations" means, so a picker left at 1 doesn't decide it.
+ */
+function variationCountFor({ asked, selected, tool }) {
+  if (asked) return Math.max(1, Math.min(MAX_ASKED_EXPLORE, Math.round(asked)));
+  if (selected > 1) return selected;
+  return Math.max(1, profileFor(tool).maxExplore);
+}
+
+/** The chat's label for a sketch run, e.g. "3 design variations". Null for a plain render. */
+function describeSketchMode(mode, count) {
+  if (mode !== "variations") return null;
+  return `${count} design variation${count === 1 ? "" : "s"}`;
+}
+
 // ── Per-tool behaviour ──────────────────────────────────────────────────────
 
 /**
@@ -390,10 +505,14 @@ async function resolveIntent(text, { tenant } = {}) {
  *
  * `maxExplore`: how many images "more options" makes. 1 where the tool's
  * result handling only shows one image per run.
+ *
+ * `relatedExplore`: the design on screen is the user's own — Sketch to Image
+ * renders their drawing — so "more designs" means variations of it that keep
+ * its motif, not new pieces that merely share a mood.
  */
 const TOOL_PROFILES = {
   text_to_image: { designTool: true, medium: "photo", maxExplore: 3 },
-  sketch_to_image: { designTool: true, medium: "photo", maxExplore: 3 },
+  sketch_to_image: { designTool: true, medium: "photo", maxExplore: 3, relatedExplore: true },
   chat_to_edit: { designTool: true, medium: "photo", maxExplore: 3 },
   text_to_sketch: { designTool: true, medium: "sketch", maxExplore: 3 },
   image_to_sketch: { designTool: true, medium: "sketch", maxExplore: 3 },
@@ -465,6 +584,19 @@ const EXPLORE_DIRECTIONS = [
   "Explore different metalwork — the frame, gallery, shank or links, and the use of negative space.",
   "Explore a bolder, more statement interpretation.",
   "Explore a lighter, more delicate interpretation.",
+];
+
+/**
+ * For variations of the user's own design: each keeps the motif and moves one
+ * thing, so the options read as one family rather than as unrelated pieces.
+ * Shared with Sketch to Image's first run (prompts/sketch.js).
+ */
+const RELATED_DIRECTIONS = [
+  "Keep the silhouette; rework the stone layout and the setting style.",
+  "Keep the stone layout; rework the metalwork — the width and profile of the metal, the openwork and how the parts join.",
+  "Make a richer, more elaborate version of the same design.",
+  "Make a lighter, more delicate version of the same design.",
+  "Rearrange the same elements into a new composition.",
 ];
 
 /** The same, for a real product: only the shot varies, never the piece. */
@@ -551,14 +683,14 @@ function attributeBlocks(intent, { medium }) {
  * · A plain edit returns `basePrompt` untouched: nothing changes for it.
  */
 function applyIntentToPrompt({ basePrompt, instruction, intent, tool, referenceNote = "", variationIndex = 0, variationTotal = 1 }) {
-  const { designTool, medium } = profileFor(tool);
+  const { designTool, medium, relatedExplore } = profileFor(tool);
   const scoped = intentForTool(intent, tool);
   const kinds = new Set(scoped.kinds);
   if (kinds.size === 0) return basePrompt;
 
   const request = String(instruction || "").trim();
   const blocks = attributeBlocks(scoped, { medium });
-  const directions = designTool ? EXPLORE_DIRECTIONS : SHOT_DIRECTIONS;
+  const directions = !designTool ? SHOT_DIRECTIONS : relatedExplore ? RELATED_DIRECTIONS : EXPLORE_DIRECTIONS;
   const variationNote =
     variationTotal > 1
       ? ` This is option ${variationIndex + 1} of ${variationTotal}; it must be clearly different from the other options. ${directions[variationIndex % directions.length]}`
@@ -572,6 +704,20 @@ function applyIntentToPrompt({ basePrompt, instruction, intent, tool, referenceN
       `The user asked: "${request}".`,
       ...blocks,
       kinds.has("explore") ? "Give a distinct take on this conversion." + variationNote : "",
+      mediumKeep(medium),
+      referenceNote,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (designTool && kinds.has("explore") && relatedExplore) {
+    return [
+      "DESIGN VARIATION: the first image is the user's own design. Create a NEW piece that grows out of it — a variation a designer would place beside it in the same collection.",
+      "Keep: the type of jewellery, the core motif (the shapes that make this design recognisable), its design language, and the metal colour and stone types unless the user asked otherwise.",
+      "Change: enough of the design — the stone layout, the metalwork, the proportions or the arrangement — that it is clearly a different piece. A copy, a recolour or the same piece from another angle is a FAILURE; so is a design that no longer looks related.",
+      `The user asked: "${request}".` + variationNote,
+      ...blocks,
       mediumKeep(medium),
       referenceNote,
     ]
@@ -638,5 +784,9 @@ module.exports = {
   refineCountFor,
   applyIntentToPrompt,
   describeIntent,
+  resolveSketchMode,
+  variationCountFor,
+  describeSketchMode,
+  RELATED_DIRECTIONS,
   TOOL_PROFILES,
 };

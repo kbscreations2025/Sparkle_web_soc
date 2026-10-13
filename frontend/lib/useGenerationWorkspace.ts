@@ -31,6 +31,13 @@ export type RefineRequest = {
   referenceImages: string[];
   conversationId: string | null;
   parentGenerationId: string | null;
+  /**
+   * Whether the turn works on something the model made ("result") or on what
+   * the user brought — their sketch or photo, picked from the opening turn
+   * ("input"). Sketch to Image renders a picked sketch afresh instead of
+   * editing it as if it were a photograph; other tools ignore it.
+   */
+  refineSource: "result" | "input";
 };
 
 export function useGenerationWorkspace({
@@ -281,6 +288,10 @@ export function useGenerationWorkspace({
       const instruction = trimmed || "Apply the changes I marked on the image.";
       const source = attach.annotatedPhoto || base;
       const references = attach.referenceImages;
+      // Judged on `base`, not `source`: a marked-up copy is still of whatever was picked.
+      const isResult =
+        images.includes(base) ||
+        history.some((msg) => msg.role === "assistant" && (msg.image === base || msg.images?.includes(base)));
 
       setHistory((current) => [
         ...current,
@@ -329,6 +340,7 @@ export function useGenerationWorkspace({
         referenceImages: references,
         conversationId: conversationId.current,
         parentGenerationId: parentGenerationId.current,
+        refineSource: isResult ? "result" : "input",
       });
 
       if (result.status === "queued" && result.job) {
@@ -355,7 +367,7 @@ export function useGenerationWorkspace({
         setRefining(false);
       }
     },
-    [attach, creditGuard, images, onRefine, readOnly, refining, selectedView, track]
+    [attach, creditGuard, history, images, onRefine, readOnly, refining, selectedView, track]
   );
 
   const reset = useCallback(() => {

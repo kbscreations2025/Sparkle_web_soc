@@ -6,6 +6,7 @@ const {
   buildImageToSketchPrompt,
   buildImageToSketchRefinePrompt,
   buildSketchToImagePrompt,
+  buildSketchVariationPrompt,
   buildSketchToImageRefinePrompt,
   SKETCH_ANALYSIS_PROMPT,
 } = require("../prompts/sketch");
@@ -45,12 +46,31 @@ registerJobHandler(TEXT_TO_SKETCH_JOB, (context) =>
   })
 );
 
-/** One or more hand-drawn sketches rendered as a photorealistic product shot. */
+/**
+ * One or more hand-drawn sketches rendered as a photorealistic product shot —
+ * or, when the notes ask for it (`data.mode`, decided in the route), new
+ * designs grown out of the sketch.
+ */
 registerJobHandler(SKETCH_TO_IMAGE_JOB, async (context) => {
+  // Variations are new designs, so there is nothing to measure: the sketch is
+  // the starting point, and each shot gets a direction of its own.
+  if (!context.data.isRefinement && context.data.mode === "variations") {
+    return runGenerationJob({
+      ...context,
+      tool: "sketch_to_image",
+      buildShots: ({ data, count }) =>
+        Array.from({ length: count }, (_, index) =>
+          buildSketchVariationPrompt({ description: data.description, index, total: count })
+        ),
+      buildRefinePrompt: buildSketchToImageRefinePrompt,
+    });
+  }
+
   // Image models render "the gist" and lose counts — a 12-sided halo of
   // twenty stones comes back as a plain octagon. So a vision model reads the
-  // sketch first and writes the exact numbers down; the render prompt then
-  // carries them as hard facts. Best-effort: no spec, render as before.
+  // sketch first and writes the exact numbers down, plus what on the sheet is
+  // not the piece. The drawing still decides every shape: see
+  // buildSketchToImagePrompt. Best-effort: no spec, render from the sketch alone.
   const spec = context.data.isRefinement ? null : await analyseSketch(context);
 
   return runGenerationJob({

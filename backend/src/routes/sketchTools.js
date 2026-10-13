@@ -1,8 +1,9 @@
 const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
-const { resolveProviderModel } = require("../aiRouting");
+const { resolveProviderModel, loadTenantOrThrow } = require("../aiRouting");
 const { clampCount } = require("../jobs/generationRunner");
 const { TEXT_TO_SKETCH_JOB, SKETCH_TO_IMAGE_JOB, IMAGE_TO_SKETCH_JOB } = require("../jobs/sketchTools");
+const { resolveSketchMode, variationCountFor, describeSketchMode } = require("../prompts/intent");
 const { queueGeneration, parseImages } = require("./queueGeneration");
 
 /**
@@ -85,40 +86,74 @@ router.post("/text-to-sketch", requirePermission("tool.text_to_sketch.run"), asy
 router.post("/sketch-to-image", requirePermission("tool.sketch_to_image.run"), async (req, res) => {
   const body = req.body || {};
   const { provider, model, modelLabel, quality } = resolveProviderModel(body.model, body.quality);
-  const refinement = readRefinement(body);
+  const shared = { provider, model, modelLabel, quality };
+
+  /*
+   * A follow-up typed on the sketch itself — picked from the opening turn —
+   * asks for that sketch to be rendered, with the message as its notes. Run as
+   * an edit it would reach the model as "this jewelry photograph … keep the
+   * background", and come back as the sketch still on its paper. Anything
+   * attached alongside counts as another view, as on the upload form.
+   */
+  const onSketch = body.refineSource === "input" && Boolean(body.refineImage && body.instruction);
+  const refinement = onSketch ? null : readRefinement(body);
+
+  if (refinement) {
+    return queueGeneration(req, res, {
+      type: SKETCH_TO_IMAGE_JOB,
+      tool: "sketch_to_image",
+      preview: body.preview,
+      request: { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length },
+      payload: { ...refinement, requestedModel: body.model, requestedQuality: body.quality },
+      message: `queued a sketch-to-image refinement on ${modelLabel}`,
+    });
+  }
 
   // Every uploaded view of the piece goes into one request, so the model sees
   // the whole design rather than one angle of it.
-  const sketches = refinement ? [] : parseImages(body.images);
-  if (!refinement && sketches.length === 0) {
+  const sketches = parseImages(onSketch ? [body.refineImage, ...(body.referenceImages ?? [])] : body.images);
+  if (sketches.length === 0) {
     return res.status(400).json({ status: "error", message: "at least one sketch is required", code: "invalid" });
   }
 
-  const count = refinement ? 1 : clampCount(body.count, PHOTO_DEFAULT_COUNT);
-  const shared = { provider, model, modelLabel, quality };
+  const description = String((onSketch ? body.instruction : body.description) ?? "").trim();
+  const userPrompt = String((onSketch ? body.displayPrompt || body.instruction : body.description) ?? "").trim() || null;
+
+  // The sketch as drawn, or new designs grown from it — read before pricing,
+  // since variations can make more images than the picker shows.
+  const tenant = await loadTenantOrThrow(req.dbUser).catch(() => null);
+  const { mode, count: asked } = await resolveSketchMode(description, { tenant });
+  const selected = clampCount(body.count, PHOTO_DEFAULT_COUNT);
+  const count = mode === "variations" ? variationCountFor({ asked, selected, tool: "sketch_to_image" }) : selected;
+  const intentLabel = describeSketchMode(mode, count);
 
   return queueGeneration(req, res, {
     type: SKETCH_TO_IMAGE_JOB,
     tool: "sketch_to_image",
     preview: body.preview,
-    request: refinement
-      ? { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length }
-      : { ...shared, isRefinement: false, description: body.description?.trim() || null, sketchCount: sketches.length, count },
-    payload: refinement
-      ? { ...refinement, requestedModel: body.model, requestedQuality: body.quality }
-      : {
-          isRefinement: false,
-          requestedModel: body.model,
-          requestedQuality: body.quality,
-          description: body.description?.trim() || "",
-          userPrompt: body.description?.trim() || null,
-          count,
-          sourceImages: sketches,
-          conversationId: body.conversationId || null,
-        },
-    message: refinement
-      ? `queued a sketch-to-image refinement on ${modelLabel}`
-      : `queued a sketch-to-image run (${count} image${count > 1 ? "s" : ""}) on ${modelLabel}`,
+    request: {
+      ...shared,
+      isRefinement: false,
+      description: description || null,
+      sketchCount: sketches.length,
+      count,
+      mode,
+      ...(intentLabel ? { intentLabel } : {}),
+    },
+    payload: {
+      isRefinement: false,
+      requestedModel: body.model,
+      requestedQuality: body.quality,
+      description,
+      userPrompt,
+      mode,
+      count,
+      intentLabel,
+      sourceImages: sketches,
+      conversationId: body.conversationId || null,
+      parentGenerationId: onSketch ? body.parentGenerationId || null : null,
+    },
+    message: `queued a sketch-to-image run (${count} image${count > 1 ? "s" : ""}) on ${modelLabel}`,
   });
 });
 

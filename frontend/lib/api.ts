@@ -996,6 +996,8 @@ export type RefineBody<TModel extends string = SparkleModelId> = {
    * the marks show where to change, and must not appear in the result.
    */
   annotated?: boolean;
+  /** Whether `refineImage` is a generated result or the user's own input — see `RefineRequest`. */
+  refineSource?: "result" | "input";
 };
 
 export function refineOn<TModel extends string = SparkleModelId>(path: string) {

@@ -5,6 +5,7 @@ const {
   INK_MASTER_PROMPT,
 } = require("./sketchMasterPrompts");
 const { buildReferenceNote } = require("./shared");
+const { RELATED_DIRECTIONS } = require("./intent");
 
 /**
  * The instructions behind the three sketch tools.
@@ -183,295 +184,85 @@ function buildImageToSketchRefinePrompt({ instruction, referenceCount = 0 }) {
 
 // ── Sketch to Image ─────────────────────────────────────────────────────────
 
-const SKETCH_TO_IMAGE_LINES = `MASTER TASK — SKETCH TO JEWELLERY IMAGE
-
-You are an expert high-end jewellery designer, master jewellery CAD specialist, jewellery rendering artist, and luxury product photographer with decades of professional experience.
-
-INPUT:
-The uploaded image is an ORIGINAL HAND-DRAWN JEWELLERY DESIGN SKETCH.
-
-If more than one image is provided, they are DIFFERENT VIEWS OF ONE SINGLE PIECE of jewellery. Use all of them together to understand the full design, then render ONE product image of that one piece, in the orientation of the first (main) view. Do NOT produce a multi-view sheet, a collage, or several pieces.
-
-Your task is to convert this exact hand-drawn design into a highly refined, realistic, professional jewellery product image while preserving the original design with maximum possible fidelity.
-
-THE ORIGINAL SKETCH IS THE ABSOLUTE SOURCE OF TRUTH (except where the jeweller notes, if any, say otherwise).
-
-This is a DESIGN-PRESERVATION task.
-
-It is NOT a redesign.
-It is NOT a reinterpretation.
-It is NOT an opportunity to create a more fashionable or commercially attractive jewellery design.
-
-The final jewellery must remain recognizably the SAME DESIGN shown in the uploaded sketch.
-
-PRIORITY ORDER: DESIGN FIDELITY > CLEANLINESS > BEAUTIFICATION.
-
-THE OVERLAY TEST: if the final photograph were laid semi-transparently over the sketch, the outline of the piece, every stone, every opening and every structural line should sit on top of its drawn counterpart. Same shapes, same positions, same sizes relative to each other, same number of everything. A designer comparing the two side by side must say "that is exactly my drawing, made real" — not "that is similar to my drawing".
-
-Do NOT "improve" the design. A more balanced, more elegant, more commercial or more typical version of the piece is a FAILURE. Rendering what is drawn — even if it is unusual, asymmetrical or unconventional — is SUCCESS.
-
-==================================================
-1. FIRST PRIORITY — UNDERSTAND THE ORIGINAL DESIGN
-==================================================
-
-Carefully analyze the uploaded sketch before rendering.
-
-Identify and preserve:
-
-- Overall jewellery type
-- Overall silhouette
-- Outer contour
-- Inner contour
-- Major structural components
-- Central element
-- Halo/frame structure
-- Stone positions
-- Stone count
-- Stone shapes
-- Prong positions
-- Decorative elements
-- Open spaces
-- Cut-outs
-- Engraved lines
-- Connecting elements
-- Bail / attachment elements
-- Symmetry
-- Curves
-- Angles
-- Layering
-- Relative proportions
-- Relationship between every component
-
-Treat every visible line, boundary, opening, stone indication, contour, and structural feature as meaningful design information.
-
-DO NOT treat the sketch as a vague inspiration image.
-
-Treat it as a jewellery design blueprint.
-
-==================================================
-2. ABSOLUTE DESIGN PRESERVATION
-==================================================
-
-PRESERVE THE ORIGINAL DESIGN.
-
-Do NOT:
-
-- redesign it
-- modernize it
-- beautify it by changing the design
-- simplify it
-- add fashionable jewellery elements
-- remove small details
-- change proportions
-- change symmetry
-- change stone positions, count, relative sizes or shapes
-- change the outer or inner silhouette
-- change the number of layers
-- change the geometry or curvature
-- change the orientation or perspective
-- invent decorative elements, stones, prongs, halos or metal frames
-
-The output must represent the SAME physical jewellery design represented by the sketch.
-
-If a design decision is uncertain, follow the visible evidence in the sketch rather than inventing a new design.
-
-==================================================
-3. LINE-BY-LINE STRUCTURAL FIDELITY
-==================================================
-
-Every meaningful structural line should translate into an appropriate jewellery structure:
-
-- Outer pencil contour → outer jewellery contour
-- Inner contour → inner metal boundary
-- Stone circle → gemstone
-- Repeated stone markings → repeated gemstones
-- Small connecting lines → metal connections
-- Open gaps → actual open spaces
-- Parallel lines → layered metal structure
-- Engraving marks → engraved metal detail
-- Prong indications → actual prongs
-- Decorative curves → actual metal curves
-- Geometric divisions → physical jewellery construction
-
-Do NOT erase structural information simply because the original drawing is rough.
-
-Do NOT merge separate components.
-
-Do NOT turn multiple distinct components into one generic smooth surface.
-
-==================================================
-4. CLEAN UP THE HAND-DRAWN DESIGN — WITHOUT CHANGING IT
-==================================================
-
-The original drawing may contain rough pencil lines, uneven line thickness, faint areas, construction marks, shaky curves, imperfect circles, rough stone indications, overlapping sketch lines and incomplete-looking lines.
-
-Clean these ONLY at the level of line quality: a shaky line becomes the clean curve it was clearly meant to be, a wobbly circle becomes a precise stone of the SAME size and position, doubled sketch strokes become one edge. Follow the designer's intended line — the average path of the strokes — never a new, "nicer" path.
-
-Cleanup never changes a shape, a proportion, a count, a spacing, or the overall silhouette.
-
-The cleanup must NEVER change the underlying design.
-
-Think "professionally cleaned jewellery designer sketch", NOT "new jewellery design inspired by the sketch."
-
-==================================================
-5. INCOMPLETE OR FAINT AREAS
-==================================================
-
-Some areas of a hand-drawn sketch may be faint, partially visible, or unfinished.
-
-Complete an area when its intended structure can be inferred from visible geometry, symmetry, repetition, continuation of lines, or clearly established design logic. When completing:
-
-- continue the existing curve and structural lines
-- maintain the existing symmetry, proportions and spacing
-- maintain the existing design language
-- do NOT introduce a new decorative concept
-
-Completion applies ONLY to parts that are clearly missing, cut off or faded — never to parts that are drawn. Anything that is drawn is rendered as drawn, not redrawn. The final piece must be a COMPLETE, wearable piece of jewellery, so apply these standard completions where needed:
-
-- RINGS: if only the head/top is drawn and the shank fades away, complete the full shank, both shoulders and the underside of the band in a smooth arc matching the drawn style and proportions.
-- HALOS: if halo stones are drawn on one side but trail off, complete the full halo with consistent stone size and spacing.
-- PENDANTS: if the bail is missing or only partly sketched, add a clean, minimal bail matching the pendant's design language.
-- EARRINGS: if the ear wire or post is cut off, complete it naturally along the drawn line.
-- BANGLES & BRACELETS: if the arc is only partly drawn, complete the full closed circle or full cuff width.
-- NECKLACES: if only the pendant is drawn with no chain, render the pendant alone, centred. If a chain fragment is shown, complete the full chain symmetrically.
-
-Completion is of STRUCTURE ONLY. If an area is genuinely ambiguous beyond these cases, preserve the visible structure rather than creatively inventing a new component.
-
-==================================================
-6. SYMMETRY
-==================================================
-
-Where the original design is clearly symmetrical, keep it symmetrical — tidy small hand-drawing wobble so both sides match, but keep the drawn shape, size and spacing.
-
-If one side is clearly defined and the other is faint or partially drawn, complete the opposite side by faithfully mirroring the established design: identical stone count, stone spacing, metal thickness, curves, decorative elements and proportions.
-
-Do not use symmetry to invent a feature that has no evidence in the sketch, and do not force symmetry onto a design that is clearly drawn asymmetrical.
-
-==================================================
-7. JEWELLERY MATERIAL CONVERSION
-==================================================
-
-Convert the cleaned design into physically realistic jewellery that looks like an actual professionally manufactured piece.
-
-Metal should have realistic thickness, realistic edges, realistic polished surfaces, physically believable reflections, crisp highlight transitions, realistic curvature, realistic setting construction, realistic prongs and joins, and manufacturing precision.
-
-The metal must look like real polished precious metal — not plastic, not liquid, not exaggerated CGI chrome.
-
-==================================================
-8. METAL COLOUR
-==================================================
-
-Decide the metal in this order:
-
-1. If the jeweller notes specify a metal, use that metal.
-2. Otherwise, if the sketch is clearly coloured or labelled with a metal, use that metal.
-3. Otherwise (a plain pencil or graphite sketch with no colour), use 18K YELLOW GOLD.
-
-A grey pencil sketch does NOT mean white gold — grey is just the colour of graphite.
-
-Metal appearances:
-
-- YELLOW GOLD: rich, warm, natural luxury 18K yellow gold — not orange, not brassy, not pale.
-- WHITE GOLD / PLATINUM: bright, cool, mirror-polished white metal with clean bright highlights — never dull or flat grey.
-- ROSE GOLD: soft, warm, natural rose-pink gold — not copper, not orange.
-
-The metal must remain physically metallic with realistic highlights and reflections. Once the metal is decided, keep it consistent across the whole piece (except clearly drawn two-tone areas, whose colour boundaries must stay sharp and exactly where drawn).
-
-==================================================
-9. GEMSTONES AND DIAMONDS
-==================================================
-
-Translate gemstone indications from the sketch into realistic gemstones.
-
-PRESERVE gemstone count, position, size relationship, shape, orientation and arrangement. Do not add, remove or multiply stones.
-
-Stone shapes follow the drawing: round → round brilliant; triangular → trillion; rectangular → baguette or emerald cut; oval, pear, marquise, heart, cushion → that cut.
-
-Unless the jeweller notes say otherwise, stones are white diamonds.
-
-Diamonds must have realistic facet geometry, crisp facet boundaries, natural brilliance, subtle fire, realistic transparency and physically believable reflections — expensive and professionally photographed, with controlled, natural sparkle.
-
-==================================================
-10. PRONGS AND SETTINGS
-==================================================
-
-Every gemstone must have a physically believable setting that follows the setting structure drawn in the sketch.
-
-Keep the prong count as drawn (a four-prong setting stays four-prong). Keep prongs clean, properly positioned, proportional to the stone, and symmetrical where appropriate.
-
-==================================================
-11. MICRO-DETAIL
-==================================================
-
-Preserve every visible design detail that can be translated into physical jewellery: tiny stones, small beads, milgrain, engraved lines, channels, openwork, cut-outs, lattice structures, decorative borders, inner and outer frames, wire details, claws, stone separators, metal gaps, negative spaces, layered construction and repeated patterns.
-
-Render milgrain as a continuous row of tiny raised beads. Render every gap and strut of openwork individually. Do not simplify these details into generic smooth surfaces.
-
-==================================================
-12. REALISTIC JEWELLERY MANUFACTURING
-==================================================
-
-The final object must look physically manufacturable: believable thickness, clean transitions, realistic joints, physically possible stone settings, realistic edge thickness.
-
-Manufacturing realism must NEVER override the original design. Give the drawn shapes real metal thickness and real settings — do not reshape, thicken into different proportions, or restructure them to make them "more manufacturable". Preserve the design first.
-
-==================================================
-13. CAMERA / VIEWPOINT
-==================================================
-
-Preserve the viewing orientation of the original (main) sketch as closely as possible.
-
-Do not arbitrarily rotate the jewellery, do not introduce a dramatically different perspective, and do not change the relationship between front-facing and side-facing elements.
-
-==================================================
-14. PRODUCT PHOTOGRAPHY AND LIGHTING
-==================================================
-
-Present the piece as a premium luxury jewellery catalogue photograph: professional macro product photography, tack-sharp focus across the entire piece (every prong tip and facet edge in focus, no depth-of-field blur), extremely high micro-detail, accurate metal reflections and natural gemstone brilliance.
-
-Lighting: controlled luxury jewellery studio lighting — a soft large-area key light from the upper-left, gentle controlled fill from the opposite side, and subtle rim highlights where physically appropriate. Clean premium highlights across the metal, with structural detail clearly visible and balanced, natural contrast.
-
-==================================================
-15. REFLECTION CONTROL
-==================================================
-
-The metal must reflect only a clean, controlled jewellery studio: soft white highlights and smooth tonal gradients. No reflections of a camera, lens, photographer, studio equipment or room, and no random black reflection patches on the metal.
-
-==================================================
-16. BACKGROUND AND COMPOSITION
-==================================================
-
-Background: completely pure, seamless, uniform white (#FFFFFF) — no gradient, vignette, tint, texture, floor or backdrop.
-
-The jewellery must be isolated: no props, hands, mannequin, display stand, jewellery box or decorative objects.
-
-Place the complete piece centred horizontally and vertically, occupying an elegant amount of the frame with generous white breathing room on every side. Never crop any part of the piece.
-
-No visible ground shadow, no dramatic cast shadow and no floating-object effect — the piece appears cleanly isolated on pure white.
-
-==================================================
-17. FINAL IMAGE STYLE
-==================================================
-
-FINAL RESULT: a photorealistic, professionally manufactured luxury jewellery piece photographed in a premium jewellery studio, suitable for luxury e-commerce, brand websites, premium catalogues, print and social media advertising.
-
-The output is a PHOTOGRAPH. Remove ALL sketch lines, pencil marks, graphite smudges, construction lines, hatching and paper texture. There must be zero visual evidence that the image was derived from a sketch.
-
-It must not look like an AI redesign, concept art, a 3D cartoon, generic or fantasy jewellery, an illustration, a sketch, a painting, or plastic CGI.
-
-==================================================
-FINAL DIRECTIVE
-==================================================
-
-The result must be the SAME jewellery design as the sketch — same silhouette, same structural elements, same stone count, positions and shapes, same proportions, same decorative elements and open spaces, same orientation — realised as a real, manufacturable piece in a premium photograph.
-
-PRESERVE THE DESIGN.
-REFINE THE DESIGN.
-REALIZE THE DESIGN.
-
-DO NOT REDESIGN THE JEWELLERY.
-
-FINAL CHECK — compare against the sketch one more time: same outline, same number of stones in the same places, same openings, same proportions. If anything differs from the drawing, follow the drawing.`.split("\n");
+/*
+ * Short on purpose. The sketch carries the design, and the more words sit
+ * beside it the more the model renders from the words instead: a 19,000-
+ * character prompt, plus a spec that summed a stacked double heart up as
+ * "intertwined", came back as the stock interlocking-hearts pendant — while a
+ * two-line "turn this into the real piece" on the same sketch came back as the
+ * drawing. Every rule below earns its place; add to them sparingly.
+ *
+ * Two prompts. The default renders the sketch as drawn; VARIATIONS — only when
+ * the notes ask for other designs (see resolveSketchMode in prompts/intent.js)
+ * — grows new designs out of it. They share how to read the sheet, the metals
+ * and the photograph.
+ */
+
+/** What on a design sheet is the piece, and what is only there to explain it. */
+const SHEET_RULES = `READ THE SHEET
+- Render ONE piece: the main drawing. If the sheet shows the piece more than once — say a top view and a side view — show it as seen in the main view (the largest, or the first), and use the other views only to understand its form. The photograph never shows two objects.
+- Small close-up or profile drawings of a part — often a stone setting seen from the side — are detail views. Use them to understand depth and construction; never render them as separate objects.
+- Construction circles, centre lines, guide lines, measurements, arrows, written notes and shading hatches are drawing aids, not metal. Leave them out.
+- Coloured marks over the drawing (circles, arrows, highlights) are the jeweller's annotations: follow what they point to, and never render the marks themselves.
+- If several images are attached, they are views of ONE piece: make one photograph of it, in the orientation of the first image — never a multi-view sheet or several pieces.`;
+
+const METAL_RULES = `- Metal, in this order: what the jeweller notes say; else a metal the sketch is coloured or labelled with; else 18K yellow gold. Grey pencil is graphite, not white gold.
+  · Yellow gold: rich, warm, natural 18K — not orange, brassy or pale.
+  · White gold / platinum: bright, cool, mirror-polished — never dull or flat grey.
+  · Rose gold: soft, warm rose-pink — not copper or orange.
+  One metal throughout, except clearly drawn two-tone areas, whose boundaries stay exactly where they are drawn.`;
+
+const PHOTO_RULES = `THE PHOTOGRAPH
+- A premium jewellery e-commerce photograph: tack-sharp focus across the whole piece, a soft large key light from the upper left with gentle fill, clean highlights and natural contrast.
+- The metal reflects only a clean studio — no camera, room or equipment reflections, no black patches.
+- Background: pure, seamless, uniform white (#FFFFFF). The paper, its tone and its texture are gone. No props, hands, stand or box, and no visible floor shadow.
+- The piece is complete, uncropped and centred, with generous white space on every side.
+- It is a real photograph: no pencil lines, hatching, smudges or paper grain — never an illustration, concept art or plastic-looking CGI.`;
+
+const SKETCH_TO_IMAGE_PROMPT = `TASK — TURN THIS SKETCH INTO A PHOTOGRAPH OF THE REAL PIECE
+
+The attached image is a jeweller's hand-drawn design sketch. Turn it into a photograph of that exact piece, made in real metal and stones. This is a faithful render of an existing design — not a design task, and not a reinterpretation.
+
+THE SKETCH IS THE BLUEPRINT
+- Reproduce exactly what is drawn: the outline, every part, where each part sits, how the parts join, cross, overlap or stay apart, every opening, every stone, and the size of everything relative to everything else.
+- Overlay test: laid over the sketch, the photographed piece lines up with the drawing — same shapes, same positions, same proportions, same number of everything.
+- Unusual is correct. An asymmetric, unconventional or unfamiliar design is rendered exactly as drawn. Swapping it for a more familiar, more balanced or more typical piece that merely looks similar is the main way this task fails.
+- Do not add, remove, merge, simplify or "improve" anything. Where something is unclear, follow what is visible in the drawing — never invent.
+- Keep the main view's viewpoint and orientation — what is drawn horizontal stays horizontal. Do not rotate, tilt or re-pose the piece.
+
+${SHEET_RULES}
+
+CLEAN UP LINE QUALITY ONLY
+- A shaky line becomes the clean line it was meant to be, a wobbly circle a precise stone of the same size in the same place, doubled strokes a single edge. Follow the average path of the strokes, never a new, nicer path.
+- Where the design is clearly symmetrical, tidy hand wobble so both sides match; never force symmetry onto a design drawn asymmetrical.
+- Complete only what is clearly unfinished, and only its structure: a ring drawn as a head alone gets its full shank and shoulders in the drawn style; a halo or stone row that trails off continues with the same stone size and spacing; a pendant with no bail gets a clean, minimal one in its own design language; a cut-off earring post or hook, or a partly drawn bangle or bracelet, is completed along the drawn line. A pendant drawn without a chain is shown on its own.
+
+MATERIALS
+- Every drawn shape becomes real metal with believable thickness, polished edges, clean joins and manufacturable settings — without reshaping, re-proportioning or restructuring any of it.
+${METAL_RULES}
+- Stones: exactly the drawn number, positions, sizes and shapes — round becomes a round brilliant; pear, oval, marquise, heart, cushion, princess, emerald, baguette and trillion keep their cut. White diamonds unless the notes say otherwise, with crisp facets, natural brilliance and controlled sparkle.
+- Settings follow the drawing: a bezel stays a bezel, the drawn prong count stays the same, pavé and bead-set stones run exactly along the drawn strips. Milgrain is a row of tiny raised beads; openwork keeps every gap and strut.
+
+${PHOTO_RULES}
+
+FINAL CHECK — compare with the sketch before finishing: same outline, same parts in the same places, same openings, same stone count and positions, same proportions. Wherever the photograph differs from the drawing, follow the drawing.`;
+
+const SKETCH_VARIATION_PROMPT = `TASK — A NEW DESIGN GROWN FROM THIS SKETCH
+
+The attached image is a jeweller's hand-drawn design sketch, and the jeweller has asked for design variations. Create a NEW piece that grows out of this sketch — one a designer would place beside it in the same collection — and show it as a photograph of the real piece.
+
+STAY RELATED TO THE SKETCH
+- Keep: the type of jewellery, the core motif (the shapes that make this design recognisable), and its design language and character.
+- Change: what the direction below asks for, enough that the result is clearly a different piece. A copy of the sketch, a recolour of it or the same piece from another angle is a FAILURE — and so is a design that no longer looks related to the sketch.
+
+${SHEET_RULES}
+
+MATERIALS
+- Real, manufacturable jewellery: believable metal thickness, polished edges, clean joins and secure settings.
+${METAL_RULES}
+- Stones are white diamonds unless the notes say otherwise, with crisp facets, natural brilliance and controlled sparkle.
+
+${PHOTO_RULES}`;
 
 /**
  * Sketch to Image must keep the sketch's viewpoint, so its variations differ
@@ -483,60 +274,75 @@ function sketchToImageVariationNote(count) {
 }
 
 /**
- * Read by a vision model before rendering (see jobs/sketchTools.js). Its
- * answer is pasted into the render prompt as the design spec, so it must be
- * plain, numeric and literal — what is drawn, not what would look good.
+ * The jeweller's own words, which win wherever they say something. For a
+ * render everything they leave unsaid stays as drawn; a variation is free to
+ * move it.
  */
-const SKETCH_ANALYSIS_PROMPT = `You are a senior jewellery CAD technician reading a hand-drawn jewellery design sketch so it can be manufactured exactly. If several images are given, they are views of ONE piece.
+function jewellerNotes(description, { variation = false } = {}) {
+  const notes = description?.trim();
+  if (!notes) return "";
+  const scope = variation
+    ? "Wherever they name a metal, stones, a finish or a direction, follow it."
+    : "Wherever they name a metal, stones, a finish or a change, that wins over the sketch and over every rule above; everything they do not mention stays exactly as the sketch shows.";
+  return `\n\nJEWELLER NOTES — THESE OVERRIDE THE SKETCH\n${scope}\n\n${notes}`;
+}
 
-Write a precise DESIGN SPEC of what is DRAWN. Be literal and numeric. Do not suggest improvements, do not describe what would look nice, do not guess materials unless written or coloured.
+/**
+ * Read by a vision model before rendering (see jobs/sketchTools.js), and
+ * pasted into the render prompt — so it is limited to what a renderer gets
+ * wrong from the drawing alone: which drawing on the sheet to render, exact
+ * counts (a 36-stone halo comes back with 26 without one), and which way an
+ * elongated stone runs (an east–west setting gets "corrected" to north–south).
+ *
+ * It must never describe shapes or layout. The renderer copies shapes from the
+ * sketch far better than from words, and draws whatever familiar piece the
+ * words name instead: "intertwined double heart" and "two curved elements"
+ * each turned a small heart stacked on a large one into a stock pendant, while
+ * the same sketch rendered from the drawing alone came back right.
+ */
+const SKETCH_ANALYSIS_PROMPT = `You are a senior jewellery CAD technician preparing a hand-drawn jewellery design sheet for manufacture. If several images are given, they show ONE piece.
 
-COUNT CAREFULLY. Count stones in every row/ring one by one, going around. Count polygon sides one by one. If a count is uncertain, give your best count and the range, e.g. "approx. 24 (22–26)".
+A renderer will also see the sheet and will copy every shape from the drawing itself. From you it needs only the two things it is likely to get wrong: which drawing on the sheet to render, and exact counts. Do NOT describe shapes, outlines or how the parts are arranged — the drawing does that, and a written description only pulls the renderer towards a familiar design. Never name the design or compare it to a known style or symbol.
 
-Cover, in this order, using short bullet lines:
+Write two short sections.
 
-1. TYPE: ring / pendant / earring / etc. Viewpoint (front, top-down, three-quarter, side).
-2. SILHOUETTE: outer shape of the whole piece — exact shape name and number of sides if polygonal (e.g. "12-sided dodecagon, flat edges, slightly rounded corners"), width-to-height ratio.
-3. STRUCTURE FROM OUTSIDE IN: list every concentric frame / band / ring / layer, in order from the outermost to the centre. For each: its shape, number of sides, whether it is plain metal or set with stones, and approximate thickness relative to the piece.
-4. STONES: for EACH group — location (which band/row), count, shape (round, princess, marquise, pear, heart...), relative size (e.g. "tiny, about 1/15 of the piece width"), setting type (pavé, bezel, prong, channel). Centre stone: shape, cut, size relative to the piece, how many prongs and where they sit (e.g. "4 round prongs at 2, 4, 8, 10 o'clock").
-5. OPENINGS / NEGATIVE SPACE: any gaps, cut-outs, galleries.
-6. DECORATIVE DETAIL: milgrain, engraving, beading, borders, scrolls — where and how many.
-7. ATTACHMENTS: bail, chain, posts, shank — what is drawn and how it connects.
-8. COLOUR / METAL: only if the sketch is coloured or labelled; otherwise write "uncoloured pencil".
-9. MOST DISTINCTIVE FEATURES: the 3–5 things a designer would point to first to recognise THIS design (e.g. "pavé-set dodecagon halo of ~24 stones between two plain dodecagon bands").
+SHEET
+- Which drawing is the main view, and where it is on the sheet (e.g. "top half", "centre").
+- Any other drawings, and what each is: another full view of the same piece (from which angle), or a small detail view of a part (which part).
+- Drawing aids present: construction circles, centre or guide lines, measurements, written notes, coloured annotations.
+- Colour or metal, only if the drawing is coloured or labelled; otherwise "uncoloured pencil".
 
-Output only the spec. No preamble.`;
+COUNTS — in the main view
+- Each group of stones: where it runs, in a few plain words; then its count, stone shape and setting (pavé, bead, bezel, prong, channel). Count one by one, going around. If unsure, give the best count and a range, e.g. "approx. 24 (22–26)".
+- Centre stone(s): shape; if it is elongated, which way its long axis runs on the drawing (horizontal, vertical or diagonal); setting; and the number of prongs if prongs are drawn.
+- The number of sides of any polygonal frame.
+
+Output only these two sections. No preamble.`;
 
 function buildSketchToImagePrompt({ description, count = 1, spec = null }) {
-  const lines = [...SKETCH_TO_IMAGE_LINES];
+  let prompt = SKETCH_TO_IMAGE_PROMPT;
 
   if (spec) {
-    lines.push(
-      "",
-      "==================================================",
-      "MEASURED DESIGN SPEC — READ FROM THIS SKETCH",
-      "==================================================",
-      "",
-      "A jewellery technician has studied this exact sketch and recorded what is drawn. Treat every shape, number of sides and stone count below as a HARD REQUIREMENT. Render exactly this many stones in exactly these positions, and exactly these shapes. Where the spec and your own impression disagree, follow the spec and the sketch — never a simpler or more typical design.",
-      "",
-      spec
-    );
+    // Numbers and the sheet only, and second to the drawing: a spec told to
+    // win over the model's own eyes lets one wrong word decide the render.
+    prompt +=
+      "\n\nTECHNICIAN'S COUNT SHEET\n" +
+      "A technician has read this sketch for what is easy to get wrong. Use it to know which drawing to render and what to leave out, and make the stone counts, prong counts, numbers of sides and the direction an elongated stone runs match it — an east–west stone stays east–west. It deliberately says nothing about shapes or layout: take every shape, position and proportion from the drawing alone. Anything it does not list is rendered as drawn.\n\n" +
+      spec;
   }
 
-  if (description?.trim()) {
-    lines.push(
-      "",
-      "==================================================",
-      "JEWELLER NOTES — THESE OVERRIDE THE SKETCH",
-      "==================================================",
-      "",
-      "Apply these exactly. Wherever they specify metal, stones, finish or a change, they take priority over the sketch and over every preservation rule above. Everything they do not mention stays exactly as the sketch shows.",
-      "",
-      description.trim()
-    );
-  }
+  return prompt + jewellerNotes(description) + sketchToImageVariationNote(count);
+}
 
-  return lines.join("\n") + sketchToImageVariationNote(count);
+/**
+ * One shot of a "variations" run: the sketch as the starting point, and a
+ * direction of its own, so parallel shots come back as a family rather than as
+ * near-copies of each other.
+ */
+function buildSketchVariationPrompt({ description, index = 0, total = 1 }) {
+  const direction = RELATED_DIRECTIONS[index % RELATED_DIRECTIONS.length];
+  const which = total > 1 ? `This is variation ${index + 1} of ${total} and must differ clearly from the others. ` : "";
+  return `${SKETCH_VARIATION_PROMPT}\n\nDIRECTION FOR THIS VARIATION\n${which}${direction}` + jewellerNotes(description, { variation: true });
 }
 
 function buildSketchToImageRefinePrompt({ instruction, referenceCount = 0 }) {
@@ -553,6 +359,7 @@ module.exports = {
   buildImageToSketchPrompt,
   buildImageToSketchRefinePrompt,
   buildSketchToImagePrompt,
+  buildSketchVariationPrompt,
   buildSketchToImageRefinePrompt,
   SKETCH_ANALYSIS_PROMPT,
 };
