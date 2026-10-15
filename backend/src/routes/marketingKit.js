@@ -3,8 +3,16 @@ const { requireAuth, requirePermission } = require("../middleware/auth");
 const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri, resolveInlineImage } = require("../generationService");
 const { queueGeneration, parseImages } = require("./queueGeneration");
-const { BRAND_STORY_JOB, AFFINITY_JOB, CAMPAIGN_KIT_JOB } = require("../jobs/marketingKit");
+const {
+  BRAND_STORY_JOB,
+  AFFINITY_JOB,
+  COLLECTION_STORY_JOB,
+  CAMPAIGN_KIT_JOB,
+  FESTIVE_POSTER_JOB,
+} = require("../jobs/marketingKit");
 const { BRAND_STORY_TONES, BRAND_STORY_LENGTHS } = require("../prompts/marketingKit");
+const { FESTIVE_EVENT_IDS, FESTIVE_ASPECT_RATIOS, POSTER_FONT_IDS, eventLabel } = require("../prompts/festivePoster");
+const { clampCount } = require("../jobs/generationRunner");
 const { MARKETING_KIT_TYPES } = require("../models/marketingKit");
 const kits = require("../services/marketingKits");
 const lifestyleModels = require("../services/lifestyleModels");
@@ -16,6 +24,13 @@ router.use(requireAuth, requirePermission("tool.marketing_kit.run"));
 
 /** Eight pieces is where the model's attention — and its token budget — runs out. */
 const MAX_AFFINITY_ITEMS = 8;
+/**
+ * Collection Story splits its pieces into categories, each read as its own
+ * small set, so it carries more in one run — and the body limit, not the
+ * model, is what bounds it (sheet pages travel as compressed JPEGs) — so
+ * there is no count cap here.
+ */
+const MAX_COLLECTION_ITEMS = Infinity;
 
 /*
  * ── Brand Story ─────────────────────────────────────────────────────────────
@@ -61,18 +76,33 @@ router.post("/brand-story", async (req, res) => {
  * ── Affinity ────────────────────────────────────────────────────────────────
  */
 
-router.post("/affinity", async (req, res) => {
+/*
+ * Collection Story is Affinity under its own name: the same request, its own
+ * job type and kit kind (see jobs/marketingKit.js).
+ */
+router.post("/affinity", (req, res) => queueAffinityRun(req, res, { type: AFFINITY_JOB, kind: "affinity", name: "Affinity deck" }));
+router.post("/collection-story", (req, res) =>
+  queueAffinityRun(req, res, { type: COLLECTION_STORY_JOB, kind: "collection_story", name: "Collection Story" })
+);
+
+async function queueAffinityRun(req, res, { type, kind, name }) {
   const { items, preview, conversationId } = req.body || {};
+  const max = kind === "collection_story" ? MAX_COLLECTION_ITEMS : MAX_AFFINITY_ITEMS;
 
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ status: "error", message: "no pieces provided", code: "invalid" });
   }
-  if (items.length > MAX_AFFINITY_ITEMS) {
+  if (items.length > max) {
     return res.status(400).json({
       status: "error",
-      message: `upload at most ${MAX_AFFINITY_ITEMS} pieces at a time`,
+      message: `upload at most ${max} pieces at a time`,
       code: "too_many_items",
     });
+  }
+
+  const categories = kind === "collection_story" ? readCategories(req.body?.categories, items.length) : [];
+  if (categories === null) {
+    return res.status(400).json({ status: "error", message: "every piece must be in at least one category", code: "invalid" });
   }
 
   // Parsed here so the worker never re-parses a data URI, and so a piece
@@ -88,21 +118,54 @@ router.post("/affinity", async (req, res) => {
   }
 
   return queueGeneration(req, res, {
-    type: AFFINITY_JOB,
+    type,
     tool: "marketing_kit",
     request: {
       provider: "gemini",
       model: "gemini-2.5-pro",
       modelLabel: "Sparkle 2.5 Pro",
-      kind: "affinity",
+      kind,
       itemCount: parsedItems.length,
       withSheets: parsedItems.filter((item) => item.sheetImages.length || item.sheetExcelText.length).length,
+      ...(categories.length ? { categoryCount: categories.length } : {}),
     },
-    payload: { items: parsedItems, conversationId: conversationId || null },
+    payload: { items: parsedItems, categories, conversationId: conversationId || null },
     preview,
-    message: `queued an Affinity deck (${parsedItems.length} piece${parsedItems.length > 1 ? "s" : ""})`,
+    message: `queued a ${name} (${parsedItems.length} piece${parsedItems.length > 1 ? "s" : ""})`,
   });
-});
+}
+
+/**
+ * Collection Story's groups, checked: each `{ label, pieceIndexes, coverIndex }`
+ * names pieces by their position in `items`, every piece is in at least one
+ * group (and may be in several), and a group's cover is one of its own pieces. Empty or absent means
+ * "one group". Null when the groups don't add up.
+ */
+function readCategories(value, itemCount) {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  const seen = new Set();
+  const categories = [];
+
+  for (const entry of value.slice(0, itemCount)) {
+    const pieceIndexes = (Array.isArray(entry?.pieceIndexes) ? entry.pieceIndexes : [])
+      .map(Number)
+      .filter((index) => Number.isInteger(index) && index >= 0 && index < itemCount);
+    if (pieceIndexes.length === 0) continue;
+    // A piece may sit in more than one group; it just has to be in at least one.
+    for (const index of pieceIndexes) seen.add(index);
+    const cover = Number(entry.coverIndex);
+    categories.push({
+      // The person's grouping name — a hint for the model, which writes the real one.
+      label: typeof entry.label === "string" ? entry.label.trim().slice(0, 100) : "",
+      pieceIndexes,
+      coverIndex: pieceIndexes.includes(cover) ? cover : pieceIndexes[0],
+    });
+  }
+
+  if (seen.size !== itemCount) return null;
+  // One group is just the plain deck — no category covers needed.
+  return categories.length > 1 ? categories : [];
+}
 
 /*
  * ── Campaign Kit ────────────────────────────────────────────────────────────
@@ -221,6 +284,139 @@ router.post("/campaign", async (req, res) => {
   });
 });
 
+/*
+ * ── Festive Poster ──────────────────────────────────────────────────────────
+ */
+
+/** Six is where every piece can still be seen clearly in one frame. */
+const MAX_FESTIVE_PIECES = 6;
+/** Each variation is a separately charged image. */
+const MAX_FESTIVE_VARIATIONS = 4;
+
+/** The poster's words and title font, cleaned — or null for a poster with no text. */
+function readPosterText(value) {
+  const line = (entry, max) => (typeof entry === "string" ? entry.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  // Asked for with every line left empty is still a poster with text: the
+  // model writes the words itself (see textBlock in prompts/festivePoster.js).
+  if (!value || value.enabled === false) return null;
+  const headline = line(value.headline, 60);
+  return {
+    headline,
+    subtitle: line(value.subtitle, 60),
+    tagline: line(value.tagline, 90),
+    font: POSTER_FONT_IDS.includes(value.font) ? value.font : "surprise",
+    placement: ["left", "center", "right"].includes(value.placement) ? value.placement : "center",
+  };
+}
+
+router.post("/festive", async (req, res) => {
+  const {
+    jewelryImages,
+    event,
+    customEvent,
+    description,
+    aspect,
+    count,
+    model: requestedModel,
+    quality: requestedQuality,
+    refineImage,
+    referenceImages,
+    instruction,
+    displayPrompt,
+    conversationId,
+    parentGenerationId,
+    preview,
+  } = req.body || {};
+
+  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
+
+  // Retouching one poster costs one image and edits it — no new kit.
+  if (refineImage && instruction) {
+    const parsed = parseDataUri(refineImage);
+    if (!parsed) {
+      return res.status(400).json({ status: "error", message: "refine image must be a data URI", code: "invalid" });
+    }
+    const references = parseImages(referenceImages);
+
+    return queueGeneration(req, res, {
+      type: FESTIVE_POSTER_JOB,
+      tool: "marketing_kit",
+      request: { provider, model, modelLabel, quality, kind: "festive", isRefinement: true, conversationId: conversationId || null },
+      payload: {
+        isRefinement: true,
+        refineImage: parsed,
+        references,
+        instruction,
+        displayPrompt,
+        requestedModel,
+        requestedQuality,
+        conversationId,
+        parentGenerationId,
+      },
+      message: `queued a Festive Poster retouch on ${modelLabel}`,
+    });
+  }
+
+  const pieces = parseImages(jewelryImages);
+  if (pieces.length === 0) {
+    return res.status(400).json({ status: "error", message: "add at least one jewellery photo", code: "invalid" });
+  }
+  if (pieces.length > MAX_FESTIVE_PIECES) {
+    return res.status(400).json({
+      status: "error",
+      message: `use at most ${MAX_FESTIVE_PIECES} pieces in one poster`,
+      code: "too_many_items",
+    });
+  }
+
+  const custom = typeof customEvent === "string" ? customEvent.trim().slice(0, 200) : "";
+  if (!custom && !FESTIVE_EVENT_IDS.includes(event)) {
+    return res.status(400).json({ status: "error", message: "choose an event, or type your own", code: "invalid" });
+  }
+
+  const options = {
+    eventId: custom ? null : event,
+    customEvent: custom || null,
+    description: typeof description === "string" ? description.slice(0, 1000) : "",
+    aspect: Object.hasOwn(FESTIVE_ASPECT_RATIOS, aspect) ? aspect : "square",
+    text: readPosterText(req.body?.text),
+  };
+  const variations = Math.min(MAX_FESTIVE_VARIATIONS, clampCount(count, 1));
+
+  return queueGeneration(req, res, {
+    type: FESTIVE_POSTER_JOB,
+    tool: "marketing_kit",
+    preview,
+    request: {
+      provider,
+      model,
+      modelLabel,
+      quality,
+      kind: "festive",
+      isRefinement: false,
+      event: eventLabel(options),
+      jewelryCount: pieces.length,
+      aspect: options.aspect,
+      count: variations,
+      conversationId: conversationId || null,
+    },
+    payload: {
+      isRefinement: false,
+      sourceImages: pieces,
+      options,
+      count: variations,
+      defaultCount: 1,
+      // The frame shape itself, not only the words — see gemini generateImage.
+      aspectRatio: FESTIVE_ASPECT_RATIOS[options.aspect],
+      userPrompt: `${eventLabel(options)} poster${options.description ? ` — ${options.description}` : ""}`,
+      requestedModel,
+      requestedQuality,
+      conversationId: conversationId || null,
+    },
+    message: `queued a ${eventLabel(options)} poster (${variations} image${variations > 1 ? "s" : ""}) on ${modelLabel}`,
+  });
+});
+
 /** At most two picks per option — one per shot in its pair. */
 function asIdList(value) {
   return (Array.isArray(value) ? value : []).filter((id) => typeof id === "string").slice(0, 2);
@@ -244,6 +440,19 @@ async function resolveBaseModel({ dbUser, modelNumber, modelId, modelImage }) {
   }
   return null;
 }
+
+/*
+ * ── Setting codes ───────────────────────────────────────────────────────────
+ * The table the catalog copy decodes sheet setting codes with, so the upload
+ * preview can show a sheet's settings in the same words the deck will use.
+ */
+const SETTING_CODE_NAMES = Object.fromEntries(require("../prompts/settingCodes.json").map((entry) => [entry.code, entry.brief]));
+
+router.get("/setting-codes", (req, res) => {
+  // Static for the life of the process; let the browser keep it a day.
+  res.set("Cache-Control", "private, max-age=86400");
+  res.json({ status: "success", codes: SETTING_CODE_NAMES });
+});
 
 /*
  * ── Saved kits ──────────────────────────────────────────────────────────────
@@ -274,7 +483,15 @@ router.get("/kits/:id", async (req, res) => {
 });
 
 router.patch("/kits/:id", async (req, res) => {
-  const kit = await kits.updateKit({ dbUser: req.dbUser, id: req.params.id, changes: req.body || {} });
+  let kit;
+  try {
+    kit = await kits.updateKit({ dbUser: req.dbUser, id: req.params.id, changes: req.body || {} });
+  } catch (err) {
+    if (err.code === "design_too_large") return res.status(413).json({ status: "error", message: err.message, code: err.code });
+    // Express 4 does not catch a rejected handler, so answer here rather than leave the request hanging.
+    console.error("[marketing-kit] update failed:", err);
+    return res.status(500).json({ status: "error", message: "Could not save that edit", code: "server_error" });
+  }
   if (!kit) return res.status(404).json({ status: "error", message: "kit not found", code: "not_found" });
   res.json({ status: "success", kit });
 });

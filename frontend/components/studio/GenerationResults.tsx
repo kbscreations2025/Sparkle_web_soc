@@ -30,6 +30,7 @@ export function GenerationResults<TModel extends string>({
   resetLabel = "Start over",
   downloadName = "generated.png",
   modelLabel,
+  checkerboard,
 }: {
   workspace: ReturnType<typeof useGenerationWorkspace>;
   modelOptions: readonly {
@@ -50,6 +51,8 @@ export function GenerationResults<TModel extends string>({
   downloadName?: string;
   /** Shown as a badge beside the result count. */
   modelLabel?: string;
+  /** Show results over a checkerboard — for a tool whose results can be transparent. */
+  checkerboard?: boolean;
 }) {
   const {
     images,
@@ -156,6 +159,7 @@ export function GenerationResults<TModel extends string>({
               busyLabel={busyLabel}
               emptyLabel="Nothing yet"
               downloadName={downloadName}
+              checkerboard={checkerboard}
               onExpand={annotating ? undefined : setLightboxSrc}
               // Marking up an image only makes sense as the start of a turn.
               onAnnotate={readOnly || annotating || !displayImg ? undefined : (src) => setAnnotating({ src, target: "stage" })}

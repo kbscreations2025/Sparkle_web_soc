@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Gem, LayoutGrid, Newspaper } from "lucide-react";
+import { ArrowRight, BookOpen, CalendarHeart, Gem, LayoutGrid, Newspaper } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
@@ -9,8 +9,8 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 const PERMISSION = "tool.marketing_kit.run";
 
 /**
- * Marketing Kit's three surfaces. Kits already made are reached through
- * History rather than a rail here.
+ * Marketing Kit's surfaces. Kits already made are reached through History
+ * rather than a rail here.
  */
 const SURFACES = [
   {
@@ -33,6 +33,20 @@ const SURFACES = [
     tagline: "A model and your jewellery · two lifestyle shots and two studio shots",
     href: "/marketing-kit/campaign",
     Icon: Newspaper,
+  },
+  {
+    id: "collection-story",
+    label: "Collection Story",
+    tagline: "Several pieces, each with its own sheet · the story and catalog copy for the collection",
+    href: "/marketing-kit/collection-story",
+    Icon: BookOpen,
+  },
+  {
+    id: "festive",
+    label: "Festive Poster",
+    tagline: "Up to six pieces in one poster · styled for Mother's Day, Christmas, Diwali and more",
+    href: "/marketing-kit/festive",
+    Icon: CalendarHeart,
   },
 ];
 

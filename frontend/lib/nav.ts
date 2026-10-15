@@ -126,6 +126,15 @@ export const TOOLS: Tool[] = [
     href: "/chat-to-edit",
     permission: "tool.chat_to_edit.run",
   },
+  {
+    id: "product_background",
+    label: "Product Background",
+    icon: Package,
+    description: "Transparent, white, any colour or a styled scene",
+    image: "/dashboard/product-background.jpg",
+    href: "/product-background",
+    permission: "tool.product_background.run",
+  },
 ];
 
 /** The nav rail: every tool, plus History — which is a page, not a tool, so it has no card. */
@@ -174,6 +183,7 @@ const TOOL_COLORS: Record<string, string> = {
   image_to_sketch: "350 55% 62%",
   marketing_kit: "20 70% 58%",
   chat_to_edit: "285 50% 62%",
+  product_background: "330 45% 60%",
 };
 
 const FALLBACK_TOOL_COLOR = "0 0% 60%";
@@ -220,6 +230,7 @@ export const TOOL_WORKSPACE_PATHS: Record<string, string> = {
   // them a run belongs to is recorded on the kit, not on the conversation,
   // so the picker is the honest place to send someone back to.
   marketing_kit: "/marketing-kit",
+  product_background: "/product-background",
 };
 
 /**
@@ -252,10 +263,4 @@ export function conversationHref(tool: string, conversationId?: string | null, m
  */
 export const UPCOMING_TOOLS: Tool[] = [
   { id: "virtual_try_on", label: "Virtual Try On", icon: Gem, description: "See jewellery on a model instantly" },
-  {
-    id: "product_background",
-    label: "Product Background",
-    icon: Package,
-    description: "Swap backgrounds to any scene",
-  },
 ];

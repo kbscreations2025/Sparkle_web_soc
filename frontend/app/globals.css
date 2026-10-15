@@ -104,6 +104,64 @@
   .thin-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(90,68,40,0.28) transparent; }
 }
 
+/* ---- Opt-in slim slider, for the deck editor's compact panels ----
+   A 3px track with a 10px knob, filled up to the knob in the deck's brown
+   (the fill comes from --fill, set inline to the value's percentage). */
+.slim-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+.slim-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #6b5d42 var(--fill, 50%), rgba(0, 0, 0, 0.12) var(--fill, 50%));
+}
+.slim-range::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.slim-range::-moz-range-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: #6b5d42;
+}
+.slim-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: #6b5d42;
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px rgba(107, 93, 66, 0.35);
+}
+.slim-range::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6b5d42;
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px rgba(107, 93, 66, 0.35);
+}
+
+/* ---- Opt-in slim scroller, for narrow side panels ----
+   A 4px lane with a 2px pill — present enough to show where you are in a
+   long list without eating into a panel that is only ~200px wide. */
+.slim-scrollbar { scrollbar-width: auto; }
+.slim-scrollbar::-webkit-scrollbar { display: block; width: 4px; height: 4px; }
+.slim-scrollbar::-webkit-scrollbar-button { display: none; }
+.slim-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.slim-scrollbar::-webkit-scrollbar-thumb { background: rgba(90,68,40,0.25); border-radius: 999px; }
+.slim-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(160,120,40,0.6); }
+@supports not selector(::-webkit-scrollbar) {
+  .slim-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(90,68,40,0.28) transparent; }
+}
+
 /* ---- Selection ---- */
 ::selection { background: rgba(196,168,106,0.18); color: #DFC07E; }
 
@@ -286,4 +344,42 @@ button, a { transition-property: color, background-color, border-color, opacity,
     break-inside: avoid;
     page-break-inside: avoid;
   }
+
+  /* The deck editor's PDF (components/studio/deck-editor/PrintDeck.tsx): while
+     it is on the page, it is the only thing printed — one 13.333×7.5in slide
+     per sheet, backgrounds and all, exactly as drawn on screen. */
+  body:has(> #deck-print-root) > *:not(#deck-print-root) {
+    display: none !important;
+  }
+  body:has(> #deck-print-root) {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  #deck-print-root {
+    position: static !important;
+    left: auto !important;
+  }
+  #deck-print-root,
+  #deck-print-root * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #deck-print-root .deck-print-page {
+    width: 13.333in;
+    height: 7.5in;
+    overflow: hidden;
+    break-after: page;
+    page-break-after: always;
+  }
+  #deck-print-root .deck-print-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
+
+/* Built off-screen while the print dialog is being prepared. */
+#deck-print-root {
+  position: fixed;
+  left: -100000px;
+  top: 0;
 }

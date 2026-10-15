@@ -18,7 +18,7 @@ import {
 } from "@/lib/api";
 import { downloadImage, downloadName } from "@/lib/image";
 import { conversationHref, toolBadgeStyle, TOOL_LABELS, TOOLS, workspacePathFor } from "@/lib/nav";
-import { describeKit, kitHref, KIT_LABEL } from "@/lib/marketingKits";
+import { describeKit, kitBadgeStyle, kitHref, KIT_LABEL } from "@/lib/marketingKits";
 import { usePageToolbar } from "@/lib/page-toolbar-context";
 import { fetchHistoryFacets } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -1353,7 +1353,8 @@ function KitsGrid({
   if (kits.length === 0) {
     return (
       <p className="px-2 py-10 text-center text-sm text-faint">
-        No kits yet — a Brand Story, Affinity deck or Campaign Kit is saved here to reopen and edit.
+        No kits yet — a Brand Story, Affinity deck, Collection Story, Campaign Kit or Festive Poster is saved here to
+        reopen and edit.
       </p>
     );
   }
@@ -1396,7 +1397,7 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
             colour, so a kit is recognisable at a glance in either tab. */}
         <span
           className="max-w-[60%] truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
-          style={toolBadgeStyle("marketing_kit")}
+          style={kitBadgeStyle(kit.kind)}
         >
           {describeKit(kit)}
         </span>
@@ -1873,7 +1874,9 @@ function TypeFilter({
 }
 
 /** The kit kinds, labelled as the rest of the app labels them. */
-const KIND_OPTIONS: FilterOption[] = (["brand_story", "affinity", "campaign"] as const).map((kind) => ({
+const KIND_OPTIONS: FilterOption[] = (
+  ["brand_story", "affinity", "collection_story", "campaign", "festive"] as const
+).map((kind) => ({
   id: kind,
   label: KIT_LABEL[kind],
 }));

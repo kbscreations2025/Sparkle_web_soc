@@ -395,6 +395,8 @@ function toHistoryItem(generation, dbUser) {
      * thing to keep and the wrong thing to read.
      */
     kitId: generation.request?.params?.kitId || null,
+    /** Which surface reopens it. Null on runs recorded before it was stored — those are Affinity decks. */
+    kitKind: generation.request?.params?.kitKind || null,
   };
 }
 

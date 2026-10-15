@@ -10,9 +10,11 @@ import {
   DEFAULT_CARD_SIZE,
   clampCard,
   sourceCodeFallback,
+  splitCategoryEntries,
   splitEntries,
   toSlides,
   type AffinityPiece,
+  type DeckCategory,
   type DeckEntry,
 } from "@/lib/affinity";
 
@@ -40,6 +42,7 @@ export function AffinityDeck({
   items,
   pieces,
   coverSplit: coverSplitProp = 60,
+  categories = [],
   onChange,
 }: {
   collectionName: string;
@@ -47,16 +50,22 @@ export function AffinityDeck({
   items: AffinityItem[];
   pieces: AffinityPiece[];
   coverSplit?: number;
+  /**
+   * Collection Story's groups. With them, each category is its own chapter —
+   * a cover with its own name, tagline and chosen photo, then its Existing
+   * and New Ideation slides — in place of the one collection cover.
+   */
+  categories?: DeckCategory[];
   onChange?: (patch: {
     collectionName?: string;
     tagline?: string;
     items?: AffinityItem[];
     coverSplit?: number;
+    categories?: DeckCategory[];
   }) => void;
 }) {
   const editable = Boolean(onChange);
   const [coverSplit, setCoverSplit] = useState(coverSplitProp);
-  const coverRef = useRef<HTMLDivElement>(null);
 
   const hero = pieces.find((piece) => piece.image)?.image;
   const { existing, ideation } = splitEntries(items, pieces);
@@ -71,30 +80,17 @@ export function AffinityDeck({
     onChange?.({ items: next });
   }
 
-  /** Drags the divider between the cover's text panel and its hero image. */
-  function onCoverDividerDown(event: ReactPointerEvent) {
-    if (!editable) return;
-    event.preventDefault();
-    const element = coverRef.current;
-    if (!element) return;
-
-    const move = (moveEvent: PointerEvent) => {
-      const rect = element.getBoundingClientRect();
-      setCoverSplit(Math.min(80, Math.max(20, ((moveEvent.clientX - rect.left) / rect.width) * 100)));
-    };
-    const up = (upEvent: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      const rect = element.getBoundingClientRect();
-      // Committed once on release rather than on every frame — a drag is one
-      // edit, not sixty.
-      onChange?.({
-        coverSplit: Math.min(80, Math.max(20, ((upEvent.clientX - rect.left) / rect.width) * 100)),
-      });
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+  function updateCategory(position: number, patch: Partial<DeckCategory>) {
+    onChange?.({ categories: categories.map((category, i) => (i === position ? { ...category, ...patch } : category)) });
   }
+
+  // The divider position is shared by every cover, so the chapters match.
+  const coverProps = {
+    split: coverSplit,
+    editable,
+    onSplitMove: setCoverSplit,
+    onSplitCommit: (split: number) => onChange?.({ coverSplit: split }),
+  };
 
   return (
     <div id="affinity-print-area" className="mx-auto max-w-[1400px] space-y-8">
@@ -106,79 +102,174 @@ export function AffinityDeck({
         </p>
       )}
 
-      {/* The cover, at the real 16:9 slide ratio so the preview is the export. */}
-      <div
-        ref={coverRef}
-        className="group/cover relative aspect-[16/9] w-full overflow-hidden"
-        style={{ background: DECK.cream, border: `1px solid ${DECK.borderGold}`, borderRadius: 4 }}
-      >
-        <Sparkle size={20} className="absolute right-8 top-6" />
-        <Sparkle size={14} className="absolute bottom-10 left-10 opacity-70" />
-
-        <div className="grid h-full" style={{ gridTemplateColumns: `${coverSplit}% ${100 - coverSplit}%` }}>
-          <div className="flex min-w-0 flex-col justify-center px-6 py-6 md:px-12 md:py-10">
-            <Editable
-              as="h1"
-              value={collectionName}
-              editable={editable}
-              onCommit={(value) => onChange?.({ collectionName: value })}
-              className="-mx-1 mb-4 px-1 text-2xl leading-snug md:text-5xl"
-              style={{ fontFamily: "Cambria, Georgia, serif", color: DECK.titleGold }}
-            />
-            <div className="mb-4 flex items-center gap-2">
-              <span className="h-px w-10 md:w-16" style={{ background: DECK.borderGold }} />
-              <span style={{ color: DECK.borderGold, fontSize: 10 }}>◆</span>
-              <span className="h-px w-10 md:w-16" style={{ background: DECK.borderGold }} />
+      {categories.length > 0 ? (
+        categories.map((category, position) => {
+          const sections = splitCategoryEntries(items, pieces, category);
+          return (
+            <div key={position} className="space-y-8">
+              <CoverSlide
+                {...coverProps}
+                name={category.name}
+                tagline={category.tagline}
+                image={pieces[category.coverIndex]?.image ?? pieces[category.pieceIndexes[0]]?.image}
+                onName={(name) => updateCategory(position, { name })}
+                onTagline={(value) => updateCategory(position, { tagline: value })}
+              />
+              <DeckSection
+                label="Existing style"
+                chapter={category.name}
+                section="existing"
+                entries={sections.existing}
+                editable={editable}
+                onUpdateItem={updateItem}
+                onSwap={swapItems}
+              />
+              <DeckSection
+                label="New Ideation"
+                chapter={category.name}
+                section="ideation"
+                entries={sections.ideation}
+                editable={editable}
+                onUpdateItem={updateItem}
+                onSwap={swapItems}
+              />
             </div>
-            <Editable
-              value={tagline}
-              editable={editable}
-              onCommit={(value) => onChange?.({ tagline: value })}
-              className="-mx-1 px-1 text-[10px] uppercase tracking-[0.28em] md:text-xs"
-              style={{ color: DECK.ink }}
-            />
-          </div>
+          );
+        })
+      ) : (
+        <>
+          <CoverSlide
+            {...coverProps}
+            name={collectionName}
+            tagline={tagline}
+            image={hero}
+            onName={(value) => onChange?.({ collectionName: value })}
+            onTagline={(value) => onChange?.({ tagline: value })}
+          />
+          <DeckSection
+            label="Existing style"
+            section="existing"
+            entries={existing}
+            editable={editable}
+            onUpdateItem={updateItem}
+            onSwap={swapItems}
+          />
+          <DeckSection
+            label="New Ideation"
+            section="ideation"
+            entries={ideation}
+            editable={editable}
+            onUpdateItem={updateItem}
+            onSwap={swapItems}
+          />
+        </>
+      )}
+    </div>
+  );
+}
 
-          <div className="relative">
-            {hero ? (
-              /* eslint-disable-next-line @next/next/no-img-element -- fixed deck geometry; next/image's sizing fights the slide ratio */
-              <img src={hero} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <Gem size={32} style={{ color: DECK.borderGold }} />
-              </div>
-            )}
+/** A cover, at the real 16:9 slide ratio so the preview is the export — the collection's, or one category's. */
+function CoverSlide({
+  name,
+  tagline,
+  image,
+  split,
+  editable,
+  onName,
+  onTagline,
+  onSplitMove,
+  onSplitCommit,
+}: {
+  name: string;
+  tagline: string;
+  image?: string;
+  split: number;
+  editable: boolean;
+  onName: (value: string) => void;
+  onTagline: (value: string) => void;
+  onSplitMove: (split: number) => void;
+  onSplitCommit: (split: number) => void;
+}) {
+  const coverRef = useRef<HTMLDivElement>(null);
+
+  /** Drags the divider between the cover's text panel and its hero image. */
+  function onCoverDividerDown(event: ReactPointerEvent) {
+    if (!editable) return;
+    event.preventDefault();
+    const element = coverRef.current;
+    if (!element) return;
+
+    const at = (pointerEvent: PointerEvent) => {
+      const rect = element.getBoundingClientRect();
+      return Math.min(80, Math.max(20, ((pointerEvent.clientX - rect.left) / rect.width) * 100));
+    };
+    const move = (moveEvent: PointerEvent) => onSplitMove(at(moveEvent));
+    const up = (upEvent: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      // Committed once on release rather than on every frame — a drag is one
+      // edit, not sixty.
+      onSplitCommit(at(upEvent));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  return (
+    <div
+      ref={coverRef}
+      className="group/cover relative aspect-[16/9] w-full overflow-hidden"
+      style={{ background: DECK.cream, border: `1px solid ${DECK.borderGold}`, borderRadius: 4 }}
+    >
+      <Sparkle size={20} className="absolute right-8 top-6" />
+      <Sparkle size={14} className="absolute bottom-10 left-10 opacity-70" />
+
+      <div className="grid h-full" style={{ gridTemplateColumns: `${split}% ${100 - split}%` }}>
+        <div className="flex min-w-0 flex-col justify-center px-6 py-6 md:px-12 md:py-10">
+          <Editable
+            as="h1"
+            value={name}
+            editable={editable}
+            onCommit={onName}
+            className="-mx-1 mb-4 px-1 text-2xl leading-snug md:text-5xl"
+            style={{ fontFamily: "Cambria, Georgia, serif", color: DECK.titleGold }}
+          />
+          <div className="mb-4 flex items-center gap-2">
+            <span className="h-px w-10 md:w-16" style={{ background: DECK.borderGold }} />
+            <span style={{ color: DECK.borderGold, fontSize: 10 }}>◆</span>
+            <span className="h-px w-10 md:w-16" style={{ background: DECK.borderGold }} />
           </div>
+          <Editable
+            value={tagline}
+            editable={editable}
+            onCommit={onTagline}
+            className="-mx-1 px-1 text-[10px] uppercase tracking-[0.28em] md:text-xs"
+            style={{ color: DECK.ink }}
+          />
         </div>
 
-        {editable && (
-          <div
-            onPointerDown={onCoverDividerDown}
-            title="Drag to resize"
-            className="absolute bottom-0 top-0 z-10 -ml-2 flex w-4 cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/cover:opacity-100"
-            style={{ left: `${coverSplit}%` }}
-          >
-            <span className="h-10 w-1 rounded-full bg-black/20" />
-          </div>
-        )}
+        <div className="relative">
+          {image ? (
+            /* eslint-disable-next-line @next/next/no-img-element -- fixed deck geometry; next/image's sizing fights the slide ratio */
+            <img src={image} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <Gem size={32} style={{ color: DECK.borderGold }} />
+            </div>
+          )}
+        </div>
       </div>
 
-      <DeckSection
-        label="Existing style"
-        section="existing"
-        entries={existing}
-        editable={editable}
-        onUpdateItem={updateItem}
-        onSwap={swapItems}
-      />
-      <DeckSection
-        label="New Ideation"
-        section="ideation"
-        entries={ideation}
-        editable={editable}
-        onUpdateItem={updateItem}
-        onSwap={swapItems}
-      />
+      {editable && (
+        <div
+          onPointerDown={onCoverDividerDown}
+          title="Drag to resize"
+          className="absolute bottom-0 top-0 z-10 -ml-2 flex w-4 cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/cover:opacity-100"
+          style={{ left: `${split}%` }}
+        >
+          <span className="h-10 w-1 rounded-full bg-black/20" />
+        </div>
+      )}
     </div>
   );
 }
@@ -186,6 +277,7 @@ export function AffinityDeck({
 /** One half of the catalog, broken into slide-sized pages. */
 function DeckSection({
   label,
+  chapter,
   section,
   entries,
   editable,
@@ -193,6 +285,8 @@ function DeckSection({
   onSwap,
 }: {
   label: string;
+  /** The category these slides belong to, shown top-left so a printed page says whose it is. */
+  chapter?: string;
   section: "existing" | "ideation";
   entries: DeckEntry[];
   editable: boolean;
@@ -210,6 +304,14 @@ function DeckSection({
           className="relative aspect-[16/9] w-full overflow-auto bg-white px-5 py-6 md:px-10 md:py-8"
           style={{ border: `1px solid ${DECK.borderGold}` }}
         >
+          {chapter && (
+            <p
+              className="absolute left-5 top-4 text-[10px] uppercase tracking-[0.28em] md:left-10 md:top-7 md:text-xs"
+              style={{ color: DECK.titleGold }}
+            >
+              {chapter}
+            </p>
+          )}
           <p
             className="absolute right-5 top-4 text-sm italic md:right-8 md:top-6 md:text-lg"
             style={{ fontFamily: "Cambria, Georgia, serif", color: DECK.ink }}

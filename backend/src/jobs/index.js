@@ -11,6 +11,7 @@ require("./lifestyle");
 require("./imageToText");
 require("./imageToVideo");
 require("./marketingKit");
+require("./productBackground");
 
 module.exports = {
   CLEANING_JOB: require("./cleaning").CLEANING_JOB,
@@ -20,4 +21,5 @@ module.exports = {
   ...require("./imageToText"),
   ...require("./imageToVideo"),
   ...require("./marketingKit"),
+  ...require("./productBackground"),
 };

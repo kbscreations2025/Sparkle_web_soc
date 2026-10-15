@@ -19,6 +19,7 @@ export function GenerationStage({
   downloadName,
   onExpand,
   onAnnotate,
+  checkerboard,
 }: {
   src: string | null;
   alt?: string;
@@ -31,9 +32,22 @@ export function GenerationStage({
   onExpand?: (src: string) => void;
   /** Omit to hide the annotate button. */
   onAnnotate?: (src: string) => void;
+  /**
+   * Draw the image over a checkerboard, so a transparent result reads as
+   * transparent — on the plain stage a cutout's clear background would just
+   * look like the app's own backdrop.
+   */
+  checkerboard?: boolean;
 }) {
   return (
-    <div className="relative flex h-full min-h-[320px] items-center justify-center overflow-hidden">
+    <div
+      className="relative flex h-full min-h-[320px] items-center justify-center overflow-hidden"
+      style={
+        checkerboard && src
+          ? { background: "repeating-conic-gradient(#e6e1d9 0% 25%, #faf8f5 0% 50%) 50% / 22px 22px" }
+          : undefined
+      }
+    >
       {src && (
         <Image
           src={src}

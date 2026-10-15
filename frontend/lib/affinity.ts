@@ -33,6 +33,11 @@ export type AffinityPiece = {
    * a sheet is an existing style and carries its own printed code.
    */
   designerInitial: string;
+  /**
+   * New Ideation only: the person's own words for the piece, typed at upload.
+   * Never sent to the model — it is placed as the caption once the deck is back.
+   */
+  note?: string;
 };
 
 /**
@@ -57,6 +62,12 @@ export function newPiece(): AffinityPiece {
   };
 }
 
+/**
+ * Collection Story: one group of pieces, with its own cover slide and its own
+ * Existing / New Ideation slides. Indexes point into the piece list.
+ */
+export type DeckCategory = { name: string; tagline: string; coverIndex: number; pieceIndexes: number[] };
+
 /** One catalog entry paired with the piece it describes. */
 export type DeckEntry = { item: AffinityItem; index: number; piece?: AffinityPiece };
 
@@ -75,6 +86,13 @@ export function splitEntries(items: AffinityItem[], pieces: AffinityPiece[]) {
     existing: entries.filter((entry) => hasProductionSheet(entry.piece)),
     ideation: entries.filter((entry) => !hasProductionSheet(entry.piece)),
   };
+}
+
+/** The same split, narrowed to one category's pieces. */
+export function splitCategoryEntries(items: AffinityItem[], pieces: AffinityPiece[], category: DeckCategory) {
+  const inCategory = (entry: DeckEntry) => category.pieceIndexes.includes(entry.item.index ?? entry.index);
+  const { existing, ideation } = splitEntries(items, pieces);
+  return { existing: existing.filter(inCategory), ideation: ideation.filter(inCategory) };
 }
 
 /** Breaks a section into slide-sized chunks. */

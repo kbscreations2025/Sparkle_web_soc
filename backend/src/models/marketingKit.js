@@ -15,7 +15,16 @@ const mongoose = require("mongoose");
  * inline and would breach MongoDB's 16MB document ceiling outright.
  */
 
-const MARKETING_KIT_TYPES = ["brand_story", "affinity", "campaign"];
+/*
+ * Two of these share another kind's document shape rather than adding one:
+ *   · `collection_story` is Affinity under its own name — same pieces, same
+ *     catalog copy — and lives in `affinity`.
+ *   · `festive` is a set of event posters made from several pieces, which is a
+ *     Campaign Kit's shape (inputs + generated shots) without the model photo,
+ *     and lives in `campaign`.
+ * Readers key off which sub-document is present, not off `kind`.
+ */
+const MARKETING_KIT_TYPES = ["brand_story", "affinity", "campaign", "collection_story", "festive"];
 const MARKETING_KIT_STATUSES = ["draft", "ready", "failed"];
 const MARKETING_KIT_IMAGE_ROLES = ["product", "sheet", "model"];
 
@@ -116,15 +125,39 @@ const brandStorySchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * Collection Story only — one named group of pieces, with its own cover slide
+ * and its own Existing / New Ideation slides. Indexes point into `pieces`.
+ */
+const collectionCategorySchema = new mongoose.Schema(
+  {
+    name: { type: String, default: "", maxlength: 300 },
+    tagline: { type: String, default: "", maxlength: 500 },
+    /** The piece whose photo is the category's cover. */
+    coverIndex: { type: Number, default: 0 },
+    pieceIndexes: { type: [Number], default: [] },
+  },
+  { _id: false }
+);
+
 const affinitySchema = new mongoose.Schema(
   {
     pieces: { type: [pieceSchema], default: [] },
+    /** Empty for Affinity and for a one-group Collection Story: the deck is then one cover and its sections. */
+    categories: { type: [collectionCategorySchema], default: [] },
     collectionName: { type: String, default: "", maxlength: 300 },
     tagline: { type: String, default: "", maxlength: 500 },
     /** The cover slide's draggable split, as a percentage. Document state, not a preference. */
     coverSplit: { type: Number, default: 50, min: 0, max: 100 },
     items: { type: [affinityItemSchema], default: [] },
     originalItems: { type: [affinityItemSchema], default: [] },
+    /**
+     * The deck as the person has arranged it in the editor: slides of freely
+     * placed text, pictures and shapes (see frontend lib/deckDesign.ts). Null
+     * until the deck is first opened in the editor, which lays the copy above
+     * out into slides. Stored whole — it is one document, edited as one.
+     */
+    design: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { _id: false }
 );

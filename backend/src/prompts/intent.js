@@ -519,6 +519,9 @@ const TOOL_PROFILES = {
   cleaning: { designTool: false, medium: "photo", maxExplore: 1 },
   life_style: { designTool: false, medium: "scene", maxExplore: 3 },
   marketing_kit: { designTool: false, medium: "scene", maxExplore: 1 },
+  // Works on the customer's real piece, like cleaning: a follow-up changes
+  // what is around it and never redesigns it.
+  product_background: { designTool: false, medium: "scene", maxExplore: 1 },
 };
 
 const DEFAULT_PROFILE = { designTool: true, medium: "photo", maxExplore: 1 };

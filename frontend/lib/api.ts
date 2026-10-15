@@ -1,3 +1,5 @@
+import type { DeckCategory } from "./affinity";
+
 export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
 
 export type ApiUser = {
@@ -785,7 +787,7 @@ export type QueuedJob = {
     /** What a text-out tool produced — Image to Text, and Brand Story. */
     text?: string;
     /** Affinity's parsed catalog copy. */
-    result?: { collectionName: string; tagline: string; items: AffinityItem[] };
+    result?: { collectionName: string; tagline: string; items: AffinityItem[]; categories?: DeckCategory[] };
     /** The saved document a Marketing Kit run wrote, so the page can open it. */
     kitId?: string | null;
     /** The model a Lifestyle model-generation run saved to the library. */
@@ -1056,6 +1058,53 @@ export function imageToSketch(body: {
   return apiRequest<QueuedResult>("/api/image-to-sketch", { method: "POST", body: JSON.stringify(body) });
 }
 
+// ── product background ───────────────────────────────────────────────────────
+
+/**
+ * What goes behind the piece. Transparent, white and a colour are cut out of
+ * the photo's own pixels and laid on exactly (no model redraws the piece); a
+ * theme is an image model placing it into a scene. See the backend's
+ * routes/productBackground.js.
+ */
+export type ProductBackgroundChoice =
+  | { kind: "transparent" }
+  | { kind: "white" }
+  | { kind: "color"; hex: string }
+  | { kind: "theme"; theme: string; prompt?: string };
+
+/** "none", the photo's own contact shadow, or a soft shadow drawn from the piece's outline. */
+export type ProductShadow = "none" | "natural" | "soft";
+
+/** Keep the photo's frame, or centre the piece on a square with an even margin. */
+export type ProductFraming = "original" | "square";
+
+export type ProductBackgroundTheme = { id: string; label: string; hint: string };
+
+/** The scene presets — the prompt wording stays on the server. */
+export function fetchProductBackgroundThemes() {
+  return apiRequest<{ themes: ProductBackgroundTheme[] }>("/api/product-background/themes");
+}
+
+export function productBackground(body: {
+  image: string;
+  background: ProductBackgroundChoice;
+  shadow?: ProductShadow;
+  framing?: ProductFraming;
+  /** A scene's own backdrop photo, as a data URI — the piece is placed into it. */
+  backdropImage?: string;
+  /** Scenes only: a `CLEANING_MODELS` id and its output size. */
+  model?: string;
+  quality?: string;
+  /** Scenes only: versions of the same scene, 1–4. */
+  count?: number;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/product-background", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** A follow-up on a Product Background result. */
+export const refineProductBackground = refineOn<string>("/api/product-background");
+
 // ── lifestyle ────────────────────────────────────────────────────────────────
 
 /** A saved model photo — the person jewellery gets placed onto. */
@@ -1311,7 +1360,11 @@ export function imageToVideo(body: {
 
 // ── marketing kit ────────────────────────────────────────────────────────────
 
-export type MarketingKitKind = "brand_story" | "affinity" | "campaign";
+/**
+ * `collection_story` is an Affinity deck under its own name, and `festive` a
+ * set of event posters — they arrive in the `affinity` and `campaign` fields.
+ */
+export type MarketingKitKind = "brand_story" | "affinity" | "campaign" | "collection_story" | "festive";
 
 /** One entry in the saved-kits rail. Summaries only — a full kit is large. */
 export type MarketingKitSummary = {
@@ -1374,8 +1427,12 @@ export type MarketingKit = MarketingKitSummary & {
     collectionName: string;
     tagline: string;
     coverSplit: number;
+    /** Collection Story's groups; empty for Affinity and a one-group story. */
+    categories?: DeckCategory[];
     items: AffinityItem[];
     originalItems: AffinityItem[];
+    /** The editor's layout of the deck; null until it is first opened in the editor. */
+    design?: unknown;
     pieces: {
       index: number;
       productImage: MarketingKitImage | null;
@@ -1395,9 +1452,10 @@ export type MarketingKit = MarketingKitSummary & {
   } | null;
 };
 
-/** One of a Campaign Kit's four shots. Points at an Asset, not its own copy. */
+/** One of a Campaign Kit's four shots (or a Festive kit's posters). Points at an Asset, not its own copy. */
 export type CampaignShot = {
-  id: "lifestyleWarm" | "lifestyleDramatic" | "studioClean" | "studioLuxury";
+  /** A Campaign Kit shot id, or `poster1`… for a Festive kit. */
+  id: string;
   label: string;
   assetId: string | null;
   url: string;
@@ -1429,12 +1487,41 @@ export function brandStory(body: {
  * text. Keeping the parser client-side is what stops the backend carrying a
  * spreadsheet library for one tool.
  */
-export function affinity(body: {
-  items: { image: string; sheetImages?: string[]; sheetExcelText?: string[] }[];
+export function affinity(
+  body: {
+    items: { image: string; sheetImages?: string[]; sheetExcelText?: string[] }[];
+    preview?: string | null;
+    /** Collection Story: the groups, by position in `items`. The label is only a hint for the AI-written name. */
+    categories?: { label: string; pieceIndexes: number[]; coverIndex: number }[];
+  },
+  /** Collection Story is the same run under its own name and endpoint. */
+  kind: "affinity" | "collection_story" = "affinity"
+) {
+  const path = kind === "collection_story" ? "/api/marketing-kit/collection-story" : "/api/marketing-kit/affinity";
+  return apiRequest<QueuedResult>(path, { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Up to six pieces together in one event-themed poster, optionally in several variations. */
+export function festivePoster(body: {
+  jewelryImages: string[];
+  /** A `FESTIVE_EVENTS` id; ignored when `customEvent` is set. */
+  event?: string;
+  customEvent?: string;
+  description?: string;
+  /** Words written onto the poster, in a chosen title font ("surprise" picks one per variation). Omit for no text. */
+  text?: { headline: string; subtitle?: string; tagline?: string; font: string; placement: "left" | "center" | "right" };
+  aspect: string;
+  count: number;
+  /** An `IMAGE_EDIT_MODELS` id — the backend resolves which provider it belongs to. */
+  model: string;
+  quality?: string;
   preview?: string | null;
 }) {
-  return apiRequest<QueuedResult>("/api/marketing-kit/affinity", { method: "POST", body: JSON.stringify(body) });
+  return apiRequest<QueuedResult>("/api/marketing-kit/festive", { method: "POST", body: JSON.stringify(body) });
 }
+
+/** Retouching one festive poster. */
+export const refineFestivePoster = refineOn<string>("/api/marketing-kit/festive");
 
 /** Four shots in one run — two of the piece worn, two of it alone. */
 export function campaignKit(body: {
@@ -1479,6 +1566,11 @@ export function fetchMarketingKit(id: string) {
   return apiRequest<{ kit?: MarketingKit }>(`/api/marketing-kit/kits/${id}`);
 }
 
+/** The catalog's setting-code table — code → the words the deck uses for it. */
+export function fetchSettingCodes() {
+  return apiRequest<{ codes?: Record<string, string> }>("/api/marketing-kit/setting-codes");
+}
+
 /**
  * Applies an edit to a saved kit. Only the fields a person may change —
  * the uploads and the `original*` fields are deliberately not updatable.
@@ -1492,8 +1584,12 @@ export function updateMarketingKit(
     tagline?: string;
     coverSplit?: number;
     items?: AffinityItem[];
+    /** Names, taglines and covers — which pieces a category holds is fixed at upload. */
+    categories?: DeckCategory[];
     /** Captions only — a shot's id, label and url are not the client's to change. */
     shots?: { id: string; caption: string }[];
+    /** The editor's whole document — see lib/deckDesign.ts. */
+    design?: unknown;
   }
 ) {
   return apiRequest<{ kit?: MarketingKit }>(`/api/marketing-kit/kits/${id}`, {
@@ -1578,6 +1674,8 @@ export type HistoryItem = {
    * Affinity run's stored text actually is.
    */
   kitId?: string | null;
+  /** Which surface wrote that deck. Null on older runs, which are all Affinity. */
+  kitKind?: MarketingKitKind | null;
 };
 
 export type ConversationAsset = { url: string; thumbnailUrl: string; role: string };

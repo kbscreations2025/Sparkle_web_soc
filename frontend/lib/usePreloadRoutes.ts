@@ -14,6 +14,8 @@ const EXTRA_ROUTES = [
   "/cleaning/shank",  "/marketing-kit/brand-story",
   "/marketing-kit/affinity",
   "/marketing-kit/campaign",
+  "/marketing-kit/collection-story",
+  "/marketing-kit/festive",
   "/credits",
 ];
 

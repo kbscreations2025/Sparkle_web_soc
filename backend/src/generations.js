@@ -19,6 +19,7 @@ const GENERATION_TOOLS = [
   "image_to_sketch",
   "marketing_kit",
   "chat_to_edit",
+  "product_background",
 ];
 
 const GENERATION_STATUSES = ["pending", "processing", "completed", "failed"];

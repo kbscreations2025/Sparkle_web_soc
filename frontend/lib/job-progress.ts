@@ -90,6 +90,8 @@ export function formatDuration(ms: number) {
 const PHASE_LABELS: Record<string, string> = {
   preparing: "Preparing",
   generating: "Generating",
+  analysing: "Analysing",
+  cutting: "Cutting out",
   saving: "Saving",
 };
 

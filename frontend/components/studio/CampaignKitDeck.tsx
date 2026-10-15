@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
-import { Check, Download, Loader2, Save } from "lucide-react";
+import { Check, Download, Loader2, Maximize2, Save } from "lucide-react";
+import { Lightbox } from "./Lightbox";
 import { updateMarketingKit, type CampaignShot, type MarketingKit } from "@/lib/api";
 import { downloadImage } from "@/lib/image";
 
@@ -14,10 +15,19 @@ import { downloadImage } from "@/lib/image";
  * editing this record. Which is why only `caption` is sent on a save: the
  * backend refuses the rest for the same reason.
  */
-export function CampaignKitDeck({ kit }: { kit: MarketingKit }) {
+export function CampaignKitDeck({
+  kit,
+  /** What one picture is called — a Festive kit holds posters, not shots. */
+  noun = "shot",
+}: {
+  kit: MarketingKit;
+  noun?: string;
+}) {
   const [shots, setShots] = useState<CampaignShot[]>(kit.campaign?.shots ?? []);
   const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState("");
+  /** The picture open full size, for a close look. */
+  const [preview, setPreview] = useState<CampaignShot | null>(null);
 
   // A different kit in the same mounted view — reset during render rather
   // than from an effect, so the old deck is never painted under the new id.
@@ -52,7 +62,8 @@ export function CampaignKitDeck({ kit }: { kit: MarketingKit }) {
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold text-cream">{kit.title}</h2>
           <p className="text-[11px] text-faint">
-            {shots.length} shot{shots.length === 1 ? "" : "s"} · {new Date(kit.createdAt).toLocaleDateString()}
+            {shots.length} {noun}
+            {shots.length === 1 ? "" : "s"} · {new Date(kit.createdAt).toLocaleDateString()}
           </p>
         </div>
         <button
@@ -70,13 +81,24 @@ export function CampaignKitDeck({ kit }: { kit: MarketingKit }) {
         {shots.map((shot) => (
           <li key={shot.id} className="space-y-2 rounded-xl border border-white/[0.08] bg-surface-raised p-2.5">
             <div className="group relative aspect-square overflow-hidden rounded-lg bg-white/[0.04]">
-              <Image
-                src={shot.thumbnailUrl || shot.url}
-                alt={shot.label}
-                fill
-                sizes="(max-width: 640px) 100vw, 380px"
-                className="object-cover"
-              />
+              <button
+                type="button"
+                onClick={() => setPreview(shot)}
+                title={`Preview ${shot.label}`}
+                aria-label={`Preview ${shot.label}`}
+                className="absolute inset-0 cursor-zoom-in"
+              >
+                <Image src={shot.thumbnailUrl || shot.url} alt={shot.label} fill sizes="(max-width: 640px) 100vw, 380px" className="object-cover" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreview(shot)}
+                title={`Preview ${shot.label}`}
+                aria-label={`Preview ${shot.label} full size`}
+                className="absolute right-10 top-2 rounded-full bg-black/55 p-1.5 text-white/85 opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/75 group-hover:opacity-100"
+              >
+                <Maximize2 size={12} />
+              </button>
               <button
                 type="button"
                 onClick={() => downloadImage(shot.url, `${shot.id}.jpg`)}
@@ -102,6 +124,9 @@ export function CampaignKitDeck({ kit }: { kit: MarketingKit }) {
           </li>
         ))}
       </ul>
+
+      {/* Full size, zoomable — the stored original, not the grid's thumbnail. */}
+      <Lightbox src={preview?.url ?? null} onClose={() => setPreview(null)} downloadName={preview ? `${preview.id}.jpg` : undefined} />
     </div>
   );
 }

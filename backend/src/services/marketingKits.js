@@ -18,6 +18,8 @@ const { createThumbnail, THUMB_EXTENSION } = require("../storage/thumbnail");
 const EXTENSION_BY_MIME = { "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 50;
+/** A saved deck design, serialised — well under Mongo's 16MB document cap with the rest of the kit. */
+const MAX_DESIGN_BYTES = 8_000_000;
 
 function extensionFor(mimeType) {
   return EXTENSION_BY_MIME[mimeType] || "jpg";
@@ -127,7 +129,19 @@ async function saveBrandStoryKit({ dbUser, kitId, model, images, sheetImages, an
  * An Affinity kit: every piece with its own photo and sheet, plus the
  * catalog copy written for the set.
  */
-async function saveAffinityKit({ dbUser, kitId, model, collectionName, tagline, items, pieces, generationId = null }) {
+async function saveAffinityKit({
+  dbUser,
+  kitId,
+  model,
+  collectionName,
+  tagline,
+  items,
+  pieces,
+  generationId = null,
+  // "collection_story" is the same deck under its own name — see the model.
+  kind = "affinity",
+  categories = [],
+}) {
   const common = { tenantId: dbUser.tenantId, userId: dbUser._id, kitId };
 
   const storedPieces = await Promise.all(
@@ -153,13 +167,14 @@ async function saveAffinityKit({ dbUser, kitId, model, collectionName, tagline, 
     tenantId: dbUser.tenantId,
     userId: dbUser._id,
     userName: dbUser.name || dbUser.email,
-    kind: "affinity",
+    kind,
     title: collectionName || "Untitled Collection",
     status: "ready",
     model,
     generationId,
     affinity: {
       pieces: storedPieces,
+      categories,
       collectionName,
       tagline,
       coverSplit: 50,
@@ -190,6 +205,9 @@ async function saveCampaignKit({
   shots,
   options,
   generationId = null,
+  // "festive" stores its posters in this same shape, with no model photo.
+  kind = "campaign",
+  title,
 }) {
   const common = { tenantId: dbUser.tenantId, userId: dbUser._id, kitId };
 
@@ -203,8 +221,8 @@ async function saveCampaignKit({
     tenantId: dbUser.tenantId,
     userId: dbUser._id,
     userName: dbUser.name || dbUser.email,
-    kind: "campaign",
-    title: options?.description?.trim()?.slice(0, 300) || "Campaign Kit",
+    kind,
+    title: (title || options?.description?.trim() || "Campaign Kit").slice(0, 300),
     status: "ready",
     model,
     generationId,
@@ -280,13 +298,14 @@ async function saveKitSafely(save, { kind, kitId, dbUser, model, generationId = 
  * reason those copies exist.
  */
 function toKitSummary(kit) {
-  const cover =
-    kit.kind === "brand_story"
-      ? kit.brandStory?.images?.[0]
-      : kit.kind === "affinity"
-        ? kit.affinity?.pieces?.find((piece) => piece.productImage)?.productImage
-        : // A campaign kit leads with what it produced, not what went in.
-          kit.campaign?.shots?.[0] ?? kit.campaign?.sourceImages?.[0];
+  // By which document is present, so the kinds that share a shape (see the
+  // model) need no case of their own.
+  const cover = kit.brandStory
+    ? kit.brandStory.images?.[0]
+    : kit.affinity
+      ? kit.affinity.pieces?.find((piece) => piece.productImage)?.productImage
+      : // A campaign-shaped kit leads with what it produced, not what went in.
+        kit.campaign?.shots?.[0] ?? kit.campaign?.sourceImages?.[0];
 
   return {
     id: String(kit._id),
@@ -304,8 +323,8 @@ function toKitSummary(kit) {
 
 /** What "how much is in here" means for each kind. */
 function countFor(kit) {
-  if (kit.kind === "affinity") return kit.affinity?.pieces?.length ?? 0;
-  if (kit.kind === "campaign") return kit.campaign?.shots?.length ?? 0;
+  if (kit.affinity) return kit.affinity.pieces?.length ?? 0;
+  if (kit.campaign) return kit.campaign.shots?.length ?? 0;
   return kit.brandStory?.images?.length ?? 0;
 }
 
@@ -328,8 +347,10 @@ function toPublicKit(kit) {
           collectionName: kit.affinity.collectionName,
           tagline: kit.affinity.tagline,
           coverSplit: kit.affinity.coverSplit,
+          categories: kit.affinity.categories ?? [],
           items: kit.affinity.items,
           originalItems: kit.affinity.originalItems,
+          design: kit.affinity.design ?? null,
           pieces: kit.affinity.pieces.map((piece) => ({
             index: piece.index,
             productImage: piece.productImage ? toPublicImage(piece.productImage) : null,
@@ -457,7 +478,44 @@ async function updateKit({ dbUser, id, changes }) {
     if (typeof changes.coverSplit === "number") {
       kit.affinity.coverSplit = Math.max(0, Math.min(100, changes.coverSplit));
     }
-    if (Array.isArray(changes.items)) kit.affinity.items = changes.items.slice(0, 64);
+    // Collection Story has no piece cap, so neither does this — bounded by the request body.
+    if (Array.isArray(changes.items)) kit.affinity.items = changes.items.slice(0, 1000);
+    /*
+     * The editor's whole document. Checked for shape and size only: it is the
+     * person's own layout of their own deck, and every url in it is either a
+     * piece reference by index or an image they uploaded as a data URI.
+     */
+    if (changes.design && typeof changes.design === "object" && changes.design.version === 1 && Array.isArray(changes.design.slides)) {
+      const size = JSON.stringify(changes.design).length;
+      if (size > MAX_DESIGN_BYTES) {
+        const error = new Error("This deck is too large to save — remove some uploaded images");
+        error.code = "design_too_large";
+        throw error;
+      }
+      kit.affinity.design = changes.design;
+      kit.markModified("affinity.design");
+    }
+    /*
+     * A category's words and its cover are the person's to change; which
+     * pieces it holds is not — that was decided at upload, and the pieces'
+     * own sheets went to the model on that basis. Matched by position.
+     */
+    if (Array.isArray(changes.categories) && kit.affinity.categories?.length) {
+      const count = kit.affinity.pieces.length;
+      kit.affinity.categories = kit.affinity.categories.map((category, i) => {
+        const patch = changes.categories[i] || {};
+        const cover = Number(patch.coverIndex);
+        return {
+          name: typeof patch.name === "string" ? patch.name.slice(0, 300) : category.name,
+          tagline: typeof patch.tagline === "string" ? patch.tagline.slice(0, 500) : category.tagline,
+          coverIndex:
+            Number.isInteger(cover) && cover >= 0 && cover < count && category.pieceIndexes.includes(cover)
+              ? cover
+              : category.coverIndex,
+          pieceIndexes: category.pieceIndexes,
+        };
+      });
+    }
   }
 
   if (kit.campaign && Array.isArray(changes.shots)) {

@@ -15,6 +15,7 @@ const lifestyleRoutes = require("./routes/lifestyle");
 const imageToTextRoutes = require("./routes/imageToText");
 const imageToVideoRoutes = require("./routes/imageToVideo");
 const marketingKitRoutes = require("./routes/marketingKit");
+const productBackgroundRoutes = require("./routes/productBackground");
 const lexiconRoutes = require("./routes/lexicon");
 const historyRoutes = require("./routes/history");
 const jobRoutes = require("./routes/jobs");
@@ -60,6 +61,7 @@ app.use("/api/image-to-video", imageToVideoRoutes);
 // One router for Marketing Kit's three surfaces — Brand Story, Affinity and
 // Campaign Kit — plus the saved kits they write.
 app.use("/api/marketing-kit", marketingKitRoutes);
+app.use("/api/product-background", productBackgroundRoutes);
 app.use("/api/lexicon", lexiconRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/jobs", jobRoutes);

@@ -56,6 +56,45 @@ export function compressImage(file: File): Promise<string> {
   });
 }
 
+/**
+ * Like `compressImage`, for graphics placed on a deck page — logos, marks,
+ * textures. A PNG, WebP or GIF keeps its transparency (re-encoded as PNG),
+ * where `compressImage`'s JPEG would turn a logo's clear background black;
+ * an SVG is kept as it is. Capped smaller, as nothing on a slide needs more.
+ */
+export function compressGraphic(file: File, maxSide = 1600): Promise<string> {
+  if (file.type === "image/svg+xml") return readAsDataUrl(file);
+  const transparent = ["image/png", "image/webp", "image/gif"].includes(file.type);
+  if (!transparent) return compressImage(file);
+
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`Could not read ${file.name}`));
+    };
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const context = canvas.getContext("2d");
+      if (!context) return resolve(readAsDataUrl(file));
+      context.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return resolve(readAsDataUrl(file));
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => resolve(readAsDataUrl(file));
+        reader.readAsDataURL(blob);
+      }, "image/png");
+    };
+    img.src = objectUrl;
+  });
+}
+
 /** Long edge of a queue thumbnail. Enough to recognise a piece, not to inspect it. */
 const THUMB_SIDE = 96;
 const THUMB_QUALITY = 0.6;

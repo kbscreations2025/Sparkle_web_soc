@@ -52,8 +52,15 @@ async function pdfToImages(file: File): Promise<string[]> {
     const context = canvas.getContext("2d");
     if (!context) continue;
 
+    // White under the page first: a JPEG has no transparency, and an
+    // unpainted canvas would come out black behind the drawing.
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
     await rendered.render({ canvasContext: context, viewport, canvas }).promise;
-    pages.push(canvas.toDataURL("image/png"));
+    // JPEG, not PNG: a rendered sheet page is several times smaller this way
+    // with the printed codes still legible, and a 24-piece Collection Story
+    // has to fit in one request.
+    pages.push(canvas.toDataURL("image/jpeg", 0.85));
   }
 
   return pages;
