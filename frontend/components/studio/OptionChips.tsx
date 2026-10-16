@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -56,26 +57,46 @@ export function Chip({
   active,
   onClick,
   size = "md",
+  leading,
+  trailing,
+  title,
+  ariaLabel,
+  className,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
   size?: "sm" | "md";
+  /** An icon before the label — the builder's "Trending" choice. */
+  leading?: ReactNode;
+  /** A mark after the label — the builder's flame on an option in fashion now. */
+  trailing?: ReactNode;
+  /** A hover note. The chip is still announced by `label`, not by this. */
+  title?: string;
+  /** What a screen reader says instead of `label`, when the icons add meaning ("Bezel, trending now"). */
+  ariaLabel?: string;
+  className?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      aria-label={ariaLabel ?? (title ? label : undefined)}
+      title={title}
       className={cn(
         "rounded-lg border font-medium transition-colors",
         size === "sm" ? "px-2 py-1 text-[10px]" : "min-h-8 px-3 py-1.5 text-xs",
+        (leading || trailing) && "inline-flex items-center gap-1",
         active
           ? "border-gold/30 bg-gold/10 text-gold"
-          : "border-white/[0.07] bg-white/[0.03] text-muted hover:border-white/[0.14] hover:text-cream"
+          : "border-white/[0.07] bg-white/[0.03] text-muted hover:border-white/[0.14] hover:text-cream",
+        className
       )}
     >
+      {leading}
       {label}
+      {trailing}
     </button>
   );
 }

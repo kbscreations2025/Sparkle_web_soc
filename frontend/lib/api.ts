@@ -771,6 +771,8 @@ export type QueuedJob = {
     style?: string | null;
     aspect?: string | null;
     count?: number;
+    /** A tool's sub-mode with a page of its own — Image Cleaning's "product_views". */
+    mode?: string | null;
   };
   result: {
     generationId: string | null;
@@ -781,6 +783,8 @@ export type QueuedJob = {
     outputUrls?: string[];
     /** How a follow-up was read — "Metal → rose gold". Null for a plain edit or a first run. */
     intentLabel?: string | null;
+    /** Product Views: the angle each of `outputUrls` shows, index for index. */
+    views?: string[];
     /** "video" when the url points at a clip, so a page renders a player rather than an `<img>`. */
     outputType?: "image" | "video";
     durationSeconds?: number;
@@ -956,6 +960,10 @@ export function textToImage(body: {
   count: number;
   /** An optional photo to start the design from, as a data URI. */
   referenceImage?: string;
+  /** Current trends to follow, one per image in turn — see `JewelryTrend`. */
+  trends?: TrendCue[];
+  /** With a reference photo: each image a new design option grown from it, not a recreation. */
+  designVariations?: boolean;
 }) {
   return apiRequest<QueuedResult>("/api/text-to-image", {
     method: "POST",
@@ -1025,6 +1033,10 @@ export function textToSketch(body: {
   count: number;
   /** Optional photo the design is drawn from, as a data URI. */
   referenceImage?: string;
+  /** Current trends to follow, one per sketch in turn — see `JewelryTrend`. */
+  trends?: TrendCue[];
+  /** With a reference photo: each sketch a new design option grown from it, not a redraw. */
+  designVariations?: boolean;
 }) {
   return apiRequest<QueuedResult>("/api/text-to-sketch", { method: "POST", body: JSON.stringify(body) });
 }
@@ -1042,6 +1054,72 @@ export function sketchToImage(body: {
   preview?: string | null;
 }) {
   return apiRequest<QueuedResult>("/api/sketch-to-image", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** A standard catalogue angle Product Views covers. */
+/** Kinds of piece — each is showcased from its own set of angles. */
+export type ProductViewCategory = "ring" | "earrings" | "pendant";
+
+export type ProductViewId =
+  | "three-quarter"
+  | "front"
+  | "side"
+  | "upright"
+  | "earring-pair"
+  | "earring-front-side"
+  | "pendant-front"
+  | "pendant-side";
+
+/** Product Views: the angles without a photo, one image each. */
+export function generateProductViews(body: {
+  category: ProductViewCategory;
+  /** The photos the person placed, each with the angle it was placed as. */
+  photos: { view: ProductViewId; image: string }[];
+  views: ProductViewId[];
+  notes?: string;
+  model: string;
+  quality?: string;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/product-views", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Replacement: what is being worn in the photo — each is fitted and sized against its own part of the body. */
+export type ReplacementCategory = "ring" | "earrings" | "necklace" | "bracelet";
+
+/** Replacement's size presets, for a person who would rather pick than type millimetres. */
+export type ReplacementSize = "delicate" | "classic" | "statement";
+
+/**
+ * Replacement: the jewellery in a photo of someone wearing it, swapped for
+ * another piece, the rest of the photo kept exactly as it was. A first turn
+ * sends the photo and the new piece (its product shot, a description, or
+ * both); a follow-up sends `change` as well — the result to change and what
+ * to change — since every answer is put back into the original photo.
+ */
+export function replaceJewellery(body: {
+  photo: string;
+  piece?: string;
+  category: ReplacementCategory;
+  size?: ReplacementSize | null;
+  description?: string;
+  /** A `CLEANING_MODELS` id — Replacement is Gemini only. */
+  model: string;
+  quality?: string;
+  preview?: string | null;
+  change?: {
+    /** The result being changed. Ignored when `source` is "input". */
+    image: string;
+    instruction: string;
+    displayPrompt?: string;
+    references?: string[];
+    /** "input" when the change was typed on the original photo — the swap is redone with it. */
+    source?: "result" | "input";
+  };
+  conversationId?: string | null;
+  parentGenerationId?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/replacement", { method: "POST", body: JSON.stringify(body) });
 }
 
 /** A photograph redrawn by hand as a sketch. */
@@ -1633,6 +1711,39 @@ export function addLexiconTerm(term: string) {
   });
 }
 
+// ── jewellery trends ─────────────────────────────────────────────────────────
+
+/** One current design direction — what a "Trending" design style sends an image after. */
+export type JewelryTrend = {
+  label: string;
+  hint: string;
+  /** What the design looks like — sent to the model with each image that follows it. */
+  cue: string;
+  /** The builder selections that define it, `{ groupKey: option }`. */
+  picks: Record<string, string>;
+};
+
+/** What a generation is sent of a trend: its name and what it looks like. */
+export type TrendCue = Pick<JewelryTrend, "label" | "cue">;
+
+/**
+ * The current trends for one audience and jewellery type — searched on the
+ * live web once a month, a curated list until then. `options` is the builder's
+ * own lists, so the picks a trend comes back with are ones it can select.
+ */
+export function fetchTrends(body: { audience: string; type: string; options: Record<string, string[]> }) {
+  return apiRequest<{
+    trends?: JewelryTrend[];
+    /** What is in fashion row by row, `{ settingStyle: ["Bezel", "Flush Set"] }` — the builder's flames. */
+    trending?: Record<string, string[]>;
+    /** "web" once this month's search has landed; "curated" until then. */
+    source?: "web" | "curated";
+    period?: string | null;
+    /** A search is still running — a later load will have its answer. */
+    refreshing?: boolean;
+  }>("/api/trends", { method: "POST", body: JSON.stringify(body) });
+}
+
 // ── history ──────────────────────────────────────────────────────────────────
 
 export type HistoryOutput = {
@@ -1676,6 +1787,8 @@ export type HistoryItem = {
   kitId?: string | null;
   /** Which surface wrote that deck. Null on older runs, which are all Affinity. */
   kitKind?: MarketingKitKind | null;
+  /** A tool's sub-mode with a page of its own — Image Cleaning's "product_views". */
+  mode?: string | null;
 };
 
 export type ConversationAsset = { url: string; thumbnailUrl: string; role: string };
@@ -1689,6 +1802,19 @@ export type ConversationTurn = {
   outputAssets: ConversationAsset[];
   /** What a text-out tool produced. Null for every tool that makes pictures. */
   text?: string | null;
+  /** A Product Views turn: the piece, and the angle of each input and output asset. */
+  productViews?: {
+    category: ProductViewCategory;
+    photoViews: ProductViewId[];
+    /** Null on runs recorded before the angles were stored. */
+    outputViews: ProductViewId[] | null;
+  };
+  /** A Replacement turn: what the new piece is. The photo and product shot are the first turn's inputs. */
+  replacement?: {
+    category: ReplacementCategory;
+    size: ReplacementSize | null;
+    description: string | null;
+  };
 };
 
 /**

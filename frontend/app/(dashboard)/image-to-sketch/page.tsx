@@ -121,27 +121,27 @@ export default function ImageToSketchPage() {
           />
 
           {photo ? (
-            <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
+            <div className="relative inline-block overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
               {/* The photo the sketch follows — open it to look closely, or to
                   mark up what the sketch should emphasise. */}
               <button
                 type="button"
                 onClick={() => setPreview({ src: photo, key: "photo" })}
                 title="Preview or annotate this photo"
-                className="group relative block aspect-[4/3] w-full"
+                className="group relative block h-40 w-40"
               >
-                <Image src={photo} alt="Photo to sketch" fill sizes="(max-width: 768px) 100vw, 720px" className="object-contain" />
-                <span className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-lg border border-white/15 bg-black/55 px-2 py-1 text-[10px] font-medium text-white/85 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
-                  <Maximize2 size={11} /> Preview &amp; annotate
+                <Image src={photo} alt="Photo to sketch" fill sizes="160px" className="object-contain" />
+                <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-md border border-white/15 bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white/85 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                  <Maximize2 size={10} /> Preview
                 </span>
               </button>
               <button
                 type="button"
                 onClick={() => setPhoto(null)}
                 aria-label="Remove photo"
-                className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-colors hover:bg-black/75"
+                className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-colors hover:bg-black/75"
               >
-                <X size={14} />
+                <X size={12} />
               </button>
             </div>
           ) : (

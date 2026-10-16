@@ -333,6 +333,13 @@ async function generateText({
   thinkingBudget = 1024,
   maxOutputTokens = 4096,
   temperature,
+  /**
+   * Ground the answer in a live Google Search — for a question about what is
+   * current (the jewellery trend list), which the model's training can't
+   * answer. Not combinable with `responseSchema` on these models, so a caller
+   * using it parses the JSON from the text itself.
+   */
+  webSearch = false,
 }) {
   const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 150_000 } });
 
@@ -352,6 +359,7 @@ async function generateText({
         ...(systemInstruction ? { systemInstruction } : {}),
         ...(responseSchema ? { responseMimeType: "application/json", responseSchema } : {}),
         ...(temperature !== undefined ? { temperature } : {}),
+        ...(webSearch ? { tools: [{ googleSearch: {} }] } : {}),
         thinkingConfig: { thinkingBudget },
         maxOutputTokens,
       },

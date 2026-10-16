@@ -263,6 +263,8 @@ async function generateText({
   thinkingBudget = 1024,
   maxOutputTokens = 4096,
   temperature,
+  /** Live web results for the model to answer from — OpenRouter's web plugin. See gemini.js. */
+  webSearch = false,
 }) {
   const parts = extraParts ?? [
     ...images.map(({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } })),
@@ -280,6 +282,7 @@ async function generateText({
     max_tokens: maxOutputTokens,
     ...(temperature !== undefined ? { temperature } : {}),
     reasoning: thinkingBudget > 0 ? { max_tokens: thinkingBudget, exclude: true } : { enabled: false, exclude: true },
+    ...(webSearch ? { plugins: [{ id: "web", max_results: 8 }] } : {}),
     ...(responseSchema
       ? // Not `strict`: strict mode demands every property be required and
         // `additionalProperties: false`, which Affinity's optional

@@ -2,6 +2,7 @@ const { registerJobHandler } = require("./registry");
 const { runGenerationJob } = require("./generationRunner");
 const {
   buildTextToSketchPrompt,
+  buildTextToSketchVariationPrompt,
   buildTextToSketchRefinePrompt,
   buildImageToSketchPrompt,
   buildImageToSketchRefinePrompt,
@@ -42,6 +43,22 @@ registerJobHandler(TEXT_TO_SKETCH_JOB, (context) =>
         count,
         hasReference: Boolean(data.sourceImages?.length),
       }),
+    // "Make variations" on a reference photo: each sketch a different design
+    // option grown out of it, rather than the same piece drawn again.
+    ...(context.data?.designVariations && context.data.sourceImages?.length
+      ? {
+          buildShots: ({ data: payload, count }) =>
+            Array.from({ length: count }, (_, index) =>
+              buildTextToSketchVariationPrompt({
+                description: payload.prompt,
+                style: payload.style,
+                aspect: payload.aspect,
+                index,
+                total: count,
+              })
+            ),
+        }
+      : {}),
     buildRefinePrompt: buildTextToSketchRefinePrompt,
   })
 );

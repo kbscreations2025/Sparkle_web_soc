@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CircleDashed, Eraser, Sparkles, type LucideIcon } from "lucide-react";
+import { CircleDashed, Eraser, Replace, Rotate3d, Sparkles, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
@@ -48,6 +48,20 @@ const MODES: CleaningMode[] = [
     description: "Cleans and polishes only the ring's band — everything else stays as it is",
     icon: CircleDashed,
     href: "/cleaning/shank",
+  },
+  {
+    id: "views",
+    label: "Product Views",
+    description: "Rings, bracelets, earrings or pendants — drop the angles you have, the missing views are made",
+    icon: Rotate3d,
+    href: "/cleaning/views",
+  },
+  {
+    id: "replacement",
+    label: "Replacement",
+    description: "Swap the jewellery in a worn photo — the hand, skin and background stay exactly as they are",
+    icon: Replace,
+    href: "/cleaning/replace",
   },
 ];
 

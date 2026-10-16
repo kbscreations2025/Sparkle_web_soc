@@ -14,7 +14,10 @@ const NAV_LABEL_BY_HREF: Record<string, string> = Object.fromEntries(
 const SUB_LABELS: Record<string, string> = {
   "/cleaning/default": "Default",
   "/cleaning/new": "High-Res Image Generation",
-  "/cleaning/shank": "Shank Cleaning",  // The three cards on the Marketing Kit page — named as the cards name them.
+  "/cleaning/shank": "Shank Cleaning",
+  "/cleaning/views": "Product Views",
+  "/cleaning/replace": "Replacement",
+  // The cards on the Marketing Kit page — named as the cards name them.
   "/marketing-kit/brand-story": "Brand Story",
   "/marketing-kit/affinity": "Affinity",
   "/marketing-kit/campaign": "Campaign Kit",

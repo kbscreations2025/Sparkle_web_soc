@@ -36,6 +36,19 @@ function clampCount(count, fallback = DEFAULT_IMAGE_COUNT) {
 }
 
 /**
+ * The current trend one image follows — sent when the Jewelry Builder asks
+ * for the latest trends (a "Trending" or "Modern" design, or one trend picked
+ * from its row; see services/trends.js). Added after the tool's own words, so
+ * it shapes the design without overriding what the user specified.
+ */
+function trendDirection({ label, cue }) {
+  return [
+    `TRENDING DIRECTION FOR THIS IMAGE — ${label}: ${cue}`,
+    "Design the piece in this current trend so it looks fresh and of the moment, while keeping every specification above (jewellery type, metal, stones, setting). Where the trend and a specification disagree, the specification wins.",
+  ].join("\n");
+}
+
+/**
  * @param tool              A key from GENERATION_TOOLS, for history and audit.
  * @param buildPrompt       `({ data, count }) => string` for an initial run.
  *                          Every variation is sent the same words.
@@ -76,6 +89,14 @@ async function runGenerationJob({
    * holding a second copy. Returns fields merged into the job result.
    */
   persist,
+  /**
+   * `async ({ output, shot, regenerate }) => output` — for a tool whose image
+   * isn't finished when the model answers: Replacement puts the photo's own
+   * pixels back around the new piece. `regenerate()` asks the model again,
+   * for an answer that can't be used. First-run shots only; runs before the
+   * live preview, so what arrives on screen is what is stored.
+   */
+  finishImage,
 }) {
   const dbUser = await User.findById(job.userId);
   if (!dbUser) throw new Error("the user who queued this job no longer exists");
@@ -168,11 +189,18 @@ async function runGenerationJob({
    * studio shots must not receive the model photo, or a hand appears in a
    * "jewelry only" frame.
    */
+  const trendCues = Array.isArray(data.trendCues) ? data.trendCues : [];
   const shots = (
     buildShots
       ? buildShots({ data, count: requestedCount })
       : Array.from({ length: requestedCount }, () => buildPrompt({ data, count: requestedCount }))
-  ).map((shot) => (typeof shot === "string" ? { prompt: shot, images: sourceImages } : { images: sourceImages, ...shot }));
+  )
+    .map((shot) => (typeof shot === "string" ? { prompt: shot, images: sourceImages } : { images: sourceImages, ...shot }))
+    // One trend per image, in turn: a run of four reads as four current
+    // directions rather than the same one four times.
+    .map((shot, index) =>
+      trendCues.length ? { ...shot, prompt: `${shot.prompt}\n\n${trendDirection(trendCues[index % trendCues.length])}` } : shot
+    );
   const count = shots.length;
 
   // The prompt recorded in History. With one set of words it is simply them;
@@ -185,15 +213,21 @@ async function runGenerationJob({
   const settled = await withProgress({ from: 20, to: 85, phase: "generating", steps: count }, ({ stepDone }) =>
     Promise.allSettled(
       shots.map(async (shot) => {
-        const result = await routeProviderCall({
-          tenant,
-          provider,
-          modelId: model,
-          prompt: shot.prompt,
-          quality,
-          aspectRatio: data.aspectRatio || null,
-          images: shot.images.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
-        });
+        const call = () =>
+          routeProviderCall({
+            tenant,
+            provider,
+            modelId: model,
+            prompt: shot.prompt,
+            quality,
+            aspectRatio: data.aspectRatio || null,
+            images: shot.images.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
+          });
+        let result = await call();
+        if (finishImage) {
+          const output = await finishImage({ output: result.output, shot, regenerate: async () => (await call()).output });
+          result = { ...result, output };
+        }
 
         // Best-effort, and awaited only so the bar and the preview move
         // together: a preview that fails still leaves a counted variation.

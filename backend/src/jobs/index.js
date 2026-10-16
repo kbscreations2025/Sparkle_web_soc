@@ -12,6 +12,8 @@ require("./imageToText");
 require("./imageToVideo");
 require("./marketingKit");
 require("./productBackground");
+require("./productViews");
+require("./replacement");
 
 module.exports = {
   CLEANING_JOB: require("./cleaning").CLEANING_JOB,
@@ -22,4 +24,6 @@ module.exports = {
   ...require("./imageToVideo"),
   ...require("./marketingKit"),
   ...require("./productBackground"),
+  ...require("./productViews"),
+  ...require("./replacement"),
 };

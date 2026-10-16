@@ -60,7 +60,7 @@ export function JobToasts() {
 
 function JobToast({ job, onDismiss }: { job: QueuedJob; onDismiss: () => void }) {
   const failed = job.status !== "completed";
-  const href = conversationHref(job.tool, job.result?.conversationId, job.result?.modelLabel);
+  const href = conversationHref(job.tool, job.result?.conversationId, job.result?.modelLabel, job.request?.mode);
   const preview = job.result?.outputUrl ?? job.preview;
   const count = job.result?.outputUrls?.length ?? 0;
 

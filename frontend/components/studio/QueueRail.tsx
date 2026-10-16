@@ -41,7 +41,7 @@ const KIT_KIND_BY_JOB_TYPE: Record<string, MarketingKitKind> = {
 function jobHref(job: QueuedJob, model?: string) {
   const kind = KIT_KIND_BY_JOB_TYPE[job.type];
   if (kind && job.result?.kitId) return kitHref({ id: job.result.kitId, kind });
-  return conversationHref(job.tool, job.result?.conversationId || job.request?.conversationId, model);
+  return conversationHref(job.tool, job.result?.conversationId || job.request?.conversationId, model, job.request?.mode);
 }
 
 /** How many finished jobs stay listed under whatever is still running. */

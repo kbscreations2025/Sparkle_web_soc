@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { turnImages, type ChatMsg } from "@/components/studio/chat";
-import { fetchConversationForTool, type ApiResult, type QueuedResult } from "@/lib/api";
+import { fetchConversationForTool, type ApiResult, type ConversationTurn, type QueuedResult } from "@/lib/api";
 import { urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useCreditGuard } from "@/lib/credit-guard";
@@ -55,13 +55,15 @@ export function useGenerationWorkspace({
    * its own picker back where the conversation left it. Everything else about
    * resuming is identical across tools and handled here.
    */
-  onResume?: (details: { model: string | null }) => void;
+  onResume?: (details: { model: string | null; generations: ConversationTurn[] }) => void;
 }) {
   const [status, setStatus] = useState<"idle" | "generating" | "done" | "failed">("idle");
   const [images, setImages] = useState<string[]>([]);
   /** How many results this run asked for — what the placeholders count against. */
   const [requestedCount, setRequestedCount] = useState(0);
   const [selectedView, setSelectedView] = useState<string | null>(null);
+  /** What each of `images` is, when the tool says — Product Views' angles. */
+  const [imageTags, setImageTags] = useState<string[] | null>(null);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -133,7 +135,7 @@ export function useGenerationWorkspace({
       setReadOnly(thread.readOnly ? { ownerName: thread.ownerName } : null);
       conversationId.current = resumeConversationId;
       parentGenerationId.current = last.id;
-      onResumeRef.current?.({ model: last.model ?? null });
+      onResumeRef.current?.({ model: last.model ?? null, generations });
     })();
 
     return () => {
@@ -146,7 +148,6 @@ export function useGenerationWorkspace({
   // spinner for the whole run and watching it fill in.
   const [liveImages, setLiveImages] = useState<string[]>([]);
   const [deliveredCount, setDeliveredCount] = useState(0);
-
   /** Settles this page's one in-flight job once the queue reports it finished. */
   useEffect(() => {
     const jobId = pendingJobId.current;
@@ -165,7 +166,7 @@ export function useGenerationWorkspace({
       pendingJobId.current = null;
       pendingKind.current = null;
 
-      const { outputUrl, outputUrls, conversationId: cid, generationId, intentLabel } = job.result;
+      const { outputUrl, outputUrls, conversationId: cid, generationId, intentLabel, views } = job.result;
       const urls = outputUrls?.length ? outputUrls : outputUrl ? [outputUrl] : [];
       if (cid) conversationId.current = cid;
       if (generationId) parentGenerationId.current = generationId;
@@ -178,6 +179,7 @@ export function useGenerationWorkspace({
       }
 
       setImages(urls);
+      setImageTags(views?.length === urls.length ? views : null);
       setSelectedView(urls[0]);
       setStatus("done");
       setRefining(false);
@@ -240,6 +242,7 @@ export function useGenerationWorkspace({
       setError("");
       setStatus("generating");
       setImages([]);
+      setImageTags(null);
       setLiveImages([]);
       setDeliveredCount(0);
       setSelectedView(null);
@@ -373,6 +376,7 @@ export function useGenerationWorkspace({
   const reset = useCallback(() => {
     setStatus("idle");
     setImages([]);
+    setImageTags(null);
     setLiveImages([]);
     setDeliveredCount(0);
     setRequestedCount(0);
@@ -400,6 +404,7 @@ export function useGenerationWorkspace({
     status,
     isGenerating,
     images,
+    imageTags,
     // Falls through to a live preview while a run is in flight, so the stage
     // shows the first finished image instead of a spinner until the last one.
     displayImg: selectedView ?? images[0] ?? liveImages[liveImages.length - 1] ?? null,

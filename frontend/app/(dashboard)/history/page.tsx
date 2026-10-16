@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { io } from "socket.io-client";
-import { CalendarRange, ChevronDown, Film, Gauge, Copy, Download, History, Loader2, type LucideIcon, MessageCircle, MoreHorizontal, Eye, ArrowUp, Newspaper, SlidersHorizontal, Trash2, Users } from "lucide-react";
+import { CalendarRange, ChevronDown, Film, Gauge, Copy, Download, History, Loader2, type LucideIcon, MessageCircle, MoreHorizontal, Eye, ArrowUp, Newspaper, Search, SlidersHorizontal, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import {
   BACKEND_URL,
@@ -727,7 +727,7 @@ export default function HistoryPage() {
     (item: HistoryItem) => {
       // `item.model` carries the recorded model label, which is the only
       // thing that distinguishes the two cleaning workspaces.
-      const href = conversationHref(item.tool, item.conversationId, item.model);
+      const href = conversationHref(item.tool, item.conversationId, item.model, item.mode);
       if (href) router.push(href);
     },
     [router]
@@ -1025,6 +1025,7 @@ export default function HistoryPage() {
           selected={selectedMembers}
           onChange={(next) => updateFilters(selectedTools, next)}
           compact={compact}
+          self={user?.name}
         />
       )}
 
@@ -1457,9 +1458,10 @@ type FilterOption = { id: string; label: string };
 
 /**
  * Shared shape for both filters here: an icon+label trigger carrying a
- * selection-count badge, and a panel with an "All" toggle above one checkbox
- * per option. Nothing checked means no filter — everything. Checking one or
- * more narrows the grid down to just those.
+ * selection-count badge, and a panel with one checkbox per option. Nothing
+ * checked means no filter — everything — so there is no "All" to tick: "Clear"
+ * empties the selection and that is all. Checking one or more narrows the grid
+ * down to just those.
  */
 function CheckboxFilter({
   icon: Icon,
@@ -1469,6 +1471,8 @@ function CheckboxFilter({
   selected,
   onChange,
   compact = false,
+  searchable = false,
+  pinned,
 }: {
   icon: LucideIcon;
   label: string;
@@ -1478,14 +1482,21 @@ function CheckboxFilter({
   onChange: (next: string[]) => void;
   /** Icon only — the phone's form, where the labels cost a row each. */
   compact?: boolean;
+  /** A search box over the list — for a list long enough to need one. */
+  searchable?: boolean;
+  /** An option kept first and apart from the rest — the viewer's own "Myself". */
+  pinned?: FilterOption;
 }) {
   const { open, side, toggle: togglePanel, containerRef } = usePopover();
+  const [query, setQuery] = useState("");
 
   function toggle(id: string) {
     onChange(selected.includes(id) ? selected.filter((v) => v !== id) : [...selected, id]);
   }
 
-  const allIds = options.map((option) => option.id);
+  const needle = query.trim().toLowerCase();
+  const listed = options.filter((option) => option.id !== pinned?.id && (!needle || option.label.toLowerCase().includes(needle)));
+  const showPinned = pinned && (!needle || pinned.label.toLowerCase().includes(needle) || "myself".includes(needle));
 
   return (
     <div className="relative" ref={containerRef}>
@@ -1520,24 +1531,50 @@ function CheckboxFilter({
           aria-multiselectable="true"
           className={cn("absolute top-full z-50 mt-2 w-48 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg", side)}
         >
-          {options.length === 0 ? (
+          {options.length === 0 && !pinned ? (
             <p className="px-3 py-2.5 text-[11px] text-faint">{emptyLabel}</p>
           ) : (
+            <>
+              <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
+                {searchable ? (
+                  <>
+                    <Search size={12} className="shrink-0 text-faint" />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder={`Search ${label.toLowerCase()}…`}
+                      aria-label={`Search ${label.toLowerCase()}`}
+                      className="min-w-0 flex-1 bg-transparent text-xs text-cream outline-none placeholder:text-faint"
+                    />
+                  </>
+                ) : (
+                  <span className="flex-1 text-[10px] text-faint">{selected.length ? `${selected.length} selected` : `All ${label.toLowerCase()}`}</span>
+                )}
+                {selected.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onChange([])}
+                    className="shrink-0 text-[11px] font-medium text-gold transition-colors hover:text-cream"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             <div className="max-h-64 overflow-y-auto py-1">
-              <label className="flex cursor-pointer items-center gap-2 border-b border-white/5 px-3 py-1.5 text-xs font-medium text-cream hover:bg-white/[0.05]">
-                <input
-                  type="checkbox"
-                  checked={selected.length === allIds.length}
-                  ref={(el) => {
-                    if (el) el.indeterminate = selected.length > 0 && selected.length < allIds.length;
-                  }}
-                  // All checked → clear; anything else (none or some) → all.
-                  onChange={() => onChange(selected.length === allIds.length ? [] : allIds)}
-                  style={{ accentColor: "var(--color-gold)" }}
-                />
-                All
-              </label>
-              {options.map((option) => (
+              {showPinned && (
+                <label className="flex cursor-pointer items-center gap-2 border-b border-white/5 px-3 py-1.5 text-xs font-medium text-cream hover:bg-white/[0.05]">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(pinned.id)}
+                    onChange={() => toggle(pinned.id)}
+                    style={{ accentColor: "var(--color-gold)" }}
+                  />
+                  <span className="truncate">Myself</span>
+                  <span className="truncate text-[10px] font-normal text-faint">{pinned.label}</span>
+                </label>
+              )}
+              {listed.length === 0 && !showPinned && <p className="px-3 py-1.5 text-[11px] text-faint">No matches</p>}
+              {listed.map((option) => (
                 <label
                   key={option.id}
                   className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]"
@@ -1552,6 +1589,7 @@ function CheckboxFilter({
                 </label>
               ))}
             </div>
+            </>
           )}
         </div>
       )}
@@ -1808,6 +1846,7 @@ function ToolFilter({ selected, onChange, compact }: { selected: string[]; onCha
       selected={selected}
       onChange={onChange}
       compact={compact}
+      searchable
     />
   );
 }
@@ -1902,11 +1941,14 @@ function MemberFilter({
   selected,
   onChange,
   compact,
+  self,
 }: {
   members: string[];
   selected: string[];
   onChange: (next: string[]) => void;
   compact?: boolean;
+  /** The viewer's own name, offered first as "Myself". */
+  self?: string;
 }) {
   const options = useMemo(() => members.map((name) => ({ id: name, label: name })), [members]);
   return (
@@ -1918,6 +1960,8 @@ function MemberFilter({
       selected={selected}
       onChange={onChange}
       compact={compact}
+      searchable
+      pinned={self ? { id: self, label: self } : undefined}
     />
   );
 }

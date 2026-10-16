@@ -16,7 +16,10 @@ const imageToTextRoutes = require("./routes/imageToText");
 const imageToVideoRoutes = require("./routes/imageToVideo");
 const marketingKitRoutes = require("./routes/marketingKit");
 const productBackgroundRoutes = require("./routes/productBackground");
+const productViewsRoutes = require("./routes/productViews");
+const replacementRoutes = require("./routes/replacement");
 const lexiconRoutes = require("./routes/lexicon");
+const trendRoutes = require("./routes/trends");
 const historyRoutes = require("./routes/history");
 const jobRoutes = require("./routes/jobs");
 const auditLogRoutes = require("./routes/auditLog");
@@ -62,7 +65,11 @@ app.use("/api/image-to-video", imageToVideoRoutes);
 // Campaign Kit — plus the saved kits they write.
 app.use("/api/marketing-kit", marketingKitRoutes);
 app.use("/api/product-background", productBackgroundRoutes);
+// Cards on Image Cleaning — they run under that tool's grant and pricing.
+app.use("/api/product-views", productViewsRoutes);
+app.use("/api/replacement", replacementRoutes);
 app.use("/api/lexicon", lexiconRoutes);
+app.use("/api/trends", trendRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/jobs", jobRoutes);
 app.use("/api/audit-log", auditLogRoutes);

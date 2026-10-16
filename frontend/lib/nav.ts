@@ -244,7 +244,10 @@ export const TOOL_WORKSPACE_PATHS: Record<string, string> = {
  * with no way back to the model it was actually made on — so a GPT label
  * routes back to New Cleaning instead.
  */
-export function workspacePathFor(tool: string, modelLabel?: string | null) {
+export function workspacePathFor(tool: string, modelLabel?: string | null, mode?: string | null) {
+  // Product Views and Replacement are cards on Image Cleaning with pages of their own.
+  if (tool === "cleaning" && mode === "product_views") return "/cleaning/views";
+  if (tool === "cleaning" && mode === "replacement") return "/cleaning/replace";
   if (tool === "cleaning" && modelLabel && NEW_CLEANING_MODEL_LABELS.has(modelLabel)) {
     return "/cleaning/new";
   }
@@ -252,8 +255,14 @@ export function workspacePathFor(tool: string, modelLabel?: string | null) {
 }
 
 /** The link that reopens one conversation, or null if that tool can't. */
-export function conversationHref(tool: string, conversationId?: string | null, modelLabel?: string | null) {
-  const path = workspacePathFor(tool, modelLabel);
+export function conversationHref(
+  tool: string,
+  conversationId?: string | null,
+  modelLabel?: string | null,
+  /** The run's sub-mode, for a tool that gives one its own page. */
+  mode?: string | null
+) {
+  const path = workspacePathFor(tool, modelLabel, mode);
   return path && conversationId ? `${path}?conversationId=${conversationId}` : null;
 }
 

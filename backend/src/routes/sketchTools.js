@@ -5,6 +5,7 @@ const { clampCount } = require("../jobs/generationRunner");
 const { TEXT_TO_SKETCH_JOB, SKETCH_TO_IMAGE_JOB, IMAGE_TO_SKETCH_JOB } = require("../jobs/sketchTools");
 const { resolveSketchMode, variationCountFor, describeSketchMode } = require("../prompts/intent");
 const { queueGeneration, parseImages } = require("./queueGeneration");
+const { readTrendCues } = require("../services/trends");
 
 /**
  * The three sketch tools' entry points. Each validates what only it knows —
@@ -75,6 +76,10 @@ router.post("/text-to-sketch", requirePermission("tool.text_to_sketch.run"), asy
           // The optional reference photo the brief is drawn from.
           sourceImages: parseImages(body.referenceImage),
           conversationId: body.conversationId || null,
+          // The current trends the builder asked each sketch to follow, in turn.
+          trendCues: readTrendCues(body.trends),
+          // New design options from the reference photo, rather than a redraw of it.
+          designVariations: body.designVariations === true && Boolean(body.referenceImage),
         },
     message: refinement
       ? `queued a text-to-sketch refinement on ${modelLabel}`

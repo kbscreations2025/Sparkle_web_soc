@@ -4,6 +4,7 @@ const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri } = require("../generationService");
 const { queueGeneration, parseImages } = require("./queueGeneration");
 const { TEXT_TO_IMAGE_JOB, MAX_IMAGE_COUNT, DEFAULT_IMAGE_COUNT } = require("../jobs/textToImage");
+const { readTrendCues } = require("../services/trends");
 
 const router = express.Router();
 
@@ -35,6 +36,8 @@ router.post("/", async (req, res) => {
     preview,
     conversationId,
     parentGenerationId,
+    trends,
+    designVariations,
   } = req.body || {};
 
   const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
@@ -113,6 +116,10 @@ router.post("/", async (req, res) => {
       requestedQuality,
       conversationId: conversationId || null,
       sourceImages: reference,
+      // The current trends the builder asked each image to follow, in turn.
+      trendCues: readTrendCues(trends),
+      // New design options from the reference photo, rather than a recreation of it.
+      designVariations: designVariations === true && reference.length > 0,
     },
     message: `queued a text-to-image run (${numImages} image${numImages > 1 ? "s" : ""}) on ${modelLabel}`,
   });

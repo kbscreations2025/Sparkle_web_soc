@@ -106,7 +106,7 @@ function QueueRow({
   // Resolved per tool rather than assuming the cleaning workspace — the queue
   // is shared, and hardcoding one tool's path sends every other tool's result
   // to the wrong page.
-  const href = conversationHref(job.tool, job.result?.conversationId, model);
+  const href = conversationHref(job.tool, job.result?.conversationId, model, job.request?.mode);
 
   return (
     <li className="flex items-start gap-2 px-3 py-2">

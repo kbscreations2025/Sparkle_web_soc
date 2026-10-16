@@ -31,6 +31,7 @@ export function GenerationResults<TModel extends string>({
   downloadName = "generated.png",
   modelLabel,
   checkerboard,
+  onReset,
 }: {
   workspace: ReturnType<typeof useGenerationWorkspace>;
   modelOptions: readonly {
@@ -53,6 +54,8 @@ export function GenerationResults<TModel extends string>({
   modelLabel?: string;
   /** Show results over a checkerboard — for a tool whose results can be transparent. */
   checkerboard?: boolean;
+  /** Replaces the header's "start over" — for a page that returns to its own view instead. */
+  onReset?: () => void;
 }) {
   const {
     images,
@@ -80,7 +83,7 @@ export function GenerationResults<TModel extends string>({
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-      <ToolHeader onReset={reset} resetLabel={resetLabel} />
+      <ToolHeader onReset={onReset ?? reset} resetLabel={resetLabel} />
       <ErrorBanner message={error} />
 
       <StudioSplitLayout

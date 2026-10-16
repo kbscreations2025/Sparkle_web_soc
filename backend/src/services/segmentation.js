@@ -93,11 +93,40 @@ async function toFrameMask(list, width, height) {
 }
 
 /**
+ * The boxes in one answer, filled, as a full-frame mask at the sent copy's
+ * size — or null when it has none. Coarse, but the boxes are right even when
+ * the masks beside them are tokens.
+ */
+function toBoxMask(list, width, height) {
+  const frame = Buffer.alloc(width * height);
+  let used = 0;
+  for (const item of list) {
+    const box = Array.isArray(item?.box_2d) ? item.box_2d.map(Number) : null;
+    if (!box || box.length !== 4 || box.some((v) => !Number.isFinite(v))) continue;
+    const [y0, x0, y1, x1] = box;
+    const left = Math.max(0, Math.round((x0 / 1000) * width));
+    const top = Math.max(0, Math.round((y0 / 1000) * height));
+    const right = Math.min(width, Math.round((x1 / 1000) * width));
+    const bottom = Math.min(height, Math.round((y1 / 1000) * height));
+    if (right - left < 2 || bottom - top < 2) continue;
+    for (let y = top; y < bottom; y++) frame.fill(255, y * width + left, y * width + right);
+    used += 1;
+  }
+  return used ? frame : null;
+}
+
+/**
  * The piece's mask for `buffer`, as `{ data, width, height }` (one channel,
  * 0–255, covering the whole photo at the sent size), or null when no attempt
  * produced one. Never throws: the cutout simply goes on without it.
+ *
+ * `boxes: true` is for a caller that needs only where the piece is, not its
+ * outline (Replacement): when every answer's masks are tokens, the boxes they
+ * came with are filled instead, flagged `fromBoxes`. Off by default — a
+ * cutout needs the outline itself, and a filled box would lift the backdrop
+ * inside it out with the piece.
  */
-async function segmentPiece({ tenant, buffer }) {
+async function segmentPiece({ tenant, buffer, boxes: allowBoxes = false }) {
   let send;
   try {
     send = await sharp(buffer, { failOn: "none" })
@@ -128,22 +157,27 @@ async function segmentPiece({ tenant, buffer }) {
     if (output.blocked) throw new Error("segmentation answer was blocked");
     const list = parseList(output.text);
     const mask = list ? await toFrameMask(list, width, height) : null;
-    if (!mask) throw new Error("segmentation answer had no usable mask");
-    return mask;
+    if (mask) return { data: mask, width, height };
+    // Whoever asked for boxes is served by the first answer with any — not
+    // kept waiting on a slower attempt that might still bring a mask.
+    const boxed = allowBoxes && list ? toBoxMask(list, width, height) : null;
+    if (boxed) return { data: boxed, width, height, fromBoxes: true };
+    throw new Error("segmentation answer had no usable mask");
   };
 
   // Two rounds at most: a photo the model keeps answering in mask tokens is
   // not worth a third wait, and colour alone is a fair cut for most pieces.
   for (let round = 1; round <= ROUNDS; round++) {
     try {
-      const data = await Promise.any(Array.from({ length: ATTEMPTS }, attempt));
-      return { data, width, height };
+      const found = await Promise.any(Array.from({ length: ATTEMPTS }, attempt));
+      if (found.fromBoxes) console.warn("[segmentation] using the answer's boxes instead of a mask");
+      return found;
     } catch (err) {
       const reasons = err?.errors?.map((entry) => entry.message).join("; ") || err.message;
       console.warn(`[segmentation] round ${round}/${ROUNDS} gave no usable mask:`, reasons);
     }
   }
-  console.warn("[segmentation] cutting out by colour alone");
+  if (!allowBoxes) console.warn("[segmentation] cutting out by colour alone");
   return null;
 }
 

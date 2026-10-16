@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useStoredImageCount } from "@/lib/useStoredImageCount";
-import { Wand2 } from "lucide-react";
+import { Sparkles, Wand2 } from "lucide-react";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
 import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
@@ -72,6 +72,8 @@ export default function TextToImagePage() {
   });
   /** An optional photo to start the design from, separate from chat attachments. */
   const reference = useReferencePhoto(workspace.setError);
+  /** Which button started the run — "Make variations" or the plain generate — for the waiting label. */
+  const [makingVariations, setMakingVariations] = useState(false);
 
   // The builder and the free text are independent: either can be used alone,
   // and typing never clobbers a selection or the other way round.
@@ -81,7 +83,14 @@ export default function TextToImagePage() {
     return <ToolAccessNotice tool="Text to Image" />;
   }
 
-  function handleGenerate() {
+  /**
+   * With a reference photo there are two ways to go: apply the brief to that
+   * design ("Generate image"), or grow new design options out of it ("Make
+   * variations"). Without one, only the first.
+   */
+  function handleGenerate(variations = false) {
+    const designVariations = variations && Boolean(reference.photo);
+    setMakingVariations(designVariations);
     workspace.generate(
       () =>
         textToImage({
@@ -92,6 +101,8 @@ export default function TextToImagePage() {
           aspect,
           count,
           referenceImage: reference.photo ?? undefined,
+          trends: builder.trendCuesFor(count),
+          designVariations,
         }),
       { count, prompt: finalDescription, images: reference.photo ? [reference.photo] : [] }
     );
@@ -107,7 +118,11 @@ export default function TextToImagePage() {
         qualityValue={quality}
         onQualityChange={setQuality}
         hints={REFINE_HINTS}
-        busyLabel={`Generating ${count > 1 ? `${count} images` : "image"}…`}
+        busyLabel={
+          makingVariations
+            ? `Designing ${count > 1 ? `${count} variations` : "a variation"}…`
+            : `Generating ${count > 1 ? `${count} images` : "image"}…`
+        }
         resetLabel="New image"
         downloadName="generated.png"
         modelLabel={OPTIONAL_IMAGE_MODELS.find((entry) => entry.id === model)?.label}
@@ -154,14 +169,36 @@ export default function TextToImagePage() {
               footerEnd={<InlineModelSelect models={OPTIONAL_IMAGE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
-            <RunButton
-              onClick={handleGenerate}
-              // Nothing to work from yet: the builder starts empty.
-              disabled={!finalDescription && !reference.photo}
-              icon={<Wand2 size={14} />}
-            >
-              {count > 1 ? `Generate ${count} images` : "Generate image"}
-            </RunButton>
+            {reference.photo ? (
+              // With a reference: change this design, or design new options from it.
+              <div className="flex gap-2">
+                <RunButton onClick={() => handleGenerate(false)} icon={<Wand2 size={14} />} className="flex-1">
+                  {finalDescription
+                    ? count > 1
+                      ? `Generate ${count} images`
+                      : "Generate image"
+                    : count > 1
+                      ? `Recreate ${count} images`
+                      : "Recreate image"}
+                </RunButton>
+                <RunButton
+                  onClick={() => handleGenerate(true)}
+                  icon={<Sparkles size={14} />}
+                  className="flex-1 bg-transparent hover:bg-gold/10"
+                >
+                  {count > 1 ? `Make ${count} variations` : "Make a variation"}
+                </RunButton>
+              </div>
+            ) : (
+              <RunButton
+                onClick={() => handleGenerate(false)}
+                // Nothing to work from yet: the builder starts empty.
+                disabled={!finalDescription}
+                icon={<Wand2 size={14} />}
+              >
+                {count > 1 ? `Generate ${count} images` : "Generate image"}
+              </RunButton>
+            )}
           </div>
         </div>
       </div>

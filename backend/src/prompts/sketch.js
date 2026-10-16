@@ -6,6 +6,7 @@ const {
 } = require("./sketchMasterPrompts");
 const { buildReferenceNote } = require("./shared");
 const { RELATED_DIRECTIONS } = require("./intent");
+const { VARIATION_FOCI } = require("./textToImage");
 
 /**
  * The instructions behind the three sketch tools.
@@ -73,10 +74,37 @@ function buildTextToSketchPrompt({ description, style, aspect, count = 1, hasRef
   prompt += variationNote(count);
 
   if (hasReference) {
-    prompt = `A reference jewellery photo is attached — use it as the visual starting point for the design (its jewelry type, silhouette and general design language), then apply the design brief below on top of it, favouring anything the brief specifies over the reference where they conflict.\n\n${prompt}`;
+    prompt = `A reference jewellery photo is attached — keep that exact design (its jewelry type, silhouette, stones, setting and details) and change only what the design brief below asks for. Where the brief specifies something, it wins over the reference; everything it does not mention stays as in the photo.\n\n${prompt}`;
   }
 
   return prompt;
+}
+
+/**
+ * "Make variations" on a reference photo: design option `index` of `total`,
+ * a new design grown out of the reference and drawn in the chosen medium —
+ * each option changing a different part (see VARIATION_FOCI).
+ */
+function buildTextToSketchVariationPrompt({ description, style, aspect, index = 0, total = 1 }) {
+  const focus = VARIATION_FOCI[index % VARIATION_FOCI.length];
+  const brief = description?.trim();
+  const sketch = buildTextToSketchPrompt({
+    description: brief
+      ? `a new design option based on the attached reference piece, with this direction applied: ${brief}`
+      : "a new design option based on the attached reference piece",
+    style,
+    aspect,
+    count: 1,
+    hasReference: false,
+  });
+
+  return [
+    `A reference jewellery photo is attached. Draw design option ${index + 1} of ${total}: a NEW jewellery design inspired by the reference — not a copy of it and not the same piece from a different angle.`,
+    "Keep from the reference: the type of piece (a ring stays a ring), its overall style and design language, the metal and the main stone, unless the brief says otherwise.",
+    `For this option, ${focus}. The change must be clearly visible, so this design is easy to tell apart from the reference and from the other options.`,
+    "",
+    sketch,
+  ].join("\n");
 }
 
 /** Fallback for a style id with no master prompt of its own. */
@@ -355,6 +383,7 @@ function buildSketchToImageRefinePrompt({ instruction, referenceCount = 0 }) {
 
 module.exports = {
   buildTextToSketchPrompt,
+  buildTextToSketchVariationPrompt,
   buildTextToSketchRefinePrompt,
   buildImageToSketchPrompt,
   buildImageToSketchRefinePrompt,

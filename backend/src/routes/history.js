@@ -397,6 +397,8 @@ function toHistoryItem(generation, dbUser) {
     kitId: generation.request?.params?.kitId || null,
     /** Which surface reopens it. Null on runs recorded before it was stored — those are Affinity decks. */
     kitKind: generation.request?.params?.kitKind || null,
+    /** A tool's sub-mode, where it has its own page — Image Cleaning's "product_views". */
+    mode: generation.request?.params?.mode || null,
   };
 }
 
@@ -468,6 +470,29 @@ router.get("/conversations/:id", async (req, res) => {
       // What a text-out tool produced — absent from `outputAssets`, which is
       // only ever pictures.
       text: g.response?.text || null,
+      // Product Views: the piece, and the angle of each input and output, so
+      // the page can lay the run back out in its boxes.
+      ...(g.request?.params?.mode === "product_views"
+        ? {
+            productViews: {
+              category: g.request.params.category || "ring",
+              photoViews: g.request.params.photoViews || [],
+              outputViews: g.request.params.outputViews || null,
+            },
+          }
+        : {}),
+      // Replacement: what the new piece is, so a reopened chat can go on
+      // changing it. The photo and the product shot are the first turn's
+      // "uploaded" and "reference" inputs.
+      ...(g.request?.params?.mode === "replacement"
+        ? {
+            replacement: {
+              category: g.request.params.category || "ring",
+              size: g.request.params.size || null,
+              description: g.request.params.description || null,
+            },
+          }
+        : {}),
     })),
   });
 });
