@@ -1312,25 +1312,36 @@ export function imageToText(body: { image: string; preview?: string | null }) {
  * Gemini Veo list. `durations`/`resolutions` are what each model accepts —
  * the backend clamps to the same lists. Veo runs on the Gemini keys with
  * OpenRouter as a priority-ordered fallback; the rest are OpenRouter only.
+ *
+ * `badge`s come from a side-by-side test on one of our rings — the same front
+ * photo pinned as the first frame and side photo as the last, a quarter-turn
+ * between them: Wan 3.0 landed exactly on the side photo with nothing
+ * invented; Kling 3.0 Pro turned at the most even speed and ended close.
+ *
+ * One model per maker, the strongest. Veo 3.1 Fast is gone — both of its runs
+ * here failed, and in that test it ended on a different angle with an
+ * invented split shank — and so are the budget and draft tiers (Veo Lite,
+ * Kling Standard, Wan 2.7, Seedance 2.0 Fast) and Seedance 2.5, which
+ * OpenRouter caps at 720p. Kling 3.0 Pro is 720p only, as OpenRouter lists it.
+ *
+ * Listed worst to best, so the best sits at the bottom of the picker — the
+ * menu opens upward from its button, which puts the best one nearest it:
+ * Wan 3.0 (exact on the photos), then Kling 3.0 Pro (most even turn), then
+ * Veo 3.1 Standard (reliable, but its multi-view 360° got the back wrong),
+ * then Seedance 2.0 (not yet tried on a 360° here).
  */
 const VEO_DURATIONS = [4, 6, 8] as const;
 const BOTH_RES = ["720p", "1080p"] as const;
 export const VIDEO_MODELS = [
-  { id: "veo-3.1-generate-preview", label: "Veo 3.1 Standard", provider: "Google", description: "Highest fidelity · richest motion & detail", durations: VEO_DURATIONS, resolutions: BOTH_RES },
-  { id: "veo-3.1-fast-generate-preview", label: "Veo 3.1 Fast", provider: "Google", description: "Faster turnaround · strong quality", durations: VEO_DURATIONS, resolutions: BOTH_RES },
-  { id: "veo-3.1-lite-generate-preview", label: "Veo 3.1 Lite", provider: "Google", description: "Lightweight & economical", durations: VEO_DURATIONS, resolutions: BOTH_RES },
-  { id: "kwaivgi/kling-v3.0-pro", label: "Kling 3.0 Pro", provider: "Kling", description: "Very stable object · smooth orbits", durations: [5, 10], resolutions: BOTH_RES },
-  { id: "kwaivgi/kling-v3.0-std", label: "Kling 3.0 Standard", provider: "Kling", description: "Stable motion · lower cost", durations: [5, 10], resolutions: ["720p"] },
-  { id: "openai/sora-2-pro", label: "Sora 2 Pro", provider: "OpenAI", description: "Rich lighting · best for mood shots", durations: [4, 8, 12], resolutions: BOTH_RES },
-  { id: "alibaba/wan-3.0", label: "Wan 3.0", provider: "Alibaba", description: "Good value · clean backdrops", durations: [5], resolutions: BOTH_RES },
-  { id: "alibaba/wan-2.7", label: "Wan 2.7", provider: "Alibaba", description: "Budget · plain backdrops", durations: [5], resolutions: BOTH_RES },
-  { id: "bytedance/seedance-2.5", label: "Seedance 2.5", provider: "ByteDance", description: "Cinematic motion", durations: [4, 5, 10], resolutions: BOTH_RES },
-  { id: "bytedance/seedance-2.0", label: "Seedance 2.0", provider: "ByteDance", description: "Balanced speed & quality", durations: [4, 5, 10], resolutions: BOTH_RES },
-  { id: "bytedance/seedance-2.0-fast", label: "Seedance 2.0 Fast", provider: "ByteDance", description: "Fastest · drafts", durations: [4, 5, 10], resolutions: ["720p"] },
+  { id: "bytedance/seedance-2.0", label: "Seedance 2.0", provider: "ByteDance", description: "Balanced speed & quality · not yet tried on a 360° here", durations: [4, 5, 10], resolutions: BOTH_RES },
+  { id: "veo-3.1-generate-preview", label: "Veo 3.1 Standard", provider: "Google", description: "Highest fidelity · richest motion & detail · every run here has worked", durations: VEO_DURATIONS, resolutions: BOTH_RES },
+  { id: "kwaivgi/kling-v3.0-pro", label: "Kling 3.0 Pro", provider: "Kling", description: "Most even turning speed in our 360° test · stable object", durations: [5, 10], resolutions: ["720p"], badge: "Smooth 360°" },
+  { id: "alibaba/wan-3.0", label: "Wan 3.0", provider: "Alibaba", description: "Lands exactly on your photos · films the pinned 360° · clean backdrops", durations: [5, 8, 10], resolutions: BOTH_RES, badge: "Best 360°" },
 ] as const;
 
 export type VideoModelId = (typeof VIDEO_MODELS)[number]["id"];
-export const DEFAULT_VIDEO_MODEL: VideoModelId = "veo-3.1-fast-generate-preview";
+/** The best of them — Wan 3.0, which landed exactly on our photos in the 360° test. */
+export const DEFAULT_VIDEO_MODEL: VideoModelId = "alibaba/wan-3.0";
 
 /**
  * Verified live against this account: durations outside 4–8s were rejected
@@ -1396,14 +1407,26 @@ export const VIDEO_REFERENCE_VIEWS = 3;
  * in `backend/src/prompts/video.js`, which enforces it. Anything else comes
  * back as an opaque 400 minutes into the queue, so with more than one view
  * the page locks these rather than offering picks that can't be honoured.
- *
- * Notably Fast and Lite do not support reference images at all.
  */
 export const VIDEO_REFERENCE_MODE = {
   model: "veo-3.1-generate-preview" as VideoModelId,
   aspectRatio: "16:9",
   resolution: "720p",
   durationSeconds: 8,
+} as const;
+
+/**
+ * The pinned 360° — mirrors TURNTABLE in `backend/src/prompts/video.js`.
+ * With the orbit camera, a Front photo and at least one more of Side, Back
+ * and Other side, the turn is filmed as segments between those photos on
+ * Wan 3.0, each landing exactly on the next photo, and joined into one loop.
+ * `angles` are the view labels it pins, in the order the piece turns.
+ */
+export const VIDEO_TURNTABLE = {
+  model: "alibaba/wan-3.0" as VideoModelId,
+  angles: ["Front", "Side", "Back", "Other side"],
+  lengths: [6, 8, 10, 12, 15],
+  defaultLength: 8,
 } as const;
 
 /**
@@ -1430,8 +1453,11 @@ export function imageToVideo(body: {
   mood: string;
   aspectRatio: string;
   resolution: string;
+  /** The length of the clip — for a pinned 360°, of the finished loop. */
   durationSeconds: number;
   preview?: string | null;
+  /** Film a pinned 360° between the labelled photos — see VIDEO_TURNTABLE. */
+  turntable?: boolean;
 }) {
   return apiRequest<QueuedResult>("/api/image-to-video", { method: "POST", body: JSON.stringify(body) });
 }

@@ -23,18 +23,16 @@ const DEFAULT_TEXT_MODEL = GEMINI_TEXT_MODELS[0];
  * on: `gemini-omni-flash-preview` 404s on `predictLongRunning` through the
  * Gemini Developer API, so it is deliberately absent rather than offered and
  * always failing.
+ *
+ * Standard only. Fast failed both of its runs here and invented a split
+ * shank on our 360° test; Lite is a lower tier of the same model. A request
+ * still naming either (an old page) resolves to Standard.
  */
-const GEMINI_VIDEO_MODELS = [
-  "veo-3.1-generate-preview",
-  "veo-3.1-fast-generate-preview",
-  "veo-3.1-lite-generate-preview",
-];
-const DEFAULT_VIDEO_MODEL = "veo-3.1-fast-generate-preview";
+const GEMINI_VIDEO_MODELS = ["veo-3.1-generate-preview"];
+const DEFAULT_VIDEO_MODEL = "veo-3.1-generate-preview";
 
 const GEMINI_VIDEO_MODEL_LABELS = {
   "veo-3.1-generate-preview": "Veo 3.1 Standard",
-  "veo-3.1-fast-generate-preview": "Veo 3.1 Fast",
-  "veo-3.1-lite-generate-preview": "Veo 3.1 Lite",
 };
 
 /**

@@ -245,7 +245,7 @@ export const TOOL_WORKSPACE_PATHS: Record<string, string> = {
  * routes back to New Cleaning instead.
  */
 export function workspacePathFor(tool: string, modelLabel?: string | null, mode?: string | null) {
-  // Product Views and Replacement are cards on Image Cleaning with pages of their own.
+  // Views Generator and Jewellery Swap are cards on Image Cleaning with pages of their own.
   if (tool === "cleaning" && mode === "product_views") return "/cleaning/views";
   if (tool === "cleaning" && mode === "replacement") return "/cleaning/replace";
   if (tool === "cleaning" && modelLabel && NEW_CLEANING_MODEL_LABELS.has(modelLabel)) {

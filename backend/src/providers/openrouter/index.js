@@ -87,6 +87,13 @@ function classifyError(err) {
     return { message: "The request could not be processed. Please adjust the input and try again.", code, retryable: false };
   }
 
+  // Any other refusal: say what the model said, briefly — "something went
+  // wrong" gives the person nothing to change.
+  const reason = String(raw).replace(/\s+/g, " ").trim().slice(0, 160);
+  if (code >= 400 && code < 500 && reason) {
+    return { message: `The model refused this request: ${reason}`, code, retryable: false };
+  }
+
   return { message: "Something went wrong talking to the model.", code, retryable: false };
 }
 
@@ -340,19 +347,23 @@ async function generateText({
  *
  * `durations` and `resolutions` are what this app offers per model — the
  * route clamps to them, so a pick the model can't run never reaches it.
+ *
+ * One model per maker, the strongest: the budget and draft tiers (Veo Fast
+ * and Lite, Kling Standard, Wan 2.7, Seedance 2.0 Fast) and Seedance 2.5 —
+ * which OpenRouter caps at 720p — are gone, and so is Sora 2 Pro, which
+ * OpenRouter no longer lists. Kling 3.0 Pro is 720p only, as OpenRouter
+ * lists it (its clips still arrive at 1080p).
+ *
+ * `maxPrompt` is the longest prompt a model accepts. Kling's is 2,500
+ * characters; the full Image to Video prompt with a design spec runs past
+ * 3,000, which is why its runs failed — prompts/video.js compacts to fit.
  */
 const OPENROUTER_VIDEO_MODELS = {
   "google/veo-3.1": { label: "Veo 3.1 Standard", durations: [4, 6, 8], resolutions: ["720p", "1080p"] },
-  "google/veo-3.1-fast": { label: "Veo 3.1 Fast", durations: [4, 6, 8], resolutions: ["720p", "1080p"] },
-  "google/veo-3.1-lite": { label: "Veo 3.1 Lite", durations: [4, 6, 8], resolutions: ["720p", "1080p"] },
-  "kwaivgi/kling-v3.0-pro": { label: "Kling 3.0 Pro", durations: [5, 10], resolutions: ["720p", "1080p"] },
-  "kwaivgi/kling-v3.0-std": { label: "Kling 3.0 Standard", durations: [5, 10], resolutions: ["720p"] },
-  "openai/sora-2-pro": { label: "Sora 2 Pro", durations: [4, 8, 12], resolutions: ["720p", "1080p"] },
-  "alibaba/wan-3.0": { label: "Wan 3.0", durations: [5], resolutions: ["720p", "1080p"] },
-  "alibaba/wan-2.7": { label: "Wan 2.7", durations: [5], resolutions: ["720p", "1080p"] },
-  "bytedance/seedance-2.5": { label: "Seedance 2.5", durations: [4, 5, 10], resolutions: ["720p", "1080p"] },
+  "kwaivgi/kling-v3.0-pro": { label: "Kling 3.0 Pro", durations: [5, 10], resolutions: ["720p"], maxPrompt: 2500 },
+  // OpenRouter takes 2–30s; these are the lengths the picker offers, 8s its default.
+  "alibaba/wan-3.0": { label: "Wan 3.0", durations: [5, 8, 10], resolutions: ["720p", "1080p"] },
   "bytedance/seedance-2.0": { label: "Seedance 2.0", durations: [4, 5, 10], resolutions: ["720p", "1080p"] },
-  "bytedance/seedance-2.0-fast": { label: "Seedance 2.0 Fast", durations: [4, 5, 10], resolutions: ["720p"] },
 };
 
 function isKnownVideoModel(modelId) {
@@ -361,6 +372,11 @@ function isKnownVideoModel(modelId) {
 
 function videoLabelFor(modelId) {
   return OPENROUTER_VIDEO_MODELS[modelId]?.label || modelId;
+}
+
+/** The longest prompt `modelId` accepts, or null when it has no known limit. */
+function videoPromptLimit(modelId) {
+  return OPENROUTER_VIDEO_MODELS[modelId]?.maxPrompt ?? null;
 }
 
 /** Same cadence and ceiling as gemini.js's Veo polling — see there. */
@@ -392,15 +408,28 @@ async function openrouterFetch(apiKey, path, init = {}) {
  * frame; several go in as `input_references` instead, mirroring the
  * first-frame vs reference split the Gemini path makes.
  *
+ * `frames: { first, last }` pins both ends instead — the clip has to open on
+ * one image and land on the other (the turntable's quarter-turns). It wins
+ * over `views`. `generateAudio: false` asks for a silent clip, which some
+ * models price lower.
+ *
  * Returns `{ base64, mimeType, text }` like every other generator here.
  */
-async function generateVideo({ apiKey, modelId, prompt, views, aspectRatio, resolution, durationSeconds, onPoll }) {
+async function generateVideo({ apiKey, modelId, prompt, views, frames, generateAudio, aspectRatio, resolution, durationSeconds, onPoll }) {
   const asUrl = ({ mimeType, base64 }) => ({ type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } });
-  const imageInput = !views?.length
-    ? {}
-    : views.length === 1
-      ? { frame_images: [{ ...asUrl(views[0]), frame_type: "first_frame" }] }
-      : { input_references: views.map(asUrl) };
+  const imageInput =
+    frames?.first && frames?.last
+      ? {
+          frame_images: [
+            { ...asUrl(frames.first), frame_type: "first_frame" },
+            { ...asUrl(frames.last), frame_type: "last_frame" },
+          ],
+        }
+      : !views?.length
+        ? {}
+        : views.length === 1
+          ? { frame_images: [{ ...asUrl(views[0]), frame_type: "first_frame" }] }
+          : { input_references: views.map(asUrl) };
 
   const submitted = await withRetry(async () =>
     (
@@ -412,6 +441,7 @@ async function generateVideo({ apiKey, modelId, prompt, views, aspectRatio, reso
           duration: durationSeconds,
           resolution,
           aspect_ratio: aspectRatio,
+          ...(generateAudio === false ? { generate_audio: false } : {}),
           ...imageInput,
         }),
       })
@@ -433,8 +463,13 @@ async function generateVideo({ apiKey, modelId, prompt, views, aspectRatio, reso
   }
 
   if (job.status === "failed") {
-    const err = new Error(job.error?.message || job.error || "Video generation failed");
-    err.error = { message: String(job.error?.message || job.error || "") };
+    // The provider's own reason, shown as it is: a run it accepted and then
+    // failed carries no status code for classifyError to read, and its
+    // generic fallback told the person nothing.
+    const reason = String(job.error?.message || job.error || "").replace(/\s+/g, " ").trim().slice(0, 160);
+    const err = new Error(reason ? `The video model couldn't make this clip: ${reason}` : "Video generation failed");
+    err.error = { message: reason };
+    if (reason) err.expose = true;
     throw err;
   }
   if (job.status !== "completed") {
@@ -459,6 +494,7 @@ module.exports = {
   OPENROUTER_VIDEO_MODELS,
   isKnownVideoModel,
   videoLabelFor,
+  videoPromptLimit,
   generateVideo,
   OPENROUTER_MODELS,
   DEFAULT_OPENROUTER_MODEL,

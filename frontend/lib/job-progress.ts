@@ -92,6 +92,7 @@ const PHASE_LABELS: Record<string, string> = {
   generating: "Generating",
   analysing: "Analysing",
   cutting: "Cutting out",
+  joining: "Joining",
   saving: "Saving",
 };
 

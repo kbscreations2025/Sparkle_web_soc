@@ -19,6 +19,11 @@ export type InlineOption<T extends string> = {
    * (or a list where nothing sets one) render exactly as before this existed.
    */
   group?: string;
+  /**
+   * A short tag beside the name — "Best 360°" — for the options worth singling
+   * out. Kept to two or three words: it shares the row with the name.
+   */
+  badge?: string;
 };
 
 /**
@@ -156,6 +161,11 @@ export function InlineDropdown<T extends string>({
                         {option.label}
                       </span>
                     </span>
+                    {option.badge && (
+                      <span className="mt-px shrink-0 rounded-full border border-gold/25 bg-gold/10 px-1.5 py-px text-[8px] font-semibold uppercase leading-[14px] tracking-wide text-gold">
+                        {option.badge}
+                      </span>
+                    )}
                     {/* Reserved whether or not it shows, so the labels of the
                         selected and unselected rows line up. */}
                     <Check

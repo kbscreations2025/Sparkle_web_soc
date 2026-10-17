@@ -4,10 +4,13 @@ const { recordGeneration } = require("../generationService");
 const {
   buildImageAnimationPrompt,
   buildDesignSpecPrompt,
+  buildTurntableSegmentPrompt,
   DEFAULT_NEGATIVE_PROMPT,
   MAX_REFERENCE_IMAGES,
   REFERENCE_MODE,
+  TURNTABLE,
 } = require("../prompts/video");
+const { frameSize, framePhotos, turnJump, snapped, retraceScore, retraced, assembleLoop } = require("../video/turntable");
 const gemini = require("../providers/gemini");
 const openrouter = require("../providers/openrouter");
 const User = require("../models/user");
@@ -69,6 +72,10 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
     }
   });
 
+  if (data.turntable) {
+    return filmTurntable({ job, data, setProgress, withProgress, dbUser, tenant, views, designSpec });
+  }
+
   const prompt = buildImageAnimationPrompt({
     camera: data.camera,
     mood: data.mood,
@@ -81,6 +88,8 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
      */
     viewCount: Math.min(views.length, MAX_REFERENCE_IMAGES),
     designSpec,
+    // Kling refuses a prompt over 2,500 characters — compacted to fit.
+    maxLength: requestedProvider === "openrouter" ? openrouter.videoPromptLimit(modelId) : null,
   });
 
   /*
@@ -183,5 +192,172 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
     provider,
   };
 });
+
+/**
+ * The pinned turntable: a full turn filmed as segments between the person's
+ * own photos — front → side → back → other side → front, or as many of those
+ * as were given — each segment pinned to a photo at both ends. Every
+ * photographed angle is therefore the photograph itself; the model only
+ * animates the turn between two known views. The segments are then evened
+ * out and joined into one seamless loop (video/turntable.js).
+ *
+ * The route plans which segments to film from what the photos show (see
+ * queueTurntable): normally one per pair of neighbouring angles; for a piece
+ * whose Back is the same photo as its Front, just Front → Side → Back, played
+ * twice.
+ *
+ * All segments are filmed at once. One that fails fails the run: a turn with
+ * a missing quarter is not a turntable. Then each is checked, and refilmed —
+ * up to twice, keeping the best take — when it:
+ *  - snapped: held still, then jumped to its last frame (turnJump);
+ *  - turned back: played the segment before it in reverse, which is how the
+ *    turn "goes backwards and forwards again" (retraceScore).
+ * Extra takes are on us: the run is priced by its segments, not its takes.
+ */
+const MAX_RETAKES = 2;
+
+async function filmTurntable({ job, data, setProgress, withProgress, dbUser, tenant, views, designSpec }) {
+  const pinned = data.pinned.map((entry) => ({ ...entry, image: views[entry.index] }));
+  const size = frameSize(data.resolution, data.aspectRatio);
+  const frames = await framePhotos(
+    pinned.map((entry) => entry.image),
+    size
+  );
+
+  // Jobs queued before plans existed: every neighbouring pair, played once.
+  const plan =
+    data.segments ??
+    pinned.map((entry, index) => {
+      const next = (index + 1) % pinned.length;
+      return {
+        fromPin: index,
+        toPin: next,
+        from: entry.label,
+        to: pinned[next].label,
+        degrees: (pinned[next].degrees - entry.degrees + 360) % 360 || 360,
+        seconds: data.segmentSeconds[index],
+      };
+    });
+  const loop = data.loop ?? plan.map((_, index) => index);
+  const segments = plan.map((segment) => ({ ...segment, first: frames[segment.fromPin], last: frames[segment.toPin] }));
+
+  const film = async (segment) => {
+    const result = await routeVideoCall({
+      tenant,
+      provider: "openrouter",
+      modelId: TURNTABLE.model,
+      prompt: buildTurntableSegmentPrompt({ ...segment, designSpec, description: data.description }),
+      frames: { first: segment.first, last: segment.last },
+      // A turntable has nothing to say; silence is also cheaper.
+      generateAudio: false,
+      config: { aspectRatio: data.aspectRatio, resolution: data.resolution, durationSeconds: segment.seconds },
+    });
+    const buffer = Buffer.from(result.output.base64, "base64");
+    return { ...result, buffer, jump: await turnJump(buffer, data.aspectRatio) };
+  };
+
+  const filmed = await withProgress({ from: 15, to: 72, phase: "generating", steps: segments.length }, ({ stepDone }) =>
+    Promise.all(
+      segments.map(async (segment) => {
+        let take = await film(segment);
+        if (snapped(take.jump)) {
+          console.warn(`[imageToVideo] turntable job ${job._id}: ${segment.from} → ${segment.to} snapped (${take.jump.toFixed(1)}×), filming it again`);
+          const retake = await film(segment);
+          if (retake.jump < take.jump) take = retake;
+        }
+        await stepDone(null);
+        return take;
+      })
+    )
+  );
+
+  // Each segment against the one before it: refilm any that turned back. The
+  // scores are taken afresh every round, since a retake changes what the
+  // segment after it is measured against.
+  await setProgress(74, "generating");
+  const scoreAll = () =>
+    Promise.all(filmed.map((take, k) => (k === 0 ? 1 : retraceScore(take.buffer, filmed[k - 1].buffer, data.aspectRatio))));
+  let scores = await scoreAll();
+  for (let round = 0; round < MAX_RETAKES; round++) {
+    const turnedBack = scores.map((score, k) => (k > 0 && retraced(score) ? k : -1)).filter((k) => k > 0);
+    if (!turnedBack.length) break;
+    console.warn(
+      `[imageToVideo] turntable job ${job._id}: ${turnedBack.map((k) => `${segments[k].from} → ${segments[k].to} (${scores[k].toFixed(2)})`).join(", ")} turned back, filming again`
+    );
+    await Promise.all(
+      turnedBack.map(async (k) => {
+        const retake = await film(segments[k]);
+        const score = await retraceScore(retake.buffer, filmed[k - 1].buffer, data.aspectRatio);
+        if (score > scores[k] && !snapped(retake.jump)) filmed[k] = retake;
+      })
+    );
+    scores = await scoreAll();
+  }
+
+  await setProgress(82, "joining");
+  const clip = await assembleLoop(
+    loop.map((k) => filmed[k].buffer),
+    {
+      degrees: loop.map((k) => segments[k].degrees),
+      loopSeconds: data.clipSeconds,
+      fps: TURNTABLE.fps,
+      aspectRatio: data.aspectRatio,
+      ...size,
+    }
+  );
+
+  await setProgress(90, "saving");
+  const modelLabel = openrouter.videoLabelFor(TURNTABLE.model);
+  const prompt = segments.map((segment) => buildTurntableSegmentPrompt({ ...segment, designSpec, description: data.description })).join("\n\n─────\n\n");
+
+  const saved = await recordGeneration({
+    tenant,
+    user: dbUser,
+    tool: "image_to_video",
+    conversationId: data.conversationId,
+    parentGenerationId: data.parentGenerationId || null,
+    model: TURNTABLE.model,
+    modelLabel,
+    provider: "openrouter",
+    quality: data.resolution,
+    prompt,
+    userPrompt: data.description || null,
+    params: {
+      mode: "turntable",
+      camera: "orbit",
+      aspectRatio: data.aspectRatio,
+      resolution: data.resolution,
+      durationSeconds: data.clipSeconds,
+      angles: pinned.map((entry) => entry.label),
+      segmentSeconds: segments.map((segment) => segment.seconds),
+      halfTurn: Boolean(data.halfTurn),
+      // How well each segment carried on from the one before (1 = fully; below 0.6 it turned back).
+      turnScores: scores.map((score) => Number(score.toFixed(2))),
+      viewCount: views.length,
+      designSpec: designSpec || null,
+    },
+    // The pinned photos, in the order the piece turns through them — the
+    // first is the opening frame, and what the poster is drawn from.
+    inputImages: pinned.map((entry) => ({ image: entry.image, role: "uploaded" })),
+    outputImages: [{ image: { mimeType: "video/mp4", base64: clip.toString("base64") }, role: "generated" }],
+    durationMs: data.clipSeconds * 1000,
+    providerId: filmed[0].providerId,
+  });
+
+  return {
+    generationId: saved.generationId,
+    conversationId: saved.conversationId,
+    outputUrl: saved.outputs[0]?.url || null,
+    outputUrls: saved.outputs.map((entry) => entry.url),
+    outputType: "video",
+    durationSeconds: data.clipSeconds,
+    turntable: true,
+    // Charged for the seconds filmed on the first takes — retakes are on us.
+    deliveredCount: segments.reduce((sum, segment) => sum + segment.seconds, 0),
+    model: TURNTABLE.model,
+    modelLabel,
+    provider: "openrouter",
+  };
+}
 
 module.exports = { IMAGE_TO_VIDEO_JOB };

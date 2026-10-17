@@ -64,7 +64,8 @@ router.post("/", async (req, res) => {
       count: views.length,
       notes,
       aspectRatio: "1:1",
-      userPrompt: `Product views: ${labels}${notes ? ` — ${notes}` : ""}`,
+      // Matches the opening line the Views Generator page shows for the run.
+      userPrompt: `Generate views: ${labels}${notes ? ` — ${notes}` : ""}`,
       sourceImages: photos,
       conversationId: body.conversationId || null,
     },

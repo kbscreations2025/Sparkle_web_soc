@@ -225,7 +225,47 @@ function moodValue(id) {
  * a real piece, and a model that improvises a stone has produced a video of
  * something the jeweller does not sell.
  */
-function buildImageAnimationPrompt({ camera, mood, description, viewCount = 1, designSpec } = {}) {
+function buildImageAnimationPrompt({ camera, mood, description, viewCount = 1, designSpec, maxLength = null } = {}) {
+  const full = buildFullAnimationPrompt({ camera, mood, description, viewCount, designSpec });
+  return maxLength && full.length > maxLength
+    ? buildCompactAnimationPrompt({ camera, mood, description, viewCount, designSpec, maxLength })
+    : full;
+}
+
+/**
+ * The same instructions said briefly, for a model with a prompt limit (Kling
+ * takes 2,500 characters; the full prompt with a spec runs past 3,000). The
+ * rules stay — only their reasoning goes — and the spec is the part shortened,
+ * at a comma, if even this is too long.
+ */
+function buildCompactAnimationPrompt({ camera, mood, description, viewCount = 1, designSpec, maxLength }) {
+  const multiView = viewCount > 1;
+  const extra = description?.trim() ? ` Also: ${description.trim()}.` : "";
+  const build = (spec) =>
+    [
+      "Film this exact piece of jewellery — never redesign it: the same structure, stone count, stone placement, prongs, metal colour and every detail in every frame.",
+      spec ? `The piece is: ${spec.replace(/[\s.,;]*$/, ".")} Every count and shape there is a hard requirement.` : "",
+      spec ? "If the spec says the piece is symmetrical, unseen sides mirror the seen ones; if it names asymmetrical features, keep them exactly as described." : "",
+      multiView ? `The ${viewCount} reference images are one piece from different angles; film it as one object and match each reference at its angle.` : "",
+      `Camera: ${cameraValue(camera)}.`,
+      `Setting & lighting: ${moodValue(mood)}.`,
+      "The whole piece stays in frame. Realistic shine — never exaggerated sparkle or blown highlights.",
+    ]
+      .filter(Boolean)
+      .join(" ") + extra;
+
+  const spec = designSpec?.trim() || "";
+  let prompt = build(spec);
+  if (prompt.length <= maxLength || !spec) return prompt.slice(0, maxLength);
+  // Shorten the spec at a comma until the whole prompt fits.
+  const room = Math.max(0, spec.length - (prompt.length - maxLength) - 1);
+  const cut = spec.slice(0, room);
+  const shortSpec = cut.slice(0, Math.max(cut.lastIndexOf(","), 0)).trim();
+  prompt = build(shortSpec);
+  return prompt.slice(0, maxLength);
+}
+
+function buildFullAnimationPrompt({ camera, mood, description, viewCount = 1, designSpec } = {}) {
   const multiView = viewCount > 1;
   const spec = designSpec?.trim();
 
@@ -353,6 +393,65 @@ const REFERENCE_MODE = {
   referenceType: "asset",
 };
 
+/**
+ * The pinned turntable: a full 360° filmed as quarter-turns between the
+ * person's own photos, each pinned as both the first and the last frame of
+ * its segment, so every photographed angle is exactly the photograph and the
+ * model only animates the turn between two known views (video/turntable.js).
+ *
+ * Wan 3.0 because a test on one of our own rings showed it is the model that
+ * actually lands on the pinned last frame — Kling ended near it, Veo ended on
+ * a different angle with an invented split shank, and a quarter-turn that
+ * misses its last frame shows as a jump at every join.
+ *
+ * `angles` are the photos that can be pinned, in the order the piece turns
+ * through them; Top and extra views still feed the written specification.
+ */
+const TURNTABLE = {
+  model: "alibaba/wan-3.0",
+  angles: [
+    { id: "front", label: "Front", degrees: 0 },
+    { id: "side", label: "Side", degrees: 90 },
+    { id: "back", label: "Back", degrees: 180 },
+    { id: "other-side", label: "Other side", degrees: 270 },
+  ],
+  /** Lengths of the finished loop on offer. */
+  lengths: [6, 8, 10, 12, 15],
+  defaultLength: 8,
+  /** Each segment is generated about as long as its share of the loop, within what Wan accepts. */
+  minSegmentSeconds: 2,
+  maxSegmentSeconds: 10,
+  /** Of the finished loop. Below Wan's own 30, so evening the speed out only ever drops frames, never repeats one. */
+  fps: 24,
+};
+
+/**
+ * One segment of the turntable: from one pinned photo to the next. Said as an
+ * amount ("exactly 90 degrees"), never a style, for the same reason the orbit
+ * preset is — and the background and light are the photos' own, since both
+ * ends of the clip are photographs.
+ */
+function buildTurntableSegmentPrompt({ from, to, degrees, designSpec, description }) {
+  const spec = designSpec?.trim();
+  return [
+    `Jewellery product turntable shot. The piece turns smoothly on an invisible turntable by exactly ${degrees} degrees, at one constant speed from the first frame to the last, from the ${from.toLowerCase()} view in the first frame to the ${to.toLowerCase()} view in the last frame. It never pauses, eases, reverses or swings back.`,
+    /*
+     * The same words on every segment. Two pinned frames rarely say which way
+     * to turn — a piece that looks alike front and back can be reached either
+     * way — and a segment that guesses the other way plays as the turn going
+     * backwards. Naming one direction everywhere is what keeps them agreeing.
+     */
+    "Turning direction: clockwise as seen from above — the side of the piece nearest the camera moves to the viewer's left — the same direction as every other part of this turn. It never turns back the way it came, and never repeats views it has already shown.",
+    "The camera does not move, zoom or tilt. The piece stays centred and the same size, on exactly the background and under exactly the lighting of the two frames.",
+    `The piece is one rigid object and must stay exactly as it appears in the two frames${spec ? `: ${spec}` : ""}. Every count, shape and proportion is a hard requirement. Nothing is added, removed, redesigned, mirrored or morphed, and anything the turn reveals must agree with both frames.`,
+    REALISTIC_SHINE_CLAUSE,
+    "No text, no hands, no props, no second piece.",
+    description?.trim() ? `Additional direction: ${description.trim()}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 const ASPECT_RATIOS = ["16:9", "9:16"];
 const DEFAULT_ASPECT_RATIO = "16:9";
 const RESOLUTIONS = ["720p", "1080p"];
@@ -371,6 +470,8 @@ module.exports = {
   MAX_REFERENCE_IMAGES,
   MAX_VIEWS,
   REFERENCE_MODE,
+  TURNTABLE,
+  buildTurntableSegmentPrompt,
   ASPECT_RATIOS,
   DEFAULT_ASPECT_RATIO,
   RESOLUTIONS,

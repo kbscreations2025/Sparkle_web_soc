@@ -50,6 +50,14 @@ const AUDIT_ACTIONS = [
   "credits.revoked",
   "credits.distributed",
   "credits.reclaimed",
+  // ── pricing ──
+  // What routes/adminPricing.js writes. Missing from this list, every one of
+  // them failed validation and was dropped — the console's price changes went
+  // unrecorded.
+  "pricing_rule.created",
+  "pricing_rule.updated",
+  "pricing_rule.retired",
+  "pricing_rule.deleted",
 ];
 
 const TARGET_TYPES = [
@@ -66,6 +74,7 @@ const TARGET_TYPES = [
   "lifestyleModel",
   "marketingKit",
   "credit_account",
+  "creditPricingRule",
 ];
 
 /**

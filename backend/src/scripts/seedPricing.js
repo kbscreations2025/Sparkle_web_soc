@@ -86,16 +86,12 @@ const IMAGE_RULES = [
  * 8 × its per-second credits.
  *
  * Only the resolutions this app offers — routes/imageToVideo.js clamps to
- * 720p and 1080p, so Veo's 4K tier is deliberately absent. Lite has no 4K at
- * all.
+ * 720p and 1080p, so Veo's 4K tier is deliberately absent. Only the models
+ * the picker still offers (see providers/openrouter OPENROUTER_VIDEO_MODELS).
  */
 const VIDEO_RULES = [
   { model: "veo-3.1-generate-preview", quality: "1080p", rate: 0.4, label: "Veo 3.1 Standard — 1080p" },
   { model: "veo-3.1-generate-preview", quality: "720p", rate: 0.4, label: "Veo 3.1 Standard — 720p" },
-  { model: "veo-3.1-fast-generate-preview", quality: "1080p", rate: 0.12, label: "Veo 3.1 Fast — 1080p" },
-  { model: "veo-3.1-fast-generate-preview", quality: "720p", rate: 0.1, label: "Veo 3.1 Fast — 720p" },
-  { model: "veo-3.1-lite-generate-preview", quality: "1080p", rate: 0.08, label: "Veo 3.1 Lite — 1080p" },
-  { model: "veo-3.1-lite-generate-preview", quality: "720p", rate: 0.05, label: "Veo 3.1 Lite — 720p" },
 
   /*
    * OpenRouter-only video models. 720p rates are the cost OpenRouter's
@@ -106,13 +102,8 @@ const VIDEO_RULES = [
    */
   ...[
     ["kwaivgi/kling-v3.0-pro", "Kling 3.0 Pro", 0.168],
-    ["kwaivgi/kling-v3.0-std", "Kling 3.0 Standard", 0.126],
-    ["openai/sora-2-pro", "Sora 2 Pro", 0.3],
     ["alibaba/wan-3.0", "Wan 3.0", 0.2],
-    ["alibaba/wan-2.7", "Wan 2.7", 0.15],
-    ["bytedance/seedance-2.5", "Seedance 2.5", 0.29],
     ["bytedance/seedance-2.0", "Seedance 2.0", 0.152],
-    ["bytedance/seedance-2.0-fast", "Seedance 2.0 Fast", 0.115],
   ].flatMap(([model, name, rate]) => [
     { model, quality: "1080p", rate: +(rate * 1.5).toFixed(3), label: `${name} — 1080p` },
     { model, quality: "720p", rate, label: `${name} — 720p` },

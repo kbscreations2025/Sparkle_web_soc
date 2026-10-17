@@ -120,7 +120,7 @@ export default function ProductViewsPage() {
 
   const workspace = useGenerationWorkspace({
     tool: "cleaning",
-    resumeLabel: "Product views",
+    resumeLabel: "Generate views",
     onRefine: (body) => refineImage({ ...body, model, quality }),
     // A run reopened from History is laid back out in its boxes: each photo
     // where it was placed, each result in the box for its angle.
@@ -234,7 +234,7 @@ export default function ProductViewsPage() {
         }),
       {
         count: requested.length,
-        prompt: `Product views: ${requested.map((id) => views.find((view) => view.id === id)?.label).join(", ")}`,
+        prompt: `Generate views: ${requested.map((id) => views.find((view) => view.id === id)?.label).join(", ")}`,
         images,
       }
     );

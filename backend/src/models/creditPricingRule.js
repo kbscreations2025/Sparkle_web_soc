@@ -64,7 +64,7 @@ const creditPricingRuleSchema = new mongoose.Schema(
     tool: { type: String, enum: [...GENERATION_TOOLS, null], default: null },
 
     /**
-     * The resolved API model id — `gemini-3-pro-image`, `veo-3.1-fast-generate-preview`,
+     * The resolved API model id — `gemini-3-pro-image`, `veo-3.1-generate-preview`,
      * `gpt-image-1`. Null matches every model.
      *
      * Free text rather than an enum: a model released after this was written

@@ -14,7 +14,9 @@ const {
   MAX_DURATION,
   MAX_VIEWS,
   REFERENCE_MODE,
+  TURNTABLE,
 } = require("../prompts/video");
+const { planTurntable } = require("../video/turntable");
 const gemini = require("../providers/gemini");
 const openrouter = require("../providers/openrouter");
 
@@ -23,8 +25,9 @@ const router = express.Router();
 /**
  * Which provider a requested video model belongs to. Veo ids stay on Gemini
  * (with OpenRouter as a priority-ordered fallback, see routeVideoCall);
- * Kling, Sora, Wan and Seedance exist only on OpenRouter. Anything unknown
- * falls back to the default Veo model.
+ * Kling, Wan and Seedance exist only on OpenRouter. Anything unknown —
+ * including Sora 2 Pro, which OpenRouter no longer offers — falls back to
+ * the default Veo model.
  */
 function resolveVideoModel(requested) {
   if (openrouter.isKnownVideoModel(requested)) {
@@ -54,9 +57,99 @@ function oneOf(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }
 
+/**
+ * The pinned turntable (see jobs/imageToVideo.js filmTurntable): the photos
+ * the client labelled Front, Side, Back and Other side are the angles the
+ * piece turns through, one segment between each and the next.
+ *
+ * What the photos show decides the plan, not the slots they sit in. The same
+ * photo in Front and Back says the piece looks the same from behind — then the
+ * second half of a turn is the first half again, so only Front → Side → Back
+ * is filmed and the loop plays it twice. Filming the full turn between those
+ * repeated photos is what made it swing back: between two identical frames a
+ * model has no way to tell which way to keep turning.
+ *
+ * Priced by what is filmed — every filmed segment, each a little longer than
+ * its share of the loop — rather than by the length of the finished loop.
+ */
+function queueTurntable(req, res, { parsedViews, viewLabels, description, aspectRatio, resolution, durationSeconds, preview, conversationId }) {
+  const labels = Array.isArray(viewLabels) ? viewLabels.slice(0, parsedViews.length).map((label) => String(label).slice(0, 24)) : [];
+  const pinned = TURNTABLE.angles
+    .map((angle) => ({ label: angle.label, degrees: angle.degrees, index: labels.indexOf(angle.label) }))
+    .filter((angle) => angle.index >= 0);
+
+  if (pinned[0]?.label !== "Front" || pinned.length < 2) {
+    return res.status(400).json({
+      status: "error",
+      message: "A pinned 360° needs the Front photo and at least one of Side, Back or Other side.",
+      code: "invalid",
+    });
+  }
+
+  const clipSeconds = nearest(durationSeconds || TURNTABLE.defaultLength, TURNTABLE.lengths);
+  const plan = planTurntable({ pinned, images: parsedViews, loopSeconds: clipSeconds });
+  if (plan.error) return res.status(400).json({ status: "error", message: plan.error, code: "invalid" });
+  const { segments, loop, halfTurn, distinct } = plan;
+  const filmedSeconds = segments.reduce((sum, segment) => sum + segment.seconds, 0);
+  const pickedResolution = oneOf(resolution, RESOLUTIONS, DEFAULT_RESOLUTION);
+  const pickedAspect = oneOf(aspectRatio, ASPECT_RATIOS, DEFAULT_ASPECT_RATIO);
+  const label = openrouter.videoLabelFor(TURNTABLE.model);
+
+  return queueGeneration(req, res, {
+    type: IMAGE_TO_VIDEO_JOB,
+    tool: "image_to_video",
+    request: {
+      provider: "openrouter",
+      // Sampled apart from ordinary clips by the duration estimator: several
+      // segments filmed at once, then joined, is its own kind of wait.
+      model: `${TURNTABLE.model}:${pickedResolution}:${clipSeconds}s:turntable${segments.length}`,
+      modelId: TURNTABLE.model,
+      modelLabel: label,
+      quality: pickedResolution,
+      durationSeconds: filmedSeconds,
+      aspectRatio: pickedAspect,
+      mode: "turntable",
+    },
+    payload: {
+      turntable: true,
+      image: parsedViews[0],
+      images: parsedViews,
+      viewLabels: labels,
+      pinned,
+      segments,
+      loop,
+      halfTurn,
+      clipSeconds,
+      description: description || null,
+      camera: "orbit",
+      aspectRatio: pickedAspect,
+      resolution: pickedResolution,
+      durationSeconds: clipSeconds,
+      requestedModel: TURNTABLE.model,
+      provider: "openrouter",
+      conversationId: conversationId || null,
+    },
+    preview,
+    message: `queued a pinned ${clipSeconds}s 360° from ${distinct} photos on ${label}${halfTurn ? " (half turn, played twice)" : ""}`,
+  });
+}
+
 router.post("/", async (req, res) => {
-  const { image, images, viewLabels, description, model: requestedModel, camera, mood, aspectRatio, resolution, durationSeconds, preview, conversationId } =
-    req.body || {};
+  const {
+    image,
+    images,
+    viewLabels,
+    description,
+    model: requestedModel,
+    camera,
+    mood,
+    aspectRatio,
+    resolution,
+    durationSeconds,
+    preview,
+    conversationId,
+    turntable,
+  } = req.body || {};
 
   /*
    * One piece, several views of it. `image` is still accepted so older
@@ -68,6 +161,10 @@ router.post("/", async (req, res) => {
   const parsedViews = parseImages(Array.isArray(images) && images.length ? images : image).slice(0, MAX_VIEWS);
   if (!parsedViews.length) {
     return res.status(400).json({ status: "error", message: "upload a jewellery photo first", code: "invalid" });
+  }
+
+  if (turntable) {
+    return queueTurntable(req, res, { parsedViews, viewLabels, description, aspectRatio, resolution, durationSeconds, preview, conversationId });
   }
 
   /*

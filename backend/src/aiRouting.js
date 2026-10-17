@@ -315,7 +315,7 @@ async function routeTextCall({ tenant, modelId, prompt, images, parts, ...option
  * A video out, across providers in the tenant's key priority order — same
  * candidate list as images (see `imageCandidatesFor`): a Veo model tries
  * the Gemini keys and, when it has an OpenRouter equivalent, the OpenRouter
- * keys, interleaved by priority. An OpenRouter-only model (Kling, Sora…)
+ * keys, interleaved by priority. An OpenRouter-only model (Kling, Wan…)
  * uses only OpenRouter keys. Failover matters more here than anywhere: a
  * run is minutes long, so a rate-limited key should cost a retry on the
  * next key rather than the whole job.
@@ -326,7 +326,7 @@ async function routeTextCall({ tenant, modelId, prompt, images, parts, ...option
  * @returns {{ output, providerId, provider, modelId }} — which provider and
  *   model id actually served it, for the history record.
  */
-async function routeVideoCall({ tenant, provider = "gemini", modelId, prompt, image, config, views, onPoll }) {
+async function routeVideoCall({ tenant, provider = "gemini", modelId, prompt, image, config, views, frames, generateAudio, onPoll }) {
   const candidates = imageCandidatesFor(tenant, provider, modelId);
   if (candidates.length === 0) {
     throw new NoProviderError(`This organization has no ${PROVIDER_LABELS[provider]} key configured. Ask a super admin to add one.`);
@@ -348,6 +348,10 @@ async function routeVideoCall({ tenant, provider = "gemini", modelId, prompt, im
                 modelId: resolvedModelId,
                 prompt,
                 views,
+                // Both ends pinned, and silence — the turntable's quarter-turns
+                // (see video/turntable.js). OpenRouter only.
+                frames,
+                generateAudio,
                 aspectRatio: config.aspectRatio,
                 resolution: config.resolution,
                 durationSeconds: config.durationSeconds,
