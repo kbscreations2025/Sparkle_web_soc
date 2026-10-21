@@ -32,6 +32,8 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   /** A pending share/unshare, held until it is confirmed. */
   const [confirming, setConfirming] = useState<{ id: string; name: string; share: boolean } | null>(null);
+  /** A pending delete, held until it is confirmed — one stray click used to remove a model from everyone's picker. */
+  const [deleting, setDeleting] = useState<{ id: string; name: string; owner: string | null } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   /**
    * Shown before the file picker: a model photo with jewellery already on
@@ -122,7 +124,7 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
                 ? () => setConfirming({ id: model.id, name: model.name, share: !model.isPublic })
                 : undefined
             }
-            onDelete={isAdmin ? () => library.remove(model.id) : undefined}
+            onDelete={isAdmin ? () => setDeleting({ id: model.id, name: model.name, owner: model.isOwn ? null : model.userName }) : undefined}
           />
         ))}
 
@@ -162,6 +164,20 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
           onConfirm={() => {
             setUploadNotice(false);
             fileInput.current?.click();
+          }}
+        />
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          title="Delete this model?"
+          body={`${deleting.name}${deleting.owner ? ` (${deleting.owner}'s model)` : ""} will be removed from the model library and from everyone's picker.`}
+          confirmLabel="Yes, delete"
+          danger
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => {
+            library.remove(deleting.id);
+            setDeleting(null);
           }}
         />
       )}
