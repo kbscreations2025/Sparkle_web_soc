@@ -228,7 +228,13 @@ export function blankSlide(background = "#FFFFFF"): DesignSlide {
   return { id: uid(), background, elements: [] };
 }
 
-/** The thin gold rule framing every slide of the customer's deck. */
+/**
+ * The gold rule framing every slide of the customer's deck. 3px rather than a
+ * hairline: the editor and phones show the page at a quarter of its size or
+ * less, where a 1.5px rule all but disappeared.
+ */
+export const FRAME_STROKE_WIDTH = 3;
+
 function frame() {
   return shapeElement({
     x: 6,
@@ -237,7 +243,7 @@ function frame() {
     h: SLIDE_H - 12,
     fill: "transparent",
     stroke: DECK.borderGold,
-    strokeWidth: 1.5,
+    strokeWidth: FRAME_STROKE_WIDTH,
     name: "Frame",
   });
 }
@@ -286,16 +292,92 @@ function coverSlide(name: string, tagline: string, pieceIndex: number | undefine
   return { id: uid(), background: DECK.cream, elements };
 }
 
+/** The grid every product page is laid out on: three cards across, two down. */
+const CARD_COLS = 3;
+const CARD_ROWS = 2;
+const CARD_LEFT = 64;
+const CARD_TOP = 104;
+const CARD_GAP_X = 40;
+const CARD_GAP_Y = 28;
+export const CARD_W = (SLIDE_W - CARD_LEFT * 2 - CARD_GAP_X * (CARD_COLS - 1)) / CARD_COLS;
+export const CARD_H = (SLIDE_H - CARD_TOP - 36 - CARD_GAP_Y) / CARD_ROWS;
+
+/** Where the card at a grid position (0–5, left to right, top to bottom) sits. */
+function cardSlot(position: number): Box {
+  return {
+    x: CARD_LEFT + (position % CARD_COLS) * (CARD_W + CARD_GAP_X),
+    y: CARD_TOP + Math.floor(position / CARD_COLS) * (CARD_H + CARD_GAP_Y),
+    w: CARD_W,
+    h: CARD_H,
+  };
+}
+
+/**
+ * One product card: category, photo, code, name and spec line, grouped so it
+ * moves as one. The deck's own cards and the editor's "Product card"
+ * template are both made here, so an added card matches the rest exactly.
+ * Empty fields show their placeholder in the editor and print nothing.
+ */
+export function productCard({
+  x,
+  y,
+  groupId = uid(),
+  label = "",
+  pieceIndex,
+  code = "",
+  title = "",
+  caption = "",
+}: {
+  x: number;
+  y: number;
+  groupId?: string;
+  label?: string;
+  pieceIndex?: number;
+  code?: string;
+  title?: string;
+  caption?: string;
+}): DesignElement[] {
+  const imageH = CARD_H - 22 - 66;
+  const line = (patch: Partial<TextElement> & Pick<TextElement, "y" | "h">) =>
+    textElement({ x, w: CARD_W, groupId, fontFamily: "Helvetica", align: "center", color: DECK.labelGray, ...patch });
+
+  return [
+    line({ y, h: 20, text: label, fontSize: 14, placeholder: "Label", name: "Label" }),
+    imageElement({ x, y: y + 22, w: CARD_W, h: imageH, pieceIndex, name: "Photo", groupId }),
+    line({ y: y + 24 + imageH, h: 20, text: code, fontSize: 13, bold: true, color: DECK.ink, placeholder: "Add a code", name: "Code" }),
+    line({ y: y + 44 + imageH, h: 18, text: title, fontSize: 12, placeholder: "Add a title", name: "Title" }),
+    line({ y: y + 62 + imageH, h: 18, text: caption, fontSize: 11, placeholder: "Add a caption", name: "Caption" }),
+  ];
+}
+
+/**
+ * Where an added card goes: the first grid position nothing sits in yet, so a
+ * fifth or sixth piece lands beside the others. A slot counts as taken when
+ * something covers a sixth of it; page-sized things (the frame) don't count.
+ * With every slot taken — or on a page that isn't a grid, like a cover — the
+ * card goes to the middle of the page, stepped clear of one already there.
+ */
+export function freeCardSlot(elements: DesignElement[]): Box {
+  const placed = elements.filter((element) => element.w * element.h < SLIDE_W * SLIDE_H * 0.8);
+  const overlap = (a: Box, b: Box) =>
+    Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+
+  for (let position = 0; position < CARD_COLS * CARD_ROWS; position++) {
+    const slot = cardSlot(position);
+    if (!placed.some((element) => overlap(boundsOf(element), slot) > (slot.w * slot.h) / 6)) return slot;
+  }
+
+  const centre = { x: (SLIDE_W - CARD_W) / 2, y: (SLIDE_H - CARD_H) / 2, w: CARD_W, h: CARD_H };
+  for (let step = 0; step < 12; step++) {
+    const box = { ...centre, x: centre.x + step * 24, y: centre.y + step * 24 };
+    if (!placed.some((element) => Math.abs(element.x - box.x) < 4 && Math.abs(element.y - box.y) < 4)) return box;
+  }
+  return centre;
+}
+
 /** One section's slides — six cards a slide, three across, each card its own group. */
 function gridSlides(label: string, chapter: string, entries: DeckEntry[], section: "existing" | "ideation"): DesignSlide[] {
   const chunks = toSlides(entries);
-  const cols = 3;
-  const left = 64;
-  const top = 104;
-  const gapX = 40;
-  const gapY = 28;
-  const cardW = (SLIDE_W - left * 2 - gapX * (cols - 1)) / cols;
-  const cardH = (SLIDE_H - top - 36 - gapY) / 2;
 
   return chunks.map((chunk, slideIndex) => {
     const elements: DesignElement[] = [frame()];
@@ -331,28 +413,21 @@ function gridSlides(label: string, chapter: string, entries: DeckEntry[], sectio
     );
 
     chunk.forEach((entry, position) => {
-      const x = left + (position % cols) * (cardW + gapX);
-      const y = top + Math.floor(position / cols) * (cardH + gapY);
+      const { x, y } = cardSlot(position);
       const group = uid();
       const { item } = entry;
-      const imageH = cardH - 22 - 66;
-      const line = (patch: Partial<TextElement> & Pick<TextElement, "y" | "h">) =>
-        textElement({ x, w: cardW, groupId: group, fontFamily: "Helvetica", align: "center", color: DECK.labelGray, ...patch });
 
       elements.push(
-        line({ y, h: 20, text: item.category, fontSize: 14, placeholder: "Label", name: "Label" }),
-        imageElement({ x, y: y + 22, w: cardW, h: imageH, pieceIndex: item.index ?? entry.index, name: "Photo", groupId: group }),
-        line({
-          y: y + 24 + imageH,
-          h: 20,
-          text: item.sourceCode || sourceCodeFallback(entry, section),
-          fontSize: 13,
-          bold: true,
-          color: DECK.ink,
-          name: "Code",
-        }),
-        line({ y: y + 44 + imageH, h: 18, text: item.title, fontSize: 12, placeholder: "Add a title", name: "Title" }),
-        line({ y: y + 62 + imageH, h: 18, text: item.caption, fontSize: 11, placeholder: "Add a caption", name: "Caption" })
+        ...productCard({
+          x,
+          y,
+          groupId: group,
+          label: item.category,
+          pieceIndex: item.index ?? entry.index,
+          code: item.sourceCode || sourceCodeFallback(entry, section),
+          title: item.title,
+          caption: item.caption,
+        })
       );
 
       // Text boxes dropped on a card in the old deck, carried over where they sat.
@@ -360,8 +435,8 @@ function gridSlides(label: string, chapter: string, entries: DeckEntry[], sectio
         if (!note.text) continue;
         elements.push(
           textElement({
-            x: x + (cardW * note.x) / 100 - 60,
-            y: y + (cardH * note.y) / 100 - 10,
+            x: x + (CARD_W * note.x) / 100 - 60,
+            y: y + (CARD_H * note.y) / 100 - 10,
             w: 120,
             h: 20,
             text: note.text,

@@ -216,6 +216,8 @@ async function recordGeneration({
     outputs: outputAssets.map((entry) => ({
       assetId: String(entry.snapshot.assetId),
       url: entry.snapshot.url,
+      // A kit's grid tile shows this, not the 4K original.
+      thumbnailUrl: entry.snapshot.thumbnailUrl ?? null,
     })),
   };
 }

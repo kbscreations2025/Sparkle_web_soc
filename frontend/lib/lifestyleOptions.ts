@@ -54,34 +54,37 @@ export function outfitsFor(genderPicks: string[] | undefined): string[] {
   return genderPicks?.includes('Male') ? OUTFITS_MALE : OUTFITS_FEMALE
 }
 
+export type PlacementOption = { id: string; label: string; value: string };
+
 /**
- * Where the piece goes — only where the answer isn't in the photograph.
- *
- * A necklace goes round the neck and an earring on an ear; the model can see
- * that from the uploaded piece, and asking cost twenty chips of scrolling
- * for a choice with one sensible answer. What a photo cannot say is *which*
- * finger or *which* wrist, so rings and bracelets keep their list and
- * everything else is left to the piece itself.
+ * Used when no category is picked. Deliberately names no kind of jewellery:
+ * the backend reads the kind out of this text to pick its rules, so a word
+ * like "earrings" here would have it prompt for one specific piece.
  */
-export const PLACEMENT_GROUPS = [
-  {
-    group: 'Anything else',
-    items: [
-      {
-        id: 'auto',
-        label: 'From the photo',
-        // Deliberately names no kind of jewellery: the backend reads the
-        // kind out of this text to pick its rules, so a word like "earrings"
-        // here would have it prompt for one specific piece.
-        value:
-          'Determine from the reference photograph what kind of piece this is, and place it on the one body location where such a piece is actually worn, at the position and length that reads as natural for it. Follow the placement rules below for that kind. Every other part of the model stays bare.',
-      },
-    ],
-  },
+export const AUTO_PLACEMENT: PlacementOption = {
+  id: 'auto',
+  label: 'From the photo',
+  value:
+    'Determine from the reference photograph what kind of piece this is, and place it on the one body location where such a piece is actually worn, at the position and length that reads as natural for it. Follow the placement rules below for that kind. Every other part of the model stays bare.',
+};
+
+/**
+ * Where the piece goes: a category first, then an optional exact spot.
+ *
+ * Naming the category is what matters most — the backend then sends only
+ * that kind's placement and size rules. "From the photo" sends every kind's
+ * rules at once, and their size caps got lost among them (studs as big as
+ * the earlobe, pendants as wide as a palm). The exact spot is optional:
+ * `standard` is where that kind is normally worn, used when none is picked.
+ * Every value names its kind ("ring", "earring", "neck", "wrist") because
+ * that word is how the backend recognises it.
+ */
+export const PLACEMENT_GROUPS: { group: string; standard: PlacementOption; items: PlacementOption[] }[] = [
   {
     group: 'Ring',
+    standard: { id: 'ring-standard', label: 'Ring', value: 'Place the ring on the left ring finger (fourth finger, between middle and pinky), the standard place a ring is worn, snug at the base of the finger. The ring must appear on this single finger ONLY.' },
     items: [
-      { id: 'left-ring', label: 'Left Ring Finger', value: 'Place the ring EXCLUSIVELY on the left ring finger (fourth finger, between middle and pinky). The ring band must encircle the full circumference of the finger at the base, fitting snugly. Size the ring so the band and stone are proportional to this finger\'s diameter — must NOT appear miniaturized. The ring must appear on this single finger ONLY. Do NOT place on any other finger.' },
+      { id: 'left-ring', label: 'Left Ring Finger', value: 'Place the ring EXCLUSIVELY on the left ring finger (fourth finger, between middle and pinky). The ring band must encircle the full circumference of the finger at the base, fitting snugly. Size the ring so the band and stone are proportional to this finger\'s diameter. The ring must appear on this single finger ONLY. Do NOT place on any other finger.' },
       { id: 'left-index', label: 'Left Index Finger', value: 'Place the ring EXCLUSIVELY on the left index finger (second finger from thumb). The ring band wraps the base knuckle snugly, proportionally sized to the index finger diameter. The ring must appear on this single finger ONLY.' },
       { id: 'left-middle', label: 'Left Middle Finger', value: 'Place the ring EXCLUSIVELY on the left middle finger (center/longest finger). The ring sits at the base, proportionally sized. The ring must appear on this single finger ONLY. Do NOT place on adjacent fingers.' },
       { id: 'left-pinky', label: 'Left Pinky', value: 'Place the ring EXCLUSIVELY on the left pinky (smallest finger). Scale the ring proportionally smaller to fit the pinky diameter snugly. The ring must appear on this single finger ONLY.' },
@@ -94,7 +97,26 @@ export const PLACEMENT_GROUPS = [
     ],
   },
   {
+    group: 'Earrings',
+    standard: { id: 'earrings-standard', label: 'Earrings', value: 'Place the earrings on the earlobes at the piercing point — a pair mirrored on both ears, or one ear only if the reference shows a single earring.' },
+    items: [
+      { id: 'both-ears', label: 'Both Ears', value: 'Place the earrings as a pair, one on each earlobe at the piercing point, mirrored on both ears.' },
+      { id: 'left-ear', label: 'Left Ear', value: 'Place a single earring on the LEFT earlobe at the piercing point. The other ear stays bare or hidden.' },
+      { id: 'right-ear', label: 'Right Ear', value: 'Place a single earring on the RIGHT earlobe at the piercing point. The other ear stays bare or hidden.' },
+    ],
+  },
+  {
+    group: 'Necklace & Pendant',
+    standard: { id: 'neck-standard', label: 'Necklace', value: 'Place the necklace around the neck at the length it is designed for, following the curve of the neck and collarbones; a pendant rests centred near the hollow between the collarbones.' },
+    items: [
+      { id: 'neck-collarbone', label: 'Pendant at Collarbone', value: 'Place the necklace around the neck, the pendant resting just below the hollow between the collarbones.' },
+      { id: 'neck-choker', label: 'Choker', value: 'Place the necklace snugly around the base of the neck as a choker, sitting above the collarbones.' },
+      { id: 'neck-long', label: 'Long Drop', value: 'Place the necklace around the neck as a long drop, the pendant resting at the upper chest, a hand-width below the collarbones.' },
+    ],
+  },
+  {
     group: 'Bracelet',
+    standard: { id: 'wrist-standard', label: 'Bracelet', value: 'Place the bracelet on the left wrist, the standard wrist for a bracelet, encircling the full wrist, proportionally sized and snug.' },
     items: [
       { id: 'right-wrist', label: 'Right Wrist', value: 'Place the bracelet on the RIGHT wrist, centered between the wrist bone and the base of the palm. The bracelet encircles the full wrist, proportionally sized to appear naturally worn — not floating or loose.' },
       { id: 'left-wrist', label: 'Left Wrist', value: 'Place the bracelet on the LEFT wrist, centered at the wrist. Encircles the full wrist, proportionally sized and snug.' },
@@ -102,7 +124,12 @@ export const PLACEMENT_GROUPS = [
   },
 ]
 
-export const ALL_PLACEMENTS = PLACEMENT_GROUPS.flatMap((group) => group.items);
+/** What gets sent: the exact spot if one is picked, else the category's standard, else "from the photo". */
+export function resolvePlacement(category: string | null, spotId: string | null): PlacementOption {
+  const group = PLACEMENT_GROUPS.find((entry) => entry.group === category);
+  if (!group) return AUTO_PLACEMENT;
+  return group.items.find((item) => item.id === spotId) ?? group.standard;
+}
 
 /**
  * Poses. Every one is a tight crop by design — this tool is for jewellery

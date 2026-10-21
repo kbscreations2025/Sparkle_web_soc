@@ -314,6 +314,8 @@ function toKitSummary(kit) {
     status: kit.status,
     error: kit.error ?? null,
     previewUrl: cover?.thumbnailUrl || cover?.url || null,
+    // Campaign Kit and Festive Poster tiles open this run in the results viewer.
+    generationId: kit.generationId ? String(kit.generationId) : null,
     pieceCount: countFor(kit),
     userName: kit.userName,
     createdAt: kit.createdAt,
@@ -423,14 +425,33 @@ function buildScopeFilter(dbUser, wantsTeam) {
  * Cursor-paginated on `_id`, which carries its own creation time, so a kit
  * saved mid-scroll can't shift a later page onto a row already shown.
  */
+/** The heavy parts of a kit no grid tile reads — see `toKitSummary`. */
+const LIST_EXCLUDED_FIELDS = [
+  "-affinity.design",
+  "-affinity.items",
+  "-affinity.originalItems",
+  "-affinity.pieces.sheetExcel",
+  "-affinity.pieces.sheetImages",
+  "-brandStory.analysis",
+  "-brandStory.originalAnalysis",
+  "-campaign.originalShots",
+  "-campaign.options",
+].join(" ");
+
 async function listKits({ dbUser, kind, cursor, limit, scope }) {
   const query = buildScopeFilter(dbUser, scope === "team");
   if (kind) query.kind = kind;
   if (cursor && mongoose.Types.ObjectId.isValid(cursor)) query._id = { $lt: new mongoose.Types.ObjectId(cursor) };
 
   const size = Math.min(Math.max(Number(limit) || DEFAULT_LIST_LIMIT, 1), MAX_LIST_LIMIT);
-  // One extra row, purely to learn whether there is another page.
-  const rows = await MarketingKit.find(query).sort({ _id: -1 }).limit(size + 1);
+  // One extra row, purely to learn whether there is another page. Only what
+  // a tile shows is read: a deck's design and sheets made one Collection
+  // Story kit alone 3.9 MB, and every page of the grid pulled it in full.
+  const rows = await MarketingKit.find(query)
+    .select(LIST_EXCLUDED_FIELDS)
+    .sort({ _id: -1 })
+    .limit(size + 1)
+    .lean();
   const page = rows.slice(0, size);
 
   return {

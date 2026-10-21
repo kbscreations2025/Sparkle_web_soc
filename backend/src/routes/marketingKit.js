@@ -353,7 +353,7 @@ router.post("/festive", async (req, res) => {
         conversationId,
         parentGenerationId,
       },
-      message: `queued a Festive Poster retouch on ${modelLabel}`,
+      message: `queued a Poster retouch on ${modelLabel}`,
     });
   }
 

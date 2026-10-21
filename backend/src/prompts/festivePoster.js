@@ -66,6 +66,28 @@ const FESTIVE_EVENTS = {
     label: "Wedding Season",
     mood: "Indian wedding season — opulent bridal styling, deep red, maroon and gold, fresh flowers, rich silk and brocade textures, grand and celebratory",
   },
+  /*
+   * Not calendar moments: a collection poster for any day of the year. The
+   * look follows a jeweller's own launch campaign — clean stone plinths, soft
+   * architectural backdrop, no festive props at all.
+   */
+  // What the page sends when no event chip is picked: just the collection.
+  collection: {
+    label: "Collection",
+    mood: "the jewellery collection itself, with no occasion — a clean, elegant, neutral premium setting chosen to suit the pieces' own metal and stone colours: soft stone, marble or satin surfaces, a calm softly blurred backdrop, soft natural light. No festive or seasonal props",
+  },
+  collection_launch: {
+    label: "Collection Launch",
+    mood: "a luxury jewellery collection launch — modern architectural luxury: warm ivory, soft stone-grey and champagne tones, pale marble and travertine plinths at different heights, a softly blurred architectural backdrop of fluted columns, arches or faceted geometric panels, soft directional daylight with gentle shadows. No festive props, no flowers — the architecture and stone are the only setting",
+  },
+  minimal_studio: {
+    label: "Minimal Studio",
+    mood: "a minimal premium studio — a seamless soft gradient backdrop in warm ivory to light taupe, one or two clean geometric pedestals or smooth stone slabs, soft even light with delicate reflections, calm, quiet and modern. No props beyond the pedestals",
+  },
+  dark_luxury: {
+    label: "Dark Luxury",
+    mood: "dark luxury — deep charcoal, black marble and smoked glass, a warm gold rim light that makes the metal glow, sleek geometric plinths, moody and dramatic yet clean. No festive props",
+  },
 };
 
 const FESTIVE_EVENT_IDS = Object.keys(FESTIVE_EVENTS);
@@ -153,7 +175,7 @@ function buildFestivePosterPrompt({ eventId, customEvent, description, aspect, p
       ? `\n\nVARIATION ${index + 1} OF ${total}: ${POSTER_DIRECTIONS[index % POSTER_DIRECTIONS.length]} It must look clearly different from the other variations.`
       : `\n\nCOMPOSITION: ${POSTER_DIRECTIONS[index % POSTER_DIRECTIONS.length]}`;
 
-  return `TASK — A FESTIVE CAMPAIGN POSTER FOR A JEWELLERY BRAND
+  return `TASK — A CAMPAIGN POSTER FOR A JEWELLERY BRAND
 
 Create one premium, photorealistic social-media campaign image featuring ${pieces}, styled for ${eventMood({ eventId, customEvent })}.
 
@@ -163,10 +185,17 @@ THE JEWELLERY IS THE CUSTOMER'S REAL PRODUCT
 - Keep real-world scale between the pieces — a ring is smaller than a necklace.
 - Each piece reads as real polished precious metal and real stones, tack-sharp.
 - Show the jewellery on its own — no model, no hands, no mannequin.
+- A pendant photographed without its chain is shown threaded on a fine chain through its bail (about 1 mm thick, in the pendant's own metal colour), laid in a graceful curve. The chain is the only addition — the pendant stays exactly as photographed — and a chain already in the photo is kept as it is.
 
 THE EVENT SETS THE SCENE, NOT THE JEWELLERY
 - Use the event's colours, props, surfaces and light around the pieces. Props stay in a supporting role: the jewellery is the hero and is never hidden behind them.
-- A refined, high-end brand look — the calibre of a luxury jeweller's festive campaign — never cheap, cluttered or cartoonish.
+- A refined, high-end brand look — the calibre of a luxury jeweller's campaign — never cheap, cluttered or cartoonish.
+
+A CLEAN, ORGANISED ARRANGEMENT
+- Arrange the pieces like a professional jewellery campaign: one hero piece slightly larger in the frame and a little elevated, the others placed around it in a balanced, deliberate grouping — at different heights and angles (standing upright, leaning, or resting on a plinth or slab), never piled, tangled or touching.
+- Give every piece clear breathing room so each one reads on its own; no piece hides or overlaps another.
+- Few props, chosen with restraint: a clean surface and at most a handful of supporting elements, kept towards the edges and softly out of focus. Large calm areas of backdrop — never a busy or crowded scene.
+- Smooth, polished finish: soft directional light with gentle, believable shadows and reflections, smooth tonal gradients in the backdrop, crisp metal edges and bright stone sparkle. No harsh glare, noise or grit.
 
 ${
     text

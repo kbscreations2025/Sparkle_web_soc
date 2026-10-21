@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Newspaper, Users } from "lucide-react";
+import { Lock, Newspaper, Users } from "lucide-react";
 import { CampaignKitDeck } from "@/components/studio/CampaignKitDeck";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
@@ -35,6 +35,13 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const PERMISSION = "tool.marketing_kit.run";
 const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
+
+/**
+ * Sent with every kit, ahead of the user's own notes — the same locked line
+ * Lifestyle sends, since it gives the best-sized results. Shown as a locked
+ * chip in "Anything else" so it can't be cleared or edited away.
+ */
+const FIXED_NOTE = "make the Jewelry very very very small";
 
 const HINTS = [
   "Warm the lighting a little",
@@ -86,6 +93,8 @@ function CampaignKitWorkspace() {
   /** A jewellery photo opened for a closer look — same affordance Lifestyle's upload gives. */
   const [jewelryPreview, setJewelryPreview] = useState<PreviewImage | null>(null);
   const [description, setDescription] = useState("");
+  // The fixed size note always leads; whatever the user types is added after it.
+  const fullDescription = [FIXED_NOTE, description.trim()].filter(Boolean).join(". ");
   const [aspect, setAspect] = useState<string>(CAMPAIGN_ASPECTS[0].id);
   const [pose, setPose] = useState<string>(POSE_OPTIONS[0].id);
   const [box, setBox] = useState<string>(BOX_STYLE_OPTIONS[0].id);
@@ -124,12 +133,12 @@ function CampaignKitWorkspace() {
         campaignKit({
           ...modelRequestFields(library.choice!),
           jewelryImages: jewelry.map((item) => item.dataUrl),
-          description,
+          description: fullDescription,
           // "Auto" is sent as no pick at all, which is what makes the
           // backend choose two *different* options for the pair rather than
           // the same one twice.
           poses: pose === "auto" ? [] : [pose],
-          boxStyles: [box],
+          boxStyles: box === "auto" ? [] : [box],
           studioProps: prop === "auto" ? [] : [prop],
           aspect,
           model,
@@ -199,7 +208,7 @@ function CampaignKitWorkspace() {
 
             <OptionChips label="Pose · lifestyle shots" options={POSE_OPTIONS} value={pose} onChange={setPose} />
             <OptionChips
-              label="Presentation box · studio shots"
+              label="Presentation · studio shots"
               options={BOX_STYLE_OPTIONS}
               value={box}
               onChange={setBox}
@@ -223,6 +232,14 @@ function CampaignKitWorkspace() {
 
             <PromptCard
               label="Anything else"
+              topSlot={
+                <span
+                  title="Always sent — gives the best-sized results"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-gold/25 bg-gold/10 px-2 py-1 text-[12px] text-gold"
+                >
+                  <Lock size={11} /> {FIXED_NOTE}
+                </span>
+              }
               value={description}
               onChange={setDescription}
               placeholder="Optional — applied to all four shots"

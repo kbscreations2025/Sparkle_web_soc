@@ -1,4 +1,13 @@
-const { IMAGE_CLEANING_PROMPT, NEW_CLEANING_PROMPT, SHANK_CLEANING_PROMPT, buildReferenceNote } = require("../prompts");
+const fs = require("fs");
+const path = require("path");
+const {
+  IMAGE_CLEANING_PROMPT,
+  NEW_CLEANING_PROMPT,
+  SHANK_CLEANING_PROMPT,
+  STUDIO_CLEANING_PROMPT,
+  GOLD_SWATCH_NOTE,
+  buildReferenceNote,
+} = require("../prompts");
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
 const { createLivePreview } = require("../storage/thumbnail");
@@ -29,7 +38,31 @@ const BUILT_IN_PROMPTS = {
   default: IMAGE_CLEANING_PROMPT,
   new: NEW_CLEANING_PROMPT,
   shank: SHANK_CLEANING_PROMPT,
+  studio: STUDIO_CLEANING_PROMPT,
 };
+
+/**
+ * The studio prompt's gold swatch: one fixed picture of the target yellow-gold
+ * tones, sent as the second image of a studio first pass. With the tones only
+ * written into the prompt the gold still drifted from photo to photo; with
+ * the swatch beside them it held noticeably closer across a set. Read once,
+ * on first use.
+ */
+const GOLD_SWATCH_PATH = path.join(__dirname, "..", "..", "assets", "cleaning", "gold-swatch.png");
+let goldSwatch;
+function loadGoldSwatch() {
+  goldSwatch ??= { mimeType: "image/png", base64: fs.readFileSync(GOLD_SWATCH_PATH).toString("base64") };
+  return goldSwatch;
+}
+
+/**
+ * Only the studio prompt's own first pass gets the swatch: "Write my own"
+ * replaces that prompt (and the note explaining the swatch), and a refinement
+ * changes only what it asks for.
+ */
+function usesGoldSwatch({ isRefinement, customPrompt, variant }) {
+  return !isRefinement && variant === "studio" && !customPrompt?.trim();
+}
 
 /**
  * A first-pass run sends the built-in prompt for its variant unless the user
@@ -45,12 +78,15 @@ const BUILT_IN_PROMPTS = {
  * plays no part here: once a thread exists, a refinement is the same
  * instruction wrapper regardless of which mode started it.
  */
-function buildPrompt({ isRefinement, instruction, customPrompt, variant, extraNotes, referenceCount = 0 }) {
+function buildPrompt({ isRefinement, instruction, customPrompt, variant, extraNotes, referenceCount = 0, swatch = false }) {
+  // The swatch note rides with the built-in prompt it explains, ahead of any
+  // extras, so a user's "make it rose gold" still has the last word.
+  const builtIn = `${BUILT_IN_PROMPTS[variant] || IMAGE_CLEANING_PROMPT}${swatch ? `\n${GOLD_SWATCH_NOTE}` : ""}`;
   if (!isRefinement && !customPrompt?.trim() && extraNotes?.trim()) {
     // "Default" plus the user's own extras: the built-in prompt still governs
     // (it is what preserves the design), with their wishes added on top.
     return (
-      `${BUILT_IN_PROMPTS[variant] || IMAGE_CLEANING_PROMPT}\n\n` +
+      `${builtIn}\n\n` +
       "ADDITIONAL REQUESTS FROM THE USER — apply these as well, on top of everything above. " +
       "Where one asks for something the instructions above would otherwise prevent (for example a different metal colour, " +
       "a shadow, or brighter stones), the user's request wins for that one point only; everything else above still applies:\n" +
@@ -65,7 +101,7 @@ function buildPrompt({ isRefinement, instruction, customPrompt, variant, extraNo
       buildReferenceNote(referenceCount)
     );
   }
-  return customPrompt?.trim() || BUILT_IN_PROMPTS[variant] || IMAGE_CLEANING_PROMPT;
+  return customPrompt?.trim() || builtIn;
 }
 
 /**
@@ -96,6 +132,7 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
   const { provider, model, quality, modelLabel } = resolveProviderModel(requestedModel);
   const tenant = await loadTenantOrThrow(dbUser);
 
+  const swatch = usesGoldSwatch({ isRefinement, customPrompt, variant });
   const basePrompt = buildPrompt({
     isRefinement,
     instruction,
@@ -103,6 +140,7 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
     variant,
     extraNotes,
     referenceCount: references.length,
+    swatch,
   });
 
   // A follow-up is shaped by what it asks for — "in rose gold" recolours the
@@ -127,6 +165,9 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
         quality,
         images: [
           { mimeType: image.mimeType, base64: image.base64 },
+          // Second, where the note says it is. Sent to the model only — it is
+          // not the user's input, so it stays out of the recorded inputs below.
+          ...(swatch ? [loadGoldSwatch()] : []),
           ...references.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),
         ],
       });

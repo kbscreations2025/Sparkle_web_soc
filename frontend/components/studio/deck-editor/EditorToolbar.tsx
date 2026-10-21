@@ -32,6 +32,11 @@ import {
   Undo2,
   Ungroup,
   Unlock,
+  Baseline,
+  Blend,
+  Move,
+  Scan,
+  Square,
 } from "lucide-react";
 import type { AffinityPiece } from "@/lib/affinity";
 import { BRAND_COLORS, FONTS, fontStack, type DesignElement, type ShapeElement, type TextElement } from "@/lib/deckDesign";
@@ -60,7 +65,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
 
   return (
     <div
-      className="flex min-h-12 flex-wrap items-center gap-1 border-b border-black/10 bg-white px-3 py-1.5 text-[12px] text-[#2B2620]"
+      className="flex min-h-11 flex-wrap items-center gap-0.5 border-b border-black/10 bg-white px-2 py-1 text-[12px] text-[#2B2620] md:min-h-12 md:gap-1 md:px-3 md:py-1.5"
       onPointerDown={(event) => event.stopPropagation()}
     >
       <Tool title="Undo (Ctrl+Z)" onClick={api.undo} disabled={!api.canUndo}>
@@ -78,7 +83,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
           <select
             value={first.fontFamily}
             onChange={(event) => setText({ fontFamily: event.target.value })}
-            className="h-8 w-[150px] rounded-md border border-black/15 bg-white px-2 text-[12px] focus:outline-none"
+            className="h-7 w-[100px] rounded-md border border-black/15 bg-white px-1.5 text-[12px] focus:outline-none md:h-8 md:w-[150px] md:px-2"
             title="Font"
           >
             {[...new Set([first.fontFamily, ...FONTS])].map((font) => (
@@ -87,7 +92,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
               </option>
             ))}
           </select>
-          <div className="flex h-8 items-center rounded-md border border-black/15">
+          <div className="flex h-7 items-center rounded-md border border-black/15 md:h-8">
             <button type="button" className="px-1.5 text-black/60 hover:text-black" onClick={() => setText({ fontSize: Math.max(4, Math.round(first.fontSize) - 1) })} title="Smaller">
               <Minus size={12} />
             </button>
@@ -97,7 +102,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
                 const size = Number(event.target.value);
                 if (size > 0 && size <= 400) setText({ fontSize: size });
               }}
-              className="w-10 bg-transparent text-center text-[12px] focus:outline-none"
+              className="w-8 bg-transparent text-center text-[12px] focus:outline-none md:w-10"
               title="Font size"
             />
             <button type="button" className="px-1.5 text-black/60 hover:text-black" onClick={() => setText({ fontSize: Math.round(first.fontSize) + 1 })} title="Bigger">
@@ -123,7 +128,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
           >
             {first.align === "left" ? <AlignLeft size={15} /> : first.align === "center" ? <AlignCenter size={15} /> : <AlignRight size={15} />}
           </Tool>
-          <Popover label="Spacing">
+          <Popover label="Spacing" icon={<Baseline size={15} />}>
             <Slider label="Letter spacing" value={first.letterSpacing} min={-2} max={20} step={0.5} onChange={(letterSpacing) => setText({ letterSpacing })} />
             <Slider label="Line height" value={first.lineHeight} min={0.8} max={3} step={0.05} onChange={(lineHeight) => setText({ lineHeight })} />
           </Popover>
@@ -141,7 +146,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
             onChange={(stroke) => setShape({ stroke, strokeWidth: first.strokeWidth || 2 })}
             allowNone={first.shape !== "line"}
           />
-          <Popover label="Outline & corners">
+          <Popover label="Outline & corners" icon={<Square size={15} />}>
             <Slider label="Outline width" value={first.strokeWidth} min={0} max={24} step={0.5} onChange={(strokeWidth) => setShape({ strokeWidth })} />
             <p className="mb-1 text-[11px] text-black/60">Style</p>
             <div className="mb-2 grid grid-cols-3 gap-1">
@@ -190,7 +195,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
           >
             <span>{first.fit === "cover" ? "Fill" : "Fit"}</span>
           </Tool>
-          <Popover label="Corners">
+          <Popover label="Corners" icon={<Scan size={15} />}>
             <Slider
               label="Corner rounding"
               value={first.radius}
@@ -206,7 +211,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
 
       {elements.length > 0 && (
         <>
-          <Popover label="Position">
+          <Popover label="Position" icon={<Move size={15} />}>
             <p className="mb-1 text-[10px] uppercase tracking-wider text-black/40">
               Align {elements.length > 1 ? "to each other" : "to the page"}
             </p>
@@ -231,7 +236,7 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
               <MenuTool onClick={() => api.reorder("backward")} icon={<ArrowDownToLine size={14} />} label="Backward" />
             </div>
           </Popover>
-          <Popover label="Transparency">
+          <Popover label="Transparency" icon={<Blend size={15} />}>
             <Slider
               label="Opacity"
               value={Math.round(first.opacity * 100)}
@@ -275,7 +280,8 @@ export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: A
 }
 
 function Divider() {
-  return <span className="mx-1 h-5 w-px bg-black/10" />;
+  // Phones drop the dividers: the wrapped rows already group the controls.
+  return <span className="mx-1 hidden h-5 w-px bg-black/10 md:inline-block" />;
 }
 
 function Tool({
@@ -298,7 +304,7 @@ function Tool({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex h-8 min-w-8 items-center justify-center rounded-md px-1.5 text-[12px] transition-colors disabled:opacity-30",
+        "flex h-7 min-w-7 items-center justify-center rounded-md px-1 text-[12px] transition-colors disabled:opacity-30 md:h-8 md:min-w-8 md:px-1.5",
         active ? "bg-[#8B5CF6]/12 text-[#5B3FB0]" : "text-black/70 hover:bg-black/5 hover:text-black"
       )}
     >
@@ -317,7 +323,7 @@ function MenuTool({ onClick, icon, label }: { onClick: () => void; icon: ReactNo
 }
 
 /** A button that opens a small panel under it, closed by clicking anywhere else. */
-function Popover({ label, children }: { label: string; children: ReactNode }) {
+function Popover({ label, icon, children }: { label: string; icon: ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -335,13 +341,27 @@ function Popover({ label, children }: { label: string; children: ReactNode }) {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className={cn("flex h-8 items-center gap-1 rounded-md px-2 text-[12px]", open ? "bg-black/5" : "hover:bg-black/5")}
+        title={label}
+        aria-label={label}
+        className={cn("flex h-7 min-w-7 items-center justify-center gap-0.5 rounded-md px-1 text-[11px] md:h-8 md:gap-1 md:px-2 md:text-[12px]", open ? "bg-black/5" : "hover:bg-black/5")}
       >
-        {label}
-        <ChevronDown size={12} className="text-black/40" />
+        {/* Phones: just the icon, so the toolbar fits on one line. */}
+        <span className="md:hidden">{icon}</span>
+        <span className="hidden md:inline">{label}</span>
+        <ChevronDown size={12} className="hidden text-black/40 md:block" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-[240px] rounded-lg border border-black/10 bg-white p-3 shadow-xl">{children}</div>
+        <div
+          // Shifted left when it would run off the right edge of a narrow screen.
+          ref={(panel) => {
+            if (!panel) return;
+            const overflow = panel.getBoundingClientRect().right - (window.innerWidth - 12);
+            if (overflow > 0) panel.style.transform = `translateX(-${overflow}px)`;
+          }}
+          className="absolute left-0 top-full z-50 mt-1 w-[240px] max-w-[calc(100vw-24px)] rounded-lg border border-black/10 bg-white p-3 shadow-xl"
+        >
+          {children}
+        </div>
       )}
     </div>
   );
@@ -425,7 +445,7 @@ function ColorButton({
         type="button"
         onClick={() => setOpen((current) => !current)}
         title={label ?? "Colour"}
-        className="flex h-8 items-center gap-1.5 rounded-md px-1.5 hover:bg-black/5"
+        className="flex h-7 items-center gap-1.5 rounded-md px-1 hover:bg-black/5 md:h-8 md:px-1.5"
       >
         {text ? (
           <span className="flex flex-col items-center leading-none">
@@ -438,10 +458,16 @@ function ColorButton({
             style={{ background: none ? "repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 50% / 8px 8px" : value }}
           />
         )}
-        {label && <span className="text-[12px]">{label}</span>}
+        {label && <span className="hidden text-[12px] md:inline">{label}</span>}
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-[212px] rounded-lg border border-black/10 bg-white p-3 shadow-xl">
+        <div
+          ref={(panel) => {
+            if (!panel) return;
+            const overflow = panel.getBoundingClientRect().right - (window.innerWidth - 12);
+            if (overflow > 0) panel.style.transform = `translateX(-${overflow}px)`;
+          }}
+          className="absolute left-0 top-full z-50 mt-1 w-[212px] rounded-lg border border-black/10 bg-white p-3 shadow-xl">
           <div className="grid grid-cols-6 gap-1.5">
             {allowNone && (
               <button

@@ -4,7 +4,7 @@ const { resolveProviderModel, loadTenantOrThrow } = require("../aiRouting");
 const { clampCount } = require("../jobs/generationRunner");
 const { TEXT_TO_SKETCH_JOB, SKETCH_TO_IMAGE_JOB, IMAGE_TO_SKETCH_JOB } = require("../jobs/sketchTools");
 const { resolveSketchMode, variationCountFor, describeSketchMode } = require("../prompts/intent");
-const { queueGeneration, parseImages } = require("./queueGeneration");
+const { queueGeneration, parseImages, MAX_REFERENCE_PHOTOS } = require("./queueGeneration");
 const { readTrendCues } = require("../services/trends");
 
 /**
@@ -58,7 +58,8 @@ router.post("/text-to-sketch", requirePermission("tool.text_to_sketch.run"), asy
   return queueGeneration(req, res, {
     type: TEXT_TO_SKETCH_JOB,
     tool: "text_to_sketch",
-    preview: body.referenceImage,
+    // The first reference photo, when several are sent.
+    preview: [].concat(body.referenceImage ?? [])[0],
     request: refinement
       ? { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length }
       : { ...shared, isRefinement: false, prompt: body.prompt?.trim() || null, style: body.style ?? null, aspect: body.aspect ?? null, count },
@@ -74,7 +75,7 @@ router.post("/text-to-sketch", requirePermission("tool.text_to_sketch.run"), asy
           aspect: body.aspect,
           count,
           // The optional reference photo the brief is drawn from.
-          sourceImages: parseImages(body.referenceImage),
+          sourceImages: parseImages(body.referenceImage).slice(0, MAX_REFERENCE_PHOTOS),
           conversationId: body.conversationId || null,
           // The current trends the builder asked each sketch to follow, in turn.
           trendCues: readTrendCues(body.trends),

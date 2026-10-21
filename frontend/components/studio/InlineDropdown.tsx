@@ -68,6 +68,21 @@ export function InlineDropdown<T extends string>({
   useDismissable(rootRef, open, close);
 
   const selected = options.find((option) => option.value === value);
+  // The panel opens upward, so the list runs bottom-up: the first option sits
+  // right above the trigger and each next one stacks on top of it. Groups
+  // mirror along with it, each keeping its header on top.
+  const ordered = [...options].reverse();
+
+  /**
+   * Bottom-up, a list taller than the panel would open scrolled to its top —
+   * the far end from the trigger. It starts on the selected option instead,
+   * or at the bottom, where the first options are.
+   */
+  const startAtSelection = useCallback((list: HTMLUListElement | null) => {
+    if (!list) return;
+    const chosen = list.querySelector<HTMLElement>('[aria-selected="true"]');
+    list.scrollTop = chosen ? chosen.offsetTop + chosen.offsetHeight - list.clientHeight + 4 : list.scrollHeight;
+  }, []);
 
   return (
     <div ref={rootRef} className="relative shrink-0">
@@ -99,6 +114,7 @@ export function InlineDropdown<T extends string>({
       <AnimatePresence>
         {open && (
           <motion.ul
+            ref={startAtSelection}
             role="listbox"
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -111,17 +127,17 @@ export function InlineDropdown<T extends string>({
              * AccountMenu — a nested backdrop-filter composites unreliably.
              */
             className={cn(
-              "absolute bottom-full z-30 mb-1.5 min-w-full overflow-hidden rounded-lg border border-white/10 bg-surface-raised py-1 shadow-lg",
+              "absolute bottom-full z-30 mb-1.5 max-h-80 min-w-full slim-scrollbar overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-surface-raised py-1 shadow-lg",
               align === "right" ? "right-0" : "left-0",
               panelClassName
             )}
           >
-            {options.map((option, index) => {
+            {ordered.map((option, index) => {
               const isSelected = option.value === value;
               // A header renders once, right before the first option of a
               // new group — not once per option — so consecutive options in
               // the same group sit together under one label.
-              const showGroupHeader = option.group && option.group !== options[index - 1]?.group;
+              const showGroupHeader = option.group && option.group !== ordered[index - 1]?.group;
 
               return (
                 <li key={option.value}>

@@ -100,11 +100,11 @@ export default function TextToImagePage() {
           style,
           aspect,
           count,
-          referenceImage: reference.photo ?? undefined,
+          referenceImage: reference.photos.length ? reference.photos : undefined,
           trends: builder.trendCuesFor(count),
           designVariations,
         }),
-      { count, prompt: finalDescription, images: reference.photo ? [reference.photo] : [] }
+      { count, prompt: finalDescription, images: reference.photos }
     );
   }
 
@@ -142,7 +142,7 @@ export default function TextToImagePage() {
           <OptionChips label="Visual Style" options={STYLES} value={style} onChange={setStyle} />
           <AspectChips options={ASPECTS} value={aspect} onChange={setAspect} />
 
-          <ReferencePhotoField photo={reference.photo} onPick={reference.pick} onChange={reference.setPhoto} />
+          <ReferencePhotoField photos={reference.photos} onPick={reference.pick} onChange={reference.setPhotos} />
 
           <div className="space-y-1">
             <PromptCard

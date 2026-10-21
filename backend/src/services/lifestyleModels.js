@@ -3,6 +3,7 @@ const LifestyleModel = require("../models/lifestyleModel");
 const { buildLibraryKey, variantKeyFor, uploadObject, publicUrlFor } = require("../storage/r2");
 const { createThumbnail, THUMB_EXTENSION } = require("../storage/thumbnail");
 const { parseDataUri } = require("../generationService");
+const { hasPermission } = require("../permissions");
 
 /**
  * Saved Lifestyle models — the people jewellery gets placed onto.
@@ -19,9 +20,30 @@ function extensionFor(mimeType) {
   return EXTENSION_BY_MIME[mimeType] || "jpg";
 }
 
+/**
+ * Whose models this person may pick from, besides the shared ones: their
+ * own, plus — with `result.read.others` — the members their `dataScope`
+ * reaches. The same reach History gives them over those members' results.
+ * Returns a Mongo `userId` condition, or null for the whole organization.
+ */
+function ownerFilter(dbUser) {
+  if (!hasPermission(dbUser, "result.read.others")) return dbUser._id;
+  const scope = dbUser.dataScope || { kind: "own" };
+  if (scope.kind === "organization") return null;
+  if (scope.kind === "selected") return { $in: [dbUser._id, ...(scope.userIds || [])] };
+  return dbUser._id;
+}
+
+function reachFilter(dbUser) {
+  const owners = ownerFilter(dbUser);
+  return owners === null ? {} : { $or: [{ userId: owners }, { isPublic: true }] };
+}
+
 /** The client-facing shape. Never the R2 key — that is ours, not the browser's. */
-function toPublicModel(row) {
+function toPublicModel(row, dbUser) {
   return {
+    // Someone else's model reached through data scope can be used, not renamed.
+    isOwn: dbUser ? String(row.userId) === String(dbUser._id) : true,
     id: String(row._id),
     name: row.name,
     attrs: row.attrs || {},
@@ -35,8 +57,9 @@ function toPublicModel(row) {
 }
 
 /**
- * Everything this person may pick from: their own models, plus whatever the
- * organization has shared.
+ * Everything this person may pick from: their own models, those of members
+ * in their data scope (see `ownerFilter`), and whatever the organization has
+ * shared.
  *
  * One query rather than two and a merge — a model shared by its own creator
  * would otherwise appear twice in their picker.
@@ -46,13 +69,13 @@ async function listModels(dbUser) {
     tenantId: dbUser.tenantId,
     deletedAt: null,
     status: "active",
-    $or: [{ userId: dbUser._id }, { isPublic: true }],
+    ...reachFilter(dbUser),
   })
     .sort({ createdAt: -1 })
     .limit(200)
     .lean();
 
-  return rows.map(toPublicModel);
+  return rows.map((row) => toPublicModel(row, dbUser));
 }
 
 /**
@@ -107,7 +130,7 @@ async function createModel({ dbUser, name, attrs = {}, notes = null, imageDataUr
     r2Key: key,
   });
 
-  return toPublicModel(row);
+  return toPublicModel(row, dbUser);
 }
 
 /** A readable name for a model saved without one, from what it was asked to be. */
@@ -128,7 +151,7 @@ async function renameModel({ dbUser, id, name }) {
 
   row.name = String(name).trim().slice(0, 100) || row.name;
   await row.save();
-  return toPublicModel(row);
+  return toPublicModel(row, dbUser);
 }
 
 /**
@@ -146,7 +169,7 @@ async function setModelPublic({ dbUser, id, isPublic }) {
   row.publicizedBy = isPublic ? dbUser._id : null;
   row.publicizedAt = isPublic ? new Date() : null;
   await row.save();
-  return toPublicModel(row);
+  return toPublicModel(row, dbUser);
 }
 
 /**
@@ -168,7 +191,7 @@ async function deleteModel({ dbUser, id, isAdmin = false }) {
   row.deletedAt = new Date();
   row.status = "archived";
   await row.save();
-  return toPublicModel(row);
+  return toPublicModel(row, dbUser);
 }
 
 /** One model, if this person may use it. Used by the queue route to resolve a pick. */
@@ -178,7 +201,7 @@ async function findUsableModel({ dbUser, id }) {
     _id: id,
     tenantId: dbUser.tenantId,
     deletedAt: null,
-    $or: [{ userId: dbUser._id }, { isPublic: true }],
+    ...reachFilter(dbUser),
   }).lean();
 }
 

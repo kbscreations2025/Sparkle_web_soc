@@ -17,6 +17,10 @@ export const FESTIVE_EVENT_OPTIONS = [
   { id: "karva_chauth", label: "Karva Chauth" },
   { id: "eid", label: "Eid" },
   { id: "wedding_season", label: "Wedding Season" },
+  // Not occasions: a collection poster for any day of the year.
+  { id: "collection_launch", label: "Collection Launch" },
+  { id: "minimal_studio", label: "Minimal Studio" },
+  { id: "dark_luxury", label: "Dark Luxury" },
   { id: "custom", label: "Custom event" },
 ];
 
@@ -54,4 +58,8 @@ export const EVENT_COPY: Record<string, { headline: string; tagline: string }> =
   karva_chauth: { headline: "Karva Chauth Collection", tagline: "For love that lasts a lifetime" },
   eid: { headline: "Eid Collection", tagline: "Celebrate in timeless elegance" },
   wedding_season: { headline: "The Bridal Edit", tagline: "For the most beautiful day" },
+  collection: { headline: "The Collection", tagline: "Timeless designs, crafted to shine" },
+  collection_launch: { headline: "The New Collection", tagline: "Architectural inspirations • Modern luxury design" },
+  minimal_studio: { headline: "Signature Collection", tagline: "Pure lines, timeless brilliance" },
+  dark_luxury: { headline: "The Noir Edit", tagline: "Bold design, quiet luxury" },
 };

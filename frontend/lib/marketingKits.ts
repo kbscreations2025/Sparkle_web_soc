@@ -9,7 +9,9 @@ import type { MarketingKitKind, MarketingKitSummary } from "./api";
  */
 export const KIT_SURFACE: Record<MarketingKitKind, string> = {
   brand_story: "/marketing-kit/brand-story",
-  affinity: "/marketing-kit/affinity",
+  // Retired: Affinity kits were moved to Collection Story, which holds the
+  // same deck. Anything still tagged Affinity opens there too.
+  affinity: "/marketing-kit/collection-story",
   campaign: "/marketing-kit/campaign",
   collection_story: "/marketing-kit/collection-story",
   festive: "/marketing-kit/festive",
@@ -17,10 +19,10 @@ export const KIT_SURFACE: Record<MarketingKitKind, string> = {
 
 export const KIT_LABEL: Record<MarketingKitKind, string> = {
   brand_story: "Brand Story",
-  affinity: "Affinity",
+  affinity: "Collection Story",
   campaign: "Campaign Kit",
   collection_story: "Collection Story",
-  festive: "Festive Poster",
+  festive: "Poster",
 };
 
 /** The link that reopens one kit. */
@@ -59,6 +61,6 @@ export function describeKit(kit: Pick<MarketingKitSummary, "kind" | "pieceCount"
     return `${KIT_LABEL[kit.kind]} · ${plural(kit.pieceCount, "piece")}`;
   }
   if (kit.kind === "campaign") return `Campaign Kit · ${plural(kit.pieceCount, "shot")}`;
-  if (kit.kind === "festive") return `Festive Poster · ${plural(kit.pieceCount, "poster")}`;
+  if (kit.kind === "festive") return `Poster · ${plural(kit.pieceCount, "poster")}`;
   return "Brand Story";
 }

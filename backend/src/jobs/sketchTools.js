@@ -41,7 +41,7 @@ registerJobHandler(TEXT_TO_SKETCH_JOB, (context) =>
         style: data.style,
         aspect: data.aspect,
         count,
-        hasReference: Boolean(data.sourceImages?.length),
+        hasReference: data.sourceImages?.length ?? 0,
       }),
     // "Make variations" on a reference photo: each sketch a different design
     // option grown out of it, rather than the same piece drawn again.

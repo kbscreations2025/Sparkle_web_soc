@@ -124,7 +124,8 @@ export function BackgroundPanel({ api, pieces }: { api: EditorApi; pieces: Affin
         {/* Colour — the last swatch opens any colour. */}
         <section>
           <Heading>Colour</Heading>
-          <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+          {/* Phones: every colour in one row of small swatches; wider screens: two rows. */}
+          <div className="grid grid-cols-12 gap-1 lg:grid-cols-6">
             {[...new Set([...(api.design.brand?.colors ?? []), ...PAGE_COLORS])].map((color) => (
               <button
                 key={color}
@@ -251,11 +252,11 @@ export function BackgroundPanel({ api, pieces }: { api: EditorApi; pieces: Affin
               )}
             </div>
           ) : (
-            <p className="mb-1 leading-snug text-black/45">Pick a picture below — it starts as a soft watermark.</p>
+            <p className="mb-1 leading-snug text-black/45 max-lg:hidden">Pick a picture below — it starts as a soft watermark.</p>
           )}
 
           <input ref={input} type="file" accept="image/*" hidden onChange={(event) => { upload(event.target.files?.[0]); event.target.value = ""; }} />
-          <div className="mt-1.5 grid grid-cols-4 gap-1">
+          <div className="mt-1.5 grid grid-cols-6 gap-1 md:grid-cols-10 lg:grid-cols-4">
             <button
               type="button"
               onClick={() => input.current?.click()}

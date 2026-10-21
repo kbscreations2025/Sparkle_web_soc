@@ -12,6 +12,7 @@ const {
   AFFINITY_PROMPT,
 } = require("../prompts/marketingKit");
 const { buildCampaignKitShots, buildCampaignKitRefinePrompt } = require("../prompts/campaignKit");
+const { matchColour, wantsColourChange } = require("../services/colorMatch");
 const { buildFestivePosterPrompt, buildFestivePosterRefinePrompt, eventLabel } = require("../prompts/festivePoster");
 
 const BRAND_STORY_JOB = "marketingKit.brandStory";
@@ -414,6 +415,10 @@ registerJobHandler(CAMPAIGN_KIT_JOB, (context) => {
       }));
     },
     buildRefinePrompt: buildCampaignKitRefinePrompt,
+    // Same as Lifestyle: an edit's colour is pulled back to the shot it
+    // edited, so retouches don't drift pinker turn by turn.
+    finishRefine: ({ output, refineImage, instruction }) =>
+      wantsColourChange(instruction) ? output : matchColour(output, refineImage),
     params: { ...context.data.options, kitId: String(kitId) },
     /*
      * A retouch of one shot is not a new deck — it edits a picture inside
@@ -444,6 +449,7 @@ registerJobHandler(CAMPAIGN_KIT_JOB, (context) => {
                   label: shot.label,
                   assetId: saved.outputs[index]?.assetId ?? null,
                   url: saved.outputs[index]?.url,
+                  thumbnailUrl: saved.outputs[index]?.thumbnailUrl ?? null,
                   caption: "",
                 })),
                 options: data.options,
@@ -500,6 +506,7 @@ registerJobHandler(FESTIVE_POSTER_JOB, (context) => {
                   label: shot.label,
                   assetId: saved.outputs[index]?.assetId ?? null,
                   url: saved.outputs[index]?.url,
+                  thumbnailUrl: saved.outputs[index]?.thumbnailUrl ?? null,
                   caption: "",
                 })),
                 options: data.options,

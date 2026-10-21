@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const express = require("express");
 const { Readable } = require("stream");
 const config = require("../config");
@@ -337,6 +338,22 @@ router.get("/", async (req, res) => {
     nextCursor: hasMore ? page[page.length - 1].createdAt.toISOString() : null,
     canReadTeam: hasPermission(req.dbUser, "result.read.others"),
   });
+});
+
+/**
+ * One result by its generation id — how a Campaign Kit or Festive Poster tile
+ * in the Kits tab opens the same viewer the results grid does. Those runs are
+ * left out of the listing above (they belong to the Kits tab), so they are
+ * fetched here instead, under the same reach: a kit a teammate can see in the
+ * grid opens, anything else is a 404.
+ */
+router.get("/item/:id", async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+  }
+  const generation = await Generation.findOne({ ...buildScopeFilter(req.dbUser, true), _id: req.params.id }).lean();
+  if (!generation) return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+  res.json({ status: "success", item: toHistoryItem(generation, req.dbUser) });
 });
 
 /**

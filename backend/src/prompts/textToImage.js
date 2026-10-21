@@ -52,6 +52,19 @@ function variationNote(count) {
   return " Generate a single distinct hero shot for this variation — vary the framing or angle subtly from the other variations while keeping the same jewelry design.";
 }
 
+/**
+ * How the attached reference photos are to be read. `count` is how many —
+ * `hasReference` is that number, so `true` from an older caller reads as one.
+ * Shared with Text to Image, so a starting photo is treated alike in both.
+ */
+function referenceNote(count) {
+  const n = Number(count) || 1;
+  if (n <= 1) {
+    return "A reference jewellery photo is attached — keep that exact design (its jewelry type, silhouette, stones, setting and details) and change only what the design brief below asks for. Where the brief specifies something, it wins over the reference; everything it does not mention stays as in the photo.";
+  }
+  return `${n} reference jewellery photos are attached. If they show the same piece (different angles or details), treat them together as one design and use every view to get its true shape, stones, setting and details right. If they show different pieces, combine elements from them into ONE single new design, as the brief below directs. Keep what the references show and change only what the brief asks for; where the brief specifies something, it wins over the references. Draw one piece only — never several pieces side by side.`;
+}
+
 /** Builds the prompt for an initial (non-refinement) generation. */
 function buildTextToImagePrompt({ description, style, aspect, count = 1, hasReference = false }) {
   const desc =
@@ -65,11 +78,9 @@ function buildTextToImagePrompt({ description, style, aspect, count = 1, hasRefe
     `${enriched} Image orientation: ${aspectNote}. Show the complete piece from a single fixed elegant hero angle, ` +
     `fully framed with nothing cropped.${variationNote(count)}`;
 
-  // Same wording as Text to Sketch's reference, so the two tools treat a
-  // starting photo alike: the photo sets the design, the brief overrides it.
-  return hasReference
-    ? `A reference jewellery photo is attached — keep that exact design (its jewelry type, silhouette, stones, setting and details) and change only what the design brief below asks for. Where the brief specifies something, it wins over the reference; everything it does not mention stays as in the photo.\n\n${prompt}`
-    : prompt;
+  // The same note Text to Sketch uses, so the two tools treat starting
+  // photos alike: the photos set the design, the brief overrides them.
+  return hasReference ? `${referenceNote(hasReference)}\n\n${prompt}` : prompt;
 }
 
 /**
@@ -117,4 +128,4 @@ function buildTextToImageRefinePrompt({ instruction, referenceCount = 0 }) {
   );
 }
 
-module.exports = { buildTextToImagePrompt, buildTextToImageVariationPrompt, VARIATION_FOCI, buildTextToImageRefinePrompt, STYLE_GUIDE, ASPECT_TEXT };
+module.exports = { buildTextToImagePrompt, buildTextToImageVariationPrompt, VARIATION_FOCI, buildTextToImageRefinePrompt, STYLE_GUIDE, ASPECT_TEXT, referenceNote };

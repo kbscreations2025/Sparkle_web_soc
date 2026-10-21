@@ -9,16 +9,41 @@
  *
  * Ids are OpenRouter's own `<provider>/<model>` naming.
  */
+const sharp = require("sharp");
+
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-/** OpenRouter's own image endpoint has two distinct shapes depending on which underlying model is asked for it — see `generateImage`. */
-const GPT_STYLE_MODELS = ["openai/gpt-image-2", "openai/gpt-image-1"];
+/** OpenRouter's own image endpoint takes a different shape depending on which underlying model is asked for it — see `generateImage`. */
+const GPT_25_MODELS = ["openai/gpt-image-2.5-sunburst", "openai/gpt-image-2.5-flare"];
+const GPT_STYLE_MODELS = ["openai/gpt-image-2", "openai/gpt-image-1", ...GPT_25_MODELS];
 const GEMINI_STYLE_MODELS = ["google/gemini-3-pro-image", "google/gemini-3.1-flash-image"];
+/**
+ * The models on trial in Image Cleaning's "Cleaning in Testing" card — photo
+ * editors from other makers, taking OpenRouter's normalized image fields: a
+ * resolution tier and an aspect ratio the model clamps to what it supports.
+ */
+const EDIT_STYLE_MODELS = [
+  "google/gemini-nano-banana-2.1",
+  "black-forest-labs/flux-3-image",
+  "black-forest-labs/flux.2-max",
+  "bytedance-seed/seedream-5-0-pro",
+  "qwen/qwen-image-3-pro",
+  "krea/k3-edit",
+  "microsoft/mai-image-2.6",
+  "x-ai/grok-imagine-image-2.0",
+  "sourceful/riverflow-v2.5-pro",
+  "tencent/hy-image-v3.5-preview",
+  "meta/muse-image",
+];
 
-const OPENROUTER_MODELS = [...GPT_STYLE_MODELS, ...GEMINI_STYLE_MODELS];
+const OPENROUTER_MODELS = [...GPT_STYLE_MODELS, ...GEMINI_STYLE_MODELS, ...EDIT_STYLE_MODELS];
 const DEFAULT_OPENROUTER_MODEL = OPENROUTER_MODELS[0];
 
-/** The "Sparkle" label the frontend shows — see frontend/lib/api.ts's NEW_CLEANING_MODELS. */
+/**
+ * The label the frontend shows — see frontend/lib/api.ts's NEW_CLEANING_MODELS
+ * and TESTING_CLEANING_MODELS. The trial models keep their makers' names, so
+ * a result in History says plainly which model made it.
+ */
 const OPENROUTER_MODEL_LABELS = {
   "openai/gpt-image-2": "Sparkle GPT Image 2",
   "openai/gpt-image-1": "Sparkle GPT Image",
@@ -28,6 +53,20 @@ const OPENROUTER_MODEL_LABELS = {
   // it is the same model whichever key answered.
   "google/gemini-2.5-pro": "Sparkle 2.5 Pro",
   "google/gemini-2.5-flash": "Sparkle 2.5 Flash",
+  // On trial — Cleaning in Testing.
+  "openai/gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst",
+  "openai/gpt-image-2.5-flare": "GPT Image 2.5 Flare",
+  "google/gemini-nano-banana-2.1": "Nano Banana 2.1",
+  "black-forest-labs/flux-3-image": "FLUX 3 Image",
+  "black-forest-labs/flux.2-max": "FLUX.2 Max",
+  "bytedance-seed/seedream-5-0-pro": "Seedream 5.0 Pro",
+  "qwen/qwen-image-3-pro": "Qwen Image 3 Pro",
+  "krea/k3-edit": "Krea K3 Edit",
+  "microsoft/mai-image-2.6": "MAI-Image-2.6",
+  "x-ai/grok-imagine-image-2.0": "Grok Imagine Image 2.0",
+  "sourceful/riverflow-v2.5-pro": "Riverflow V2.5 Pro",
+  "tencent/hy-image-v3.5-preview": "Hy Image 3.5",
+  "meta/muse-image": "Muse Image",
 };
 
 function labelFor(modelId) {
@@ -38,9 +77,21 @@ function labelFor(modelId) {
 const GPT_QUALITIES = ["high", "medium", "low"];
 /** The Gemini-style models' axis is a resolution, same vocabulary the Gemini provider module itself uses — confirmed from OpenRouter's own Playground export, not assumed. */
 const GEMINI_QUALITIES = ["4K", "2K", "1K"];
+/** OpenRouter's normalized tiers for the trial models. 2K first: not every one of them renders 4K. */
+const EDIT_QUALITIES = ["2K", "1K"];
+/**
+ * The trial models that do render 4K — each confirmed by a probe that got a
+ * 4096×4096 image back, not assumed. The rest reject "4K" outright (Seedream
+ * and Grok list 1K/2K only), so it can't simply be added for all of them.
+ */
+const EDIT_4K_MODELS = ["google/gemini-nano-banana-2.1"];
+const EDIT_4K_QUALITIES = ["4K", "2K", "1K"];
 
 function qualitiesFor(modelId) {
-  return GEMINI_STYLE_MODELS.includes(modelId) ? GEMINI_QUALITIES : GPT_QUALITIES;
+  if (GEMINI_STYLE_MODELS.includes(modelId)) return GEMINI_QUALITIES;
+  if (EDIT_4K_MODELS.includes(modelId)) return EDIT_4K_QUALITIES;
+  if (EDIT_STYLE_MODELS.includes(modelId)) return EDIT_QUALITIES;
+  return GPT_QUALITIES;
 }
 
 function qualityFor(modelId, requested) {
@@ -143,7 +194,40 @@ async function withKeyFailover(entries, attempt) {
  * URI works as the reference's `url` same as a hosted one. Shared by both
  * model families below — only the rest of the body differs.
  */
+/**
+ * The shapes every trial editor accepts — the narrowest list among them
+ * (Krea's, from its own rejection message); Nano Banana takes all of these.
+ */
+const EDIT_ASPECTS = [
+  ["1:1", 1],
+  ["4:5", 4 / 5],
+  ["4:3", 4 / 3],
+  ["3:2", 3 / 2],
+  ["2:3", 2 / 3],
+  ["16:9", 16 / 9],
+  ["9:16", 9 / 16],
+];
+
+/**
+ * The supported shape nearest the photo being edited. Left unset, a trial
+ * editor usually keeps the photo's shape but not always — a square product
+ * shot came back 16:9 and re-cropped — so an edit asks for it outright.
+ */
+async function photoAspect(image) {
+  if (!image?.base64) return null;
+  try {
+    const { width, height } = await sharp(Buffer.from(image.base64, "base64")).metadata();
+    if (!width || !height) return null;
+    const ratio = width / height;
+    const distance = (value) => Math.abs(Math.log(ratio / value));
+    return EDIT_ASPECTS.reduce((best, entry) => (distance(entry[1]) < distance(best[1]) ? entry : best))[0];
+  } catch {
+    return null;
+  }
+}
+
 async function generateImage({ apiKey, modelId, prompt, images, quality, aspectRatio }) {
+  const editAspect = EDIT_STYLE_MODELS.includes(modelId) && !aspectRatio ? await photoAspect(images?.[0]) : null;
   const inputReferences = images?.length
     ? {
         input_references: images.map(({ mimeType, base64 }) => ({
@@ -157,7 +241,18 @@ async function generateImage({ apiKey, modelId, prompt, images, quality, aspectR
   // OpenRouter's own Playground export for each, not assumed from one
   // shape carrying over to the other. GPT's has a compute-tier `quality`
   // plus `background`; Gemini's has a `resolution` and neither of those.
-  const body = GEMINI_STYLE_MODELS.includes(modelId)
+  const body = EDIT_STYLE_MODELS.includes(modelId)
+    ? {
+        // The trial models: OpenRouter's normalized fields only. Their
+        // providers reject "auto" outright, so the shape is the one asked
+        // for, or else the edited photo's own (see `photoAspect`).
+        model: modelId,
+        prompt,
+        resolution: qualityFor(modelId, quality),
+        ...(aspectRatio || editAspect ? { aspect_ratio: aspectRatio || editAspect } : {}),
+        ...inputReferences,
+      }
+    : GEMINI_STYLE_MODELS.includes(modelId)
     ? {
         model: modelId,
         prompt,
@@ -171,6 +266,10 @@ async function generateImage({ apiKey, modelId, prompt, images, quality, aspectR
         aspect_ratio: aspectRatio || "1:1",
         quality: qualityFor(modelId, quality),
         background: "auto",
+        // Without a resolution GPT Image 2.5 answers at 1024px; asked for
+        // "2K" it returns ~1254px, its ceiling (a probe asking "4K" got the
+        // same). gpt-image-2/1 keep their existing request untouched.
+        ...(GPT_25_MODELS.includes(modelId) ? { resolution: "2K" } : {}),
         ...inputReferences,
       };
 

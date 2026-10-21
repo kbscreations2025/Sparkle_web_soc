@@ -70,6 +70,8 @@ export function DeckEditor({
   const { design, active, slide, selected, setSelected, editingId, setEditingId } = api;
 
   const [tab, setTab] = useState<PanelTab>("pages");
+  /** Whether the panel sheet is showing below desktop width, where it slides up over the page; desktop always shows it. */
+  const [panelOpen, setPanelOpen] = useState(false);
   const [zoom, setZoom] = useState<number | "fit">("fit");
   const [fitScale, setFitScale] = useState(0.6);
   const [guides, setGuides] = useState<Guide[]>([]);
@@ -86,14 +88,22 @@ export function DeckEditor({
     if (!stage) return;
     const measure = () => {
       const width = stage.clientWidth - 64;
-      const height = stage.clientHeight - 64;
+      let height = stage.clientHeight - 64;
+      if (panelOpen && window.matchMedia("(max-width: 1023px)").matches) {
+        // An open sheet covers the bottom of the stage, so the slide fits
+        // between its spot 6vh down and the top of the tallest sheet (42vh):
+        // one size whichever panel is open, never running underneath.
+        const top = stage.getBoundingClientRect().top + window.innerHeight * 0.06;
+        const sheetTop = (stage.parentElement?.getBoundingClientRect().bottom ?? window.innerHeight) - window.innerHeight * 0.42;
+        height = Math.min(height, sheetTop - top - 16);
+      }
       setFitScale(Math.max(0.2, Math.min(width / SLIDE_W, height / SLIDE_H)));
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(stage);
     return () => observer.disconnect();
-  }, []);
+  }, [panelOpen]);
 
   /*
    * The mouse wheel turns pages, as in PowerPoint's normal view — unless the
@@ -498,11 +508,14 @@ export function DeckEditor({
   const handle = 10 / scale;
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden" data-app-chrome>
-      <EditorPanels api={api} pieces={pieces} tab={tab} onTab={setTab} />
+    <div className="flex min-h-0 flex-1 flex-col-reverse overflow-hidden lg:flex-row" data-app-chrome>
+      <EditorPanels api={api} pieces={pieces} tab={tab} onTab={setTab} open={panelOpen} onOpenChange={setPanelOpen} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <EditorToolbar api={api} pieces={pieces} onOpenImages={() => setTab("images")} />
+        <EditorToolbar api={api} pieces={pieces} onOpenImages={() => {
+            setTab("images");
+            setPanelOpen(true);
+          }} />
 
         <div
           ref={stageRef}
@@ -513,7 +526,13 @@ export function DeckEditor({
             setMenu({ x: event.clientX, y: event.clientY });
           }}
         >
-          <div className="flex min-h-full min-w-fit flex-col items-center justify-center gap-3 p-8">
+          {/* Phones and tablets: centred while no panel is open; with one open, a fixed spot near the top, clear of the sheet. */}
+          <div
+            className={cn(
+              "flex min-h-full min-w-fit flex-col items-center gap-3 p-4 lg:justify-center lg:p-8",
+              panelOpen ? "justify-start pt-[6vh]" : "justify-center"
+            )}
+          >
             <div ref={slideRef} className="shadow-[0_6px_30px_rgba(60,40,10,0.18)]">
               <SlideView slide={slide} pieces={pieces} scale={scale} renderElement={renderElement}>
                 {/* Selection frame */}
@@ -575,7 +594,7 @@ export function DeckEditor({
           >
             <ChevronLeft size={14} />
           </button>
-          <span className="tabular-nums">
+          <span className="whitespace-nowrap tabular-nums">
             Page {active + 1} of {design.slides.length}
           </span>
           <button
@@ -587,8 +606,6 @@ export function DeckEditor({
           >
             <ChevronRight size={14} />
           </button>
-          <span className="ml-2 hidden text-black/40 md:inline">Scroll to move between pages · Ctrl + scroll to zoom</span>
-
           <div className="ml-auto flex items-center gap-1.5">
             <button
               type="button"
@@ -604,7 +621,7 @@ export function DeckEditor({
               max={ZOOM_MAX * 100}
               value={Math.round(scale * 100)}
               onChange={(event) => setZoom(Number(event.target.value) / 100)}
-              className="slim-range w-28"
+              className="slim-range hidden w-28 sm:block"
               style={{ "--fill": `${((Math.round(scale * 100) - ZOOM_MIN * 100) / ((ZOOM_MAX - ZOOM_MIN) * 100)) * 100}%` } as React.CSSProperties}
               title="Zoom"
             />

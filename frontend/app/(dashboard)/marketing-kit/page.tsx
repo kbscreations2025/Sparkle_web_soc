@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, BookOpen, CalendarHeart, Gem, LayoutGrid, Newspaper } from "lucide-react";
+import { ArrowRight, BookOpen, CalendarHeart, Gem, Newspaper } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
@@ -21,13 +21,6 @@ const SURFACES = [
     Icon: Gem,
   },
   {
-    id: "affinity",
-    label: "Affinity",
-    tagline: "Several pieces, each with its own sheet · catalog copy for the set",
-    href: "/marketing-kit/affinity",
-    Icon: LayoutGrid,
-  },
-  {
     id: "campaign",
     label: "Campaign Kit",
     tagline: "A model and your jewellery · two lifestyle shots and two studio shots",
@@ -43,8 +36,8 @@ const SURFACES = [
   },
   {
     id: "festive",
-    label: "Festive Poster",
-    tagline: "Up to six pieces in one poster · styled for Mother's Day, Christmas, Diwali and more",
+    label: "Poster",
+    tagline: "Up to six pieces in one poster · a collection poster, or styled for Mother's Day, Christmas, Diwali and more",
     href: "/marketing-kit/festive",
     Icon: CalendarHeart,
   },

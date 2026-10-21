@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CircleDashed, Eraser, Replace, Rotate3d, Sparkles, type LucideIcon } from "lucide-react";
+import { CircleDashed, Eraser, FlaskConical, Replace, Rotate3d, Sparkles, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
@@ -30,17 +30,24 @@ type CleaningMode = {
 const MODES: CleaningMode[] = [
   {
     id: "new-cleaning",
-    label: "High-Res Image Generation",
+    label: "Cleaning 1 (up to 1K)",
     description: "GPT's latest image model via OpenRouter — same workspace, its own instructions",
     icon: Eraser,
     href: "/cleaning/new",
   },
   {
     id: "default",
-    label: "Default",
+    label: "Cleaning 2 (up to 4K)",
     description: "The standard retouch — upload, clean, then ask for changes",
     icon: Sparkles,
     href: "/cleaning/default",
+  },
+  {
+    id: "testing",
+    label: "Cleaning Testing",
+    description: "White background, polished metal, one consistent gold — Nano Banana 2.1 up to 4K",
+    icon: FlaskConical,
+    href: "/cleaning/testing",
   },
   {
     id: "shank",
@@ -63,6 +70,12 @@ const MODES: CleaningMode[] = [
     icon: Replace,
     href: "/cleaning/replace",
   },
+];
+
+/** The page's two groups: the full-photo cleanings, then the tools that do one specific job. */
+const SECTIONS = [
+  { title: "Cleaning", ids: ["new-cleaning", "default", "testing"] },
+  { title: "Retouch & Edit Tools", ids: ["shank", "views", "replacement"] },
 ];
 
 const containerVariants = {
@@ -88,19 +101,23 @@ export default function CleaningPage() {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-6xl space-y-6">
-        {/* The breadcrumb already names this page — no need to repeat the title here. */}
-        <motion.div
-          variants={containerVariants}
-          initial="hidden"
-          animate="show"
-          className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
-        >
-          {MODES.map((mode) => (
-            <motion.div key={mode.id} variants={cardVariants}>
-              <ModeCard mode={mode} />
+        {SECTIONS.map((section) => (
+          <section key={section.title} className="space-y-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-faint">{section.title}</h2>
+            <motion.div
+              variants={containerVariants}
+              initial="hidden"
+              animate="show"
+              className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            >
+              {MODES.filter((mode) => section.ids.includes(mode.id)).map((mode) => (
+                <motion.div key={mode.id} variants={cardVariants}>
+                  <ModeCard mode={mode} />
+                </motion.div>
+              ))}
             </motion.div>
-          ))}
-        </motion.div>
+          </section>
+        ))}
       </div>
     </div>
   );

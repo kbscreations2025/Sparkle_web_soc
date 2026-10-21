@@ -87,7 +87,7 @@ function openingTurn(id: string, original: string, content: string): ChatMsg {
   return { id, role: "user", content, image: original || undefined };
 }
 
-type ModelOption ={ id: string; label: string; quality: string; description: string; badge: string };
+type ModelOption = { id: string; label: string; quality: string; description: string; badge?: string };
 
 /**
  * The Image Cleaning workspace: upload, clean, then refine in chat. Shared by
@@ -107,7 +107,7 @@ export function CleaningWorkspace<TModel extends string>({
   modelOptions: readonly (ModelOption & { id: TModel })[];
   defaultModel: TModel;
   /** Which built-in prompt "Default" instructions resolve to — see above. */
-  promptVariant?: "default" | "new" | "shank";
+  promptVariant?: "default" | "new" | "shank" | "studio";
 }) {
   const { user } = useAuth();
 
@@ -635,7 +635,7 @@ export function CleaningWorkspace<TModel extends string>({
                     : "Small changes on top of the default — e.g. “soft shadow under the ring”, “make the diamonds brighter”, “rose gold metal”…"
                 }
                 onPasteImage={running ? undefined : (file) => handleAdd([file])}
-                footerEnd={<InlineModelSelect models={modelOptions} value={model} onChange={setModel} showQuality />}
+                footerEnd={<InlineModelSelect models={modelOptions} value={model} onChange={setModel} showQuality align="right" />}
               />
             </section>
 

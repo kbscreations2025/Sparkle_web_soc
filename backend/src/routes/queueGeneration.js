@@ -197,4 +197,7 @@ async function queueGeneration(req, res, { type, tool, request, payload, preview
   }
 }
 
-module.exports = { queueGeneration, parseImages };
+/** Reference photos a text-to-image or text-to-sketch run takes — the pages offer the same. */
+const MAX_REFERENCE_PHOTOS = 4;
+
+module.exports = { queueGeneration, parseImages, MAX_REFERENCE_PHOTOS };

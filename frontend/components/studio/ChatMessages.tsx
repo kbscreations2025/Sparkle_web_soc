@@ -49,8 +49,9 @@ export function ChatMessages({
   hintsLabel?: string;
   onHint?: (hint: string) => void;
 }) {
+  // A visible scrollbar: a long run of edits is otherwise hard to tell is scrollable.
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2.5">
+    <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2.5">
       {history.map((msg) =>
         msg.role === "user" ? (
           <UserBubble key={msg.id} msg={msg} onOpen={onSelectResult} />

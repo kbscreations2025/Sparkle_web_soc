@@ -7,21 +7,37 @@
  * live here, so a wording change never needs a frontend deploy.
  */
 
-/** A colour chip beside each box, so the lining is picked by eye. */
+/**
+ * How the piece is presented in the studio shots: a real setting, or a lined
+ * box (with a colour chip, so the lining is picked by eye). "Auto" is sent as
+ * no pick, and the backend gives each studio shot a different real setting.
+ */
 export const BOX_STYLE_OPTIONS = [
-  { id: "none", label: "No box", swatch: "transparent" },
-  { id: "white-velvet", label: "White Velvet", swatch: "#f2efe9" },
-  { id: "cream-velvet", label: "Cream Velvet", swatch: "#e8dcc0" },
-  { id: "navy-velvet", label: "Navy Velvet", swatch: "#1c2b4a" },
-  { id: "black-velvet", label: "Black Velvet", swatch: "#161616" },
-  { id: "charcoal-velvet", label: "Charcoal Velvet", swatch: "#33343a" },
-  { id: "burgundy-velvet", label: "Burgundy Velvet", swatch: "#5c1a2b" },
-  { id: "emerald-velvet", label: "Emerald Velvet", swatch: "#1f4d3a" },
-  { id: "rose-velvet", label: "Rose Velvet", swatch: "#d9a8ab" },
-  { id: "champagne-satin", label: "Champagne Satin", swatch: "#e6d3a3" },
-  { id: "gold-velvet", label: "Gold Velvet", swatch: "#a1782e" },
-  { id: "grey-suede", label: "Grey Suede", swatch: "#8a8781" },
-  { id: "plum-velvet", label: "Plum Velvet", swatch: "#4a2545" },
+  { id: "auto", label: "Auto (Varied)" },
+  { id: "flowers-around", label: "Among Flowers" },
+  { id: "marble-table", label: "Marble Table" },
+  { id: "wood-table", label: "Wooden Table" },
+  { id: "silk-cloth", label: "Draped Silk" },
+  { id: "linen-cloth", label: "Linen Cloth" },
+  { id: "stone-plinth", label: "Stone Plinth" },
+  { id: "ceramic-tray", label: "Ceramic Dish" },
+  { id: "sand", label: "Sand & Shell" },
+  { id: "leaves", label: "Green Leaves" },
+  { id: "mirror-tray", label: "Mirror Tray" },
+  { id: "open-box", label: "Open Gift Box" },
+  { id: "none", label: "Plain Backdrop", swatch: "transparent" },
+  { id: "white-velvet", label: "White Velvet Box", swatch: "#f2efe9" },
+  { id: "cream-velvet", label: "Cream Velvet Box", swatch: "#e8dcc0" },
+  { id: "navy-velvet", label: "Navy Velvet Box", swatch: "#1c2b4a" },
+  { id: "black-velvet", label: "Black Velvet Box", swatch: "#161616" },
+  { id: "charcoal-velvet", label: "Charcoal Velvet Box", swatch: "#33343a" },
+  { id: "burgundy-velvet", label: "Burgundy Velvet Box", swatch: "#5c1a2b" },
+  { id: "emerald-velvet", label: "Emerald Velvet Box", swatch: "#1f4d3a" },
+  { id: "rose-velvet", label: "Rose Velvet Box", swatch: "#d9a8ab" },
+  { id: "champagne-satin", label: "Champagne Satin Box", swatch: "#e6d3a3" },
+  { id: "gold-velvet", label: "Gold Velvet Box", swatch: "#a1782e" },
+  { id: "grey-suede", label: "Grey Suede Box", swatch: "#8a8781" },
+  { id: "plum-velvet", label: "Plum Velvet Box", swatch: "#4a2545" },
 ] as const;
 
 /**

@@ -11,6 +11,8 @@ type Model = {
   description?: string;
   /** Which provider serves this model — see `InlineDropdown`'s `group`. */
   provider?: string;
+  /** A short tag beside the label, e.g. "Recommended" — see `InlineDropdown`. */
+  badge?: string;
 };
 
 /**
@@ -37,6 +39,7 @@ export function InlineModelSelect<TModel extends string>({
   showQuality = false,
   quality,
   onQualityChange,
+  align = "left",
 }: {
   models: readonly (Model & { id: TModel })[];
   value: TModel;
@@ -44,6 +47,8 @@ export function InlineModelSelect<TModel extends string>({
   showQuality?: boolean;
   quality?: string;
   onQualityChange?: (quality: string) => void;
+  /** Which edge of the trigger the model list lines up with: "right" where the picker sits at the end of a bar, so the list opens inward. */
+  align?: "left" | "right";
 }) {
   const selected = models.find((model) => model.id === value);
   const options = selected?.qualities ?? [];
@@ -64,9 +69,12 @@ export function InlineModelSelect<TModel extends string>({
           label: model.label,
           hint: model.description,
           group: model.provider,
+          badge: model.badge,
         }))}
+        align={align}
         triggerClassName="max-w-[150px] sm:max-w-[170px]"
-        panelClassName="w-[210px]"
+        // Wider only when a badge shares the row, so the label isn't cut off.
+        panelClassName={models.some((model) => model.badge) ? "w-[250px]" : "w-[210px]"}
       />
 
       {showQuality &&

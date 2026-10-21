@@ -11,6 +11,7 @@ import {
   deleteHistoryItem,
   deleteMarketingKit,
   fetchHistory,
+  fetchHistoryItem,
   listMarketingKits,
   MODEL_LABELS,
   type HistoryItem,
@@ -680,6 +681,32 @@ export default function HistoryPage() {
     [kits, dateRange, selectedKinds, selectedMembers]
   );
 
+  /**
+   * The run behind each Campaign Kit and Festive Poster tile, by kit id —
+   * what lets those tiles open the results viewer and the chat, the way an
+   * image tile does. Fetched once per kit as the tab shows it; small, and
+   * only for those two kinds (the others are decks, opened in their editor).
+   */
+  const [kitItems, setKitItems] = useState<Record<string, HistoryItem>>({});
+  const requestedKitItems = useRef(new Set<string>());
+  useEffect(() => {
+    if (view !== "kits" || !visibleKits) return;
+    for (const kit of visibleKits) {
+      if (!OPENS_AS_RESULT.has(kit.kind) || !kit.generationId || requestedKitItems.current.has(kit.id)) continue;
+      requestedKitItems.current.add(kit.id);
+      fetchHistoryItem(kit.generationId).then((res) => {
+        // The kit's kind is the mode: it is what sends "open the chat" to the
+        // Campaign Kit or Festive Poster page rather than the Marketing Kit hub.
+        if (res.status === "success" && res.item) {
+          const item = { ...res.item, mode: kit.kind };
+          setKitItems((current) => ({ ...current, [kit.id]: item }));
+        }
+      });
+    }
+  }, [view, visibleKits]);
+  /** A result opened from a kit tile — deleting it is the kit's own button, not the viewer's. */
+  const kitGenerationIds = useMemo(() => new Set(Object.values(kitItems).map((item) => item.id)), [kitItems]);
+
   /** What the badge counts — whatever the tab on screen is showing. */
   const badgeCount = view === "kits" ? (visibleKits?.length ?? 0) : totalImages;
 
@@ -1133,7 +1160,17 @@ export default function HistoryPage() {
         )}
         <div ref={scrollRef} className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3 lg:p-4">
           {view === "kits" ? (
-            <KitsGrid kits={visibleKits} loading={kitsLoading} columns={columns} onDelete={setPendingKitDelete} />
+            <KitsGrid
+              kits={visibleKits}
+              loading={kitsLoading}
+              columns={columns}
+              onDelete={setPendingKitDelete}
+              items={kitItems}
+              canContinue={(item) => item.isOwn && Boolean(workspacePathFor(item.tool, item.model))}
+              canView={viewable}
+              onOpen={openItem}
+              onContinue={handleContinue}
+            />
           ) : loading ? (
             <SkeletonGrid rows={3} />
           ) : visibleItems.length === 0 ? (
@@ -1186,7 +1223,7 @@ export default function HistoryPage() {
         modelLabel={modelLabelFor(selected?.model)}
         canContinue={Boolean(selected?.isOwn && workspacePathFor(selected.tool, selected.model))}
         canView={Boolean(selected && viewable(selected))}
-        canDelete={Boolean(selected && deletable(selected))}
+        canDelete={Boolean(selected && deletable(selected) && !kitGenerationIds.has(selected.id))}
         deleting={Boolean(selected && deletingId === selected.id)}
         onClose={() => setSelected(null)}
         onDelete={requestDelete}
@@ -1338,23 +1375,39 @@ function ViewTab({
  * is in the grid, not what a grid looks like, and a second card style would
  * make the two halves read as two different pages.
  */
+/**
+ * Kits that are a set of pictures rather than a deck: their tiles open the
+ * results viewer and the chat, like an image tile, instead of an editor.
+ */
+const OPENS_AS_RESULT = new Set(["campaign", "festive"]);
+
+type KitResultActions = {
+  /** The run behind a Campaign Kit or Festive Poster tile, by kit id, once loaded. */
+  items: Record<string, HistoryItem>;
+  canContinue: (item: HistoryItem) => boolean;
+  canView: (item: HistoryItem) => boolean;
+  onOpen: (item: HistoryItem) => void;
+  onContinue: (item: HistoryItem) => void;
+};
+
 function KitsGrid({
   kits,
   loading,
   columns,
   onDelete,
+  ...actions
 }: {
   kits: MarketingKitSummary[] | null;
   loading: boolean;
   columns: number;
   onDelete: (kit: MarketingKitSummary) => void;
-}) {
+} & KitResultActions) {
   if (loading || kits === null) return <SkeletonGrid rows={2} />;
 
   if (kits.length === 0) {
     return (
       <p className="px-2 py-10 text-center text-sm text-faint">
-        No kits yet — a Brand Story, Affinity deck, Collection Story, Campaign Kit or Festive Poster is saved here to
+        No kits yet — a Brand Story, Affinity deck, Collection Story, Campaign Kit or Poster is saved here to
         reopen and edit.
       </p>
     );
@@ -1363,19 +1416,27 @@ function KitsGrid({
   return (
     <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP }}>
       {kits.map((kit) => (
-        <KitTile key={kit.id} kit={kit} onDelete={onDelete} />
+        <KitTile key={kit.id} kit={kit} onDelete={onDelete} {...actions} />
       ))}
     </div>
   );
 }
 
-function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: MarketingKitSummary) => void }) {
-  return (
-    <div
-      title={kit.title || "Untitled kit"}
-      className="group relative aspect-square overflow-hidden rounded-lg border border-white/[0.06] transition-colors hover:border-white/20 md:rounded-xl"
-    >
-      <Link href={kitHref(kit)} className="absolute inset-0" aria-label={kit.title || "Untitled kit"}>
+function KitTile({
+  kit,
+  onDelete,
+  items,
+  canContinue,
+  canView,
+  onOpen,
+  onContinue,
+}: { kit: MarketingKitSummary; onDelete: (kit: MarketingKitSummary) => void } & KitResultActions) {
+  // Campaign Kit and Festive Poster open the results viewer once their run
+  // has loaded; until then (and for every other kind) the tile opens the kit.
+  const item = OPENS_AS_RESULT.has(kit.kind) ? items[kit.id] : undefined;
+  const cover = item?.outputs[0];
+  const picture = (
+    <>
         {kit.previewUrl ? (
           /* eslint-disable-next-line @next/next/no-img-element -- small grid tile, lazy-loaded natively; next/image adds no value at this size */
           <img
@@ -1391,7 +1452,28 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
             <Newspaper size={22} className="text-faint" />
           </span>
         )}
-      </Link>
+    </>
+  );
+
+  return (
+    <div
+      title={kit.title || "Untitled kit"}
+      className="group relative aspect-square overflow-hidden rounded-lg border border-white/[0.06] transition-colors hover:border-white/20 md:rounded-xl"
+    >
+      {item ? (
+        <button
+          type="button"
+          onClick={() => onOpen(item)}
+          className="absolute inset-0 block cursor-pointer"
+          aria-label={`Preview ${kit.title || "this kit"}`}
+        >
+          {picture}
+        </button>
+      ) : (
+        <Link href={kitHref(kit)} className="absolute inset-0" aria-label={kit.title || "Untitled kit"}>
+          {picture}
+        </Link>
+      )}
 
       <div className="pointer-events-none absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2">
         {/* The same badge the results tiles carry, in Marketing Kit's own
@@ -1405,8 +1487,40 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
 
         {/* A teammate's kit is readable but not theirs to remove — the
             server refuses it, so the tile doesn't offer it. */}
-        {kit.isOwn !== false && (
+        {(item || kit.isOwn !== false) && (
           <div className={cn(TILE_ACTION_GROUP, "pointer-events-auto")}>
+            {/* The same chat and download buttons an image tile has. */}
+            {item && canContinue(item) && (
+              <button
+                type="button"
+                title="Continue this conversation"
+                onClick={() => onContinue(item)}
+                className={TILE_ACTION_BUTTON}
+              >
+                <MessageCircle size={10} className={TILE_ACTION_ICON} />
+              </button>
+            )}
+            {item && canView(item) && (
+              <button
+                type="button"
+                title={`View ${item.userName}'s chat (read-only)`}
+                onClick={() => onContinue(item)}
+                className={TILE_ACTION_BUTTON}
+              >
+                <Eye size={10} className={TILE_ACTION_ICON} />
+              </button>
+            )}
+            {item && cover && (
+              <button
+                type="button"
+                title="Download"
+                onClick={() => downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type))}
+                className={TILE_ACTION_BUTTON}
+              >
+                <Download size={10} className={TILE_ACTION_ICON} />
+              </button>
+            )}
+            {kit.isOwn !== false && (
             <button
               type="button"
               onClick={() => onDelete(kit)}
@@ -1416,6 +1530,7 @@ function KitTile({ kit, onDelete }: { kit: MarketingKitSummary; onDelete: (kit: 
             >
               <Trash2 size={10} className={TILE_ACTION_ICON} />
             </button>
+            )}
           </div>
         )}
       </div>
@@ -1560,7 +1675,7 @@ function CheckboxFilter({
                   </button>
                 )}
               </div>
-            <div className="max-h-64 overflow-y-auto py-1">
+            <div className="thin-scrollbar max-h-64 overflow-y-auto py-1">
               {showPinned && (
                 <label className="flex cursor-pointer items-center gap-2 border-b border-white/5 px-3 py-1.5 text-xs font-medium text-cream hover:bg-white/[0.05]">
                   <input
@@ -1914,7 +2029,7 @@ function TypeFilter({
 
 /** The kit kinds, labelled as the rest of the app labels them. */
 const KIND_OPTIONS: FilterOption[] = (
-  ["brand_story", "affinity", "collection_story", "campaign", "festive"] as const
+  ["brand_story", "collection_story", "campaign", "festive"] as const
 ).map((kind) => ({
   id: kind,
   label: KIT_LABEL[kind],

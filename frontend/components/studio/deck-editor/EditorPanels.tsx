@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowUp,
@@ -18,13 +19,20 @@ import {
   PaintBucket,
   Stamp,
   Upload,
+  X,
+  MoreHorizontal,
+  ArrowLeft,
+  ArrowRight,
+  LayoutTemplate,
 } from "lucide-react";
 import { DECK, type AffinityPiece } from "@/lib/affinity";
 import {
   SLIDE_H,
   SLIDE_W,
   describe,
+  freeCardSlot,
   imageElement,
+  productCard,
   shapeElement,
   slideTitle,
   textElement,
@@ -43,13 +51,14 @@ import { BackgroundPanel } from "./BackgroundPanel";
 import { BrandPanel } from "./BrandPanel";
 import { ElementBody, SlideView, elementFrame } from "./SlideView";
 
-export type PanelTab = "pages" | "layers" | "text" | "elements" | "images" | "background" | "brand";
+export type PanelTab = "pages" | "layers" | "text" | "elements" | "templates" | "images" | "background" | "brand";
 
 const TABS: { id: PanelTab; label: string; icon: typeof Files }[] = [
   { id: "pages", label: "Pages", icon: Files },
   { id: "layers", label: "Layers", icon: Layers },
   { id: "text", label: "Text", icon: Type },
   { id: "elements", label: "Elements", icon: Shapes },
+  { id: "templates", label: "Templates", icon: LayoutTemplate },
   { id: "images", label: "Images", icon: ImageIcon },
   { id: "background", label: "Backdrop", icon: PaintBucket },
   { id: "brand", label: "Brand", icon: Stamp },
@@ -61,22 +70,37 @@ export function EditorPanels({
   pieces,
   tab,
   onTab,
+  open,
+  onOpenChange,
 }: {
   api: EditorApi;
   pieces: AffinityPiece[];
   tab: PanelTab;
   onTab: (tab: PanelTab) => void;
+  /** Below desktop width the panel floats over the page and can be closed; on desktop it is always shown. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <div className="flex shrink-0 border-r border-black/10 bg-white text-[#2B2620]">
-      <div className="flex w-[52px] flex-col items-center gap-0.5 border-r border-black/5 bg-[#FAF8F5] py-1.5">
+    // Phones and tablets: a tab bar along the bottom, opening a sheet above
+    // it, so the page keeps the full width. Desktop (1024px and up): the rail
+    // down the left with its panel beside it, always open.
+    <div className="relative z-20 flex shrink-0 border-t border-black/10 bg-white text-[#2B2620] lg:border-r lg:border-t-0">
+      <div className="slim-scrollbar flex w-full flex-row items-center justify-around gap-0.5 overflow-x-auto bg-[#FAF8F5] px-1 py-1 lg:w-[52px] lg:flex-col lg:justify-start lg:border-r lg:border-black/5 lg:px-0 lg:py-1.5">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
-            onClick={() => onTab(id)}
+            onClick={() => {
+              // Tapping the open tab again closes it, where the panel can close.
+              if (tab === id && open) onOpenChange(false);
+              else {
+                onTab(id);
+                onOpenChange(true);
+              }
+            }}
             className={cn(
-              "flex w-11 flex-col items-center gap-0.5 rounded-md py-1.5 text-[9px] transition-colors",
+              "flex w-11 shrink-0 flex-col items-center gap-0.5 rounded-md py-1.5 text-[8px] transition-colors",
               tab === id ? "bg-white text-[#6B5D42] shadow-sm" : "text-black/50 hover:bg-white/70 hover:text-black/80"
             )}
           >
@@ -86,11 +110,27 @@ export function EditorPanels({
         ))}
       </div>
 
-      <div className="slim-scrollbar flex w-[196px] flex-col overflow-y-auto">
-        {tab === "pages" && <PagesPanel api={api} pieces={pieces} />}
+      <div
+        className={cn(
+          "slim-scrollbar z-30 flex-col overflow-y-auto bg-white",
+          "absolute bottom-full left-0 right-0 max-h-[42vh] rounded-t-xl border-t border-black/10 shadow-[0_-8px_30px_rgba(0,0,0,0.12)]",
+          "lg:static lg:flex lg:max-h-none lg:w-[196px] lg:rounded-none lg:border-t-0 lg:shadow-none",
+          open ? "flex" : "hidden"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => onOpenChange(false)}
+          className="absolute right-2 top-2 z-20 flex h-6 w-6 items-center justify-center rounded-md text-black/50 hover:bg-black/5 lg:hidden"
+          aria-label="Close panel"
+        >
+          <X size={14} />
+        </button>
+        {tab === "pages" && <PagesPanel api={api} pieces={pieces} open={open} />}
         {tab === "layers" && <LayersPanel api={api} pieces={pieces} />}
         {tab === "text" && <TextPanel api={api} />}
         {tab === "elements" && <ElementsPanel api={api} />}
+        {tab === "templates" && <TemplatesPanel api={api} onTab={onTab} />}
         {tab === "images" && <ImagesPanel api={api} pieces={pieces} />}
         {tab === "background" && <BackgroundPanel api={api} pieces={pieces} />}
         {tab === "brand" && <BrandPanel api={api} />}
@@ -101,7 +141,8 @@ export function EditorPanels({
 
 function PanelTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-2.5 pb-1.5 pt-2">
+    // Room on the right below desktop width, where the panel's close button sits.
+    <div className="sticky top-0 z-10 flex items-center justify-between bg-white pb-1.5 pl-2.5 pr-10 pt-2 lg:pr-2.5">
       <p className="text-[12px] font-semibold">{children}</p>
       {action}
     </div>
@@ -110,10 +151,165 @@ function PanelTitle({ children, action }: { children: ReactNode; action?: ReactN
 
 /* ── Pages ─────────────────────────────────────────────────────────────── */
 
-function PagesPanel({ api, pieces }: { api: EditorApi; pieces: AffinityPiece[] }) {
-  const [dragFrom, setDragFrom] = useState<number | null>(null);
-  const [dropAt, setDropAt] = useState<number | null>(null);
-  const thumbScale = 168 / SLIDE_W;
+function PagesPanel({ api, pieces, open }: { api: EditorApi; pieces: AffinityPiece[]; /** Whether the panel is showing below desktop width — see EditorPanels. */ open: boolean }) {
+  /** The page whose ⋯ menu is open on a phone, and where to draw it on screen. */
+  const [menu, setMenu] = useState<{ index: number; x: number; y: number } | null>(null);
+  // Below desktop width the pages run in a sideways row, with smaller thumbnails so more of it fits.
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 1023px)");
+    const sync = () => setNarrow(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+  const thumbScale = (narrow ? 120 : 168) / SLIDE_W;
+
+  /*
+   * Reordering by pointer rather than HTML drag-and-drop, which touch screens
+   * never fire. A mouse picks a page up once it moves a few pixels; a finger
+   * after a short press-and-hold, so an ordinary swipe still scrolls the row.
+   * `insertAt` is the gap the page will land in: 0 is before the first page,
+   * n is after the last.
+   */
+  const [drag, setDragState] = useState<{ from: number; insertAt: number; x: number; y: number } | null>(null);
+  // Mirrored in a ref so the drop reads it directly: a state updater can run
+  // twice in development, and must not move the page twice.
+  const dragRef = useRef<typeof drag>(null);
+  const setDrag = (next: typeof drag) => {
+    dragRef.current = next;
+    setDragState(next);
+  };
+  const listRef = useRef<HTMLOListElement>(null);
+  const pending = useRef<{ index: number; x: number; y: number; touch: boolean; timer?: number; started: boolean } | null>(null);
+  /** Swallows the click a drop would otherwise turn into "open this page". */
+  const justDropped = useRef(false);
+
+  const gapAt = (x: number, y: number) => {
+    const items = [...(listRef.current?.querySelectorAll<HTMLElement>(":scope > li:not([data-slot])") ?? [])];
+    const across = narrow; // the phone and tablet row runs sideways
+    const at = items.findIndex((item) => {
+      const box = item.getBoundingClientRect();
+      return across ? x < box.left + box.width / 2 : y < box.top + box.height / 2;
+    });
+    return at === -1 ? items.length : at;
+  };
+
+  useEffect(() => {
+    const list = listRef.current;
+    // While a page is held, the finger moves it rather than scrolling the row.
+    const blockScroll = (event: TouchEvent) => {
+      if (pending.current?.started) event.preventDefault();
+    };
+    list?.addEventListener("touchmove", blockScroll, { passive: false });
+
+    const move = (event: PointerEvent) => {
+      const press = pending.current;
+      if (!press) return;
+      const moved = Math.hypot(event.clientX - press.x, event.clientY - press.y);
+      if (!press.started) {
+        if (press.touch) {
+          // Moving before the hold completes is a swipe: let it scroll.
+          if (moved > 8) {
+            window.clearTimeout(press.timer);
+            pending.current = null;
+          }
+          return;
+        }
+        if (moved < 5) return;
+        press.started = true;
+      }
+      setDrag({ from: press.index, insertAt: gapAt(event.clientX, event.clientY), x: event.clientX, y: event.clientY });
+      // Near either end of the row, keep it scrolling towards the pointer.
+      if (narrow && list) {
+        const box = list.getBoundingClientRect();
+        if (event.clientX < box.left + 32) list.scrollLeft -= 10;
+        else if (event.clientX > box.right - 32) list.scrollLeft += 10;
+      }
+    };
+    const end = () => {
+      const press = pending.current;
+      pending.current = null;
+      if (press) window.clearTimeout(press.timer);
+      const current = dragRef.current;
+      if (press?.started && current) {
+        justDropped.current = true;
+        window.setTimeout(() => (justDropped.current = false), 0);
+        const to = current.insertAt > current.from ? current.insertAt - 1 : current.insertAt;
+        if (to !== current.from) api.moveSlide(current.from, to);
+      }
+      if (current) setDrag(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      list?.removeEventListener("touchmove", blockScroll);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gapAt reads only the DOM and `narrow`
+  }, [api, narrow]);
+
+  // The gap the page would land in, marked only where dropping would move it.
+  const slot = drag && drag.insertAt !== drag.from && drag.insertAt !== drag.from + 1 ? drag.insertAt : null;
+
+  const pickUp = (event: React.PointerEvent, index: number) => {
+    if (event.button !== 0) return;
+    const touch = event.pointerType !== "mouse";
+    const press: NonNullable<typeof pending.current> = { index, x: event.clientX, y: event.clientY, touch, started: false };
+    if (touch) {
+      press.timer = window.setTimeout(() => {
+        press.started = true;
+        navigator.vibrate?.(15);
+        setDrag({ from: index, insertAt: index, x: press.x, y: press.y });
+      }, 280);
+    }
+    pending.current = press;
+  };
+
+  /*
+   * The page being edited always stays in view in this list — after the
+   * arrows, Page Up/Down, scrolling the stage, adding or moving a page, or
+   * opening this panel. Only the list's own scroller moves (the sideways row
+   * on a phone, the panel column elsewhere), never the page around it:
+   * instantly as the panel appears, smoothly after that.
+   */
+  const shown = useRef(false);
+  useEffect(() => {
+    const item = listRef.current?.querySelector<HTMLElement>(`:scope > li[data-page="${api.active}"]`);
+    if (!item) return;
+    const across = narrow;
+    let scroller: HTMLElement | null = null;
+    for (let node = item.parentElement; node; node = node.parentElement) {
+      const overflow = getComputedStyle(node)[across ? "overflowX" : "overflowY"];
+      if (overflow === "auto" || overflow === "scroll") {
+        scroller = node;
+        break;
+      }
+    }
+    // A closed panel has no layout to scroll; it is revealed when it opens.
+    if (!scroller || item.offsetParent === null || scroller.clientHeight === 0) {
+      shown.current = false;
+      return;
+    }
+    const box = scroller.getBoundingClientRect();
+    const rect = item.getBoundingClientRect();
+    // The panel title sticks over the top of the column.
+    const inset = across ? 0 : scroller.querySelector<HTMLElement>(":scope > .sticky")?.offsetHeight ?? 0;
+    const gap = 8;
+    let delta = 0;
+    if (across) {
+      if (rect.left < box.left + gap) delta = rect.left - box.left - gap;
+      else if (rect.right > box.right - gap) delta = rect.right - box.right + gap;
+    } else if (rect.top < box.top + inset + gap) delta = rect.top - box.top - inset - gap;
+    else if (rect.bottom > box.bottom - gap) delta = rect.bottom - box.bottom + gap;
+    // A hidden tab never runs a smooth scroll to the end, so it jumps there.
+    const behavior: ScrollBehavior = shown.current && document.visibilityState === "visible" ? "smooth" : "auto";
+    shown.current = true;
+    if (delta) scroller.scrollBy(across ? { left: delta, behavior } : { top: delta, behavior });
+  }, [api.active, api.design.slides.length, narrow, open]);
 
   return (
     <>
@@ -131,33 +327,25 @@ function PagesPanel({ api, pieces }: { api: EditorApi; pieces: AffinityPiece[] }
         {api.design.slides.length} pages
       </PanelTitle>
 
-      <ol className="space-y-1.5 px-2.5 pb-3">
+      {/* Phones and tablets: one compact row that scrolls sideways; desktop: a column. */}
+      <ol ref={listRef} className="slim-scrollbar flex gap-2 overflow-x-auto px-2.5 pb-3 lg:block lg:space-y-1.5 lg:overflow-visible">
         {api.design.slides.map((slide, index) => (
+          <Fragment key={slide.id}>
+          {slot === index && <DropSlot narrow={narrow} />}
           <li
-            key={slide.id}
-            draggable
-            onDragStart={() => setDragFrom(index)}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDropAt(index);
-            }}
-            onDragEnd={() => {
-              setDragFrom(null);
-              setDropAt(null);
-            }}
-            onDrop={() => {
-              if (dragFrom !== null) api.moveSlide(dragFrom, index);
-              setDragFrom(null);
-              setDropAt(null);
-            }}
-            className={cn("group/page relative", dropAt === index && dragFrom !== index && "pt-2")}
-          >
-            {dropAt === index && dragFrom !== null && dragFrom !== index && (
-              <div className="absolute inset-x-0 top-0 h-0.5 rounded bg-[#8B5CF6]" />
+            data-page={index}
+            className={cn(
+              "group/page relative w-[124px] shrink-0 select-none transition-opacity lg:w-auto",
+              drag?.from === index && "opacity-40"
             )}
+          >
             <button
               type="button"
-              onClick={() => api.setActive(index)}
+              onPointerDown={(event) => pickUp(event, index)}
+              onContextMenu={(event) => event.preventDefault()}
+              onClick={() => {
+                if (!justDropped.current) api.setActive(index);
+              }}
               className={cn(
                 "block w-full overflow-hidden rounded-md border-2 text-left transition-colors",
                 api.active === index ? "border-[#8B5CF6]" : "border-transparent hover:border-black/15"
@@ -174,8 +362,21 @@ function PagesPanel({ api, pieces }: { api: EditorApi; pieces: AffinityPiece[] }
                 <p className="truncate text-[10px] font-medium leading-tight">{slideTitle(slide)}</p>
                 <p className="truncate text-[9px] leading-tight text-black/45">{summarize(slide)}</p>
               </div>
+              {/* Phones: one ⋯ button beside the name, always there since there is no hover. */}
+              <button
+                type="button"
+                title="Page options"
+                aria-label="Page options"
+                onClick={(event) => {
+                  const box = event.currentTarget.getBoundingClientRect();
+                  setMenu(menu?.index === index ? null : { index, x: box.right, y: box.top });
+                }}
+                className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-black/60 hover:bg-black/5 lg:hidden"
+              >
+                <MoreHorizontal size={14} />
+              </button>
             </div>
-            <div className="absolute right-1 top-1 flex gap-0.5 opacity-0 transition-opacity group-hover/page:opacity-100">
+            <div className="absolute right-1 top-1 hidden gap-0.5 opacity-0 transition-opacity group-hover/page:opacity-100 lg:flex">
               <MiniButton title="Move up" onClick={() => api.moveSlide(index, index - 1)} disabled={index === 0}>
                 <ArrowUp size={11} />
               </MiniButton>
@@ -190,17 +391,81 @@ function PagesPanel({ api, pieces }: { api: EditorApi; pieces: AffinityPiece[] }
               </MiniButton>
             </div>
           </li>
+          </Fragment>
         ))}
+        {slot === api.design.slides.length && <DropSlot narrow={narrow} />}
       </ol>
+
+      {/* A small copy of the held page that follows the finger or cursor. */}
+      {drag &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[70] rotate-2 overflow-hidden rounded-md border-2 border-[#8B5CF6] bg-white opacity-90 shadow-2xl"
+            // Held just above the finger, so the finger never hides it.
+            style={{ left: drag.x - 50, top: drag.y - 72 }}
+          >
+            <SlideView slide={api.design.slides[drag.from]} pieces={pieces} scale={100 / SLIDE_W} />
+          </div>,
+          document.body
+        )}
+
+      {/* Portalled to the body: the panel scrolls, and would clip it. */}
+      {menu &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={() => setMenu(null)} />
+            <div
+              className="fixed z-[61] w-40 rounded-lg border border-black/10 bg-white py-1 text-[12px] shadow-xl"
+              // Opens upward from the button: the sheet sits at the bottom of the screen.
+              style={{ left: Math.max(8, Math.min(menu.x - 160, window.innerWidth - 168)), bottom: window.innerHeight - menu.y + 4 }}
+            >
+              {[
+                { label: "Move left", icon: <ArrowLeft size={13} />, run: () => api.moveSlide(menu.index, menu.index - 1), disabled: menu.index === 0 },
+                { label: "Move right", icon: <ArrowRight size={13} />, run: () => api.moveSlide(menu.index, menu.index + 1), disabled: menu.index === api.design.slides.length - 1 },
+                { label: "Duplicate", icon: <Copy size={13} />, run: () => api.duplicateSlide(menu.index) },
+                { label: "Delete", icon: <Trash2 size={13} />, run: () => api.removeSlide(menu.index), disabled: api.design.slides.length <= 1, danger: true },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  disabled={item.disabled}
+                  onClick={() => {
+                    item.run();
+                    setMenu(null);
+                  }}
+                  className={cn("flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-black/5 disabled:opacity-30", item.danger && "text-red-600")}
+                >
+                  {item.icon}
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </>,
+          document.body
+        )}
 
       <button
         type="button"
         onClick={() => api.addSlide(api.design.slides.length)}
-        className="mx-2.5 mb-3 flex items-center justify-center gap-1 rounded-md border border-dashed border-black/20 py-1.5 text-[10px] text-black/55 hover:border-[#6B5D42] hover:text-[#6B5D42]"
+        className="mx-2.5 mb-3 hidden items-center lg:flex justify-center gap-1 rounded-md border border-dashed border-black/20 py-1.5 text-[10px] text-black/55 hover:border-[#6B5D42] hover:text-[#6B5D42]"
       >
         <Plus size={12} /> Add a blank page at the end
       </button>
     </>
+  );
+}
+
+/** The line that marks the gap a dragged page will land in, with a dot at each end. */
+function DropSlot({ narrow }: { narrow: boolean }) {
+  return (
+    <li
+      data-slot
+      aria-hidden
+      className={cn("relative shrink-0 rounded-full bg-[#8B5CF6]", narrow ? "-mx-1 h-[71px] w-[3px]" : "-my-0.5 h-[3px] w-full")}
+    >
+      <span className={cn("absolute h-2 w-2 rounded-full bg-[#8B5CF6]", narrow ? "-top-1 left-1/2 -translate-x-1/2" : "-left-1 top-1/2 -translate-y-1/2")} />
+      <span className={cn("absolute h-2 w-2 rounded-full bg-[#8B5CF6]", narrow ? "-bottom-1 left-1/2 -translate-x-1/2" : "-right-1 top-1/2 -translate-y-1/2")} />
+    </li>
   );
 }
 
@@ -320,17 +585,17 @@ function LayerThumb({ element, pieces }: { element: DesignElement; pieces: Affin
 
 function TextPanel({ api }: { api: EditorApi }) {
   const presets = [
-    { label: "Add a heading", style: "text-[22px] font-normal", font: "Cambria", preset: { text: "", fontSize: 56, color: DECK.titleGold, w: 720, placeholder: "Heading" } },
-    { label: "Add a subheading", style: "text-[16px]", font: "Cambria", preset: { text: "", fontSize: 30, italic: true, w: 600, placeholder: "Subheading" } },
+    { label: "Add a heading", style: "text-[16px] font-normal lg:text-[22px]", font: "Cambria", preset: { text: "", fontSize: 56, color: DECK.titleGold, w: 720, placeholder: "Heading" } },
+    { label: "Add a subheading", style: "text-[13px] lg:text-[16px]", font: "Cambria", preset: { text: "", fontSize: 30, italic: true, w: 600, placeholder: "Subheading" } },
     {
       label: "Add body text",
-      style: "text-[12px]",
+      style: "text-[11px] lg:text-[12px]",
       font: "Helvetica",
       preset: { text: "", fontFamily: "Helvetica", fontSize: 18, w: 520, lineHeight: 1.5, placeholder: "Body text" },
     },
     {
       label: "ADD A CAPTION",
-      style: "text-[10px] tracking-[0.25em]",
+      style: "text-[9px] tracking-[0.2em] lg:text-[10px] lg:tracking-[0.25em]",
       font: "Helvetica",
       preset: { text: "", fontFamily: "Helvetica", fontSize: 13, uppercase: true, letterSpacing: 3, w: 420, placeholder: "Caption" },
     },
@@ -343,23 +608,29 @@ function TextPanel({ api }: { api: EditorApi }) {
         <button
           type="button"
           onClick={() => api.addText({ text: "", fontFamily: "Helvetica", fontSize: 20, placeholder: "Your text" })}
-          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[#6B5D42] py-2 text-[12px] font-medium text-white hover:opacity-90"
+          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[#6B5D42] py-1.5 text-[12px] font-medium text-white hover:opacity-90 lg:py-2"
         >
           <Type size={13} /> Add a text box
         </button>
         <p className="pt-1 text-[10px] uppercase tracking-wider text-black/40">Default styles</p>
-        {presets.map(({ label, style, font, preset }) => (
-          <button
-            key={label}
-            type="button"
-            onClick={() => api.addText(preset)}
-            className={cn("w-full rounded-md border border-black/10 px-3 py-2.5 text-left hover:border-[#6B5D42]/50 hover:bg-[#F7F2EC]", style)}
-            style={{ fontFamily: `"${font}", Georgia, serif` }}
-          >
-            {label}
-          </button>
-        ))}
-        <p className="pt-2 text-[10px] leading-relaxed text-black/45">
+        {/* Phones: two to a row in smaller type; wider screens: one per row. */}
+        <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 lg:grid-cols-1 lg:gap-2">
+          {presets.map(({ label, style, font, preset }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => api.addText(preset)}
+              className={cn(
+                "w-full truncate rounded-md border border-black/10 px-2.5 py-2 text-left hover:border-[#6B5D42]/50 hover:bg-[#F7F2EC] lg:px-3 lg:py-2.5",
+                style
+              )}
+              style={{ fontFamily: `"${font}", Georgia, serif` }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="pt-2 text-[10px] max-lg:hidden leading-relaxed text-black/45">
           Double-click any text on the page to edit it. Drag a text box&apos;s corner to scale the type, or its sides to rewrap it.
         </p>
       </div>
@@ -647,22 +918,43 @@ const SECTIONS: { title: string; presets: Preset[] }[] = [
   },
 ];
 
+/** Shapes shown per section on a phone before "See all" — two rows of six. */
+const PHONE_PREVIEW = 12;
+
 function ElementsPanel({ api }: { api: EditorApi }) {
+  const [expanded, setExpanded] = useState<string[]>([]);
   return (
     <>
       <PanelTitle>Elements</PanelTitle>
       <div className="space-y-3 px-2.5 pb-4">
         {SECTIONS.map((section) => (
           <div key={section.title}>
-            <p className="mb-1.5 text-[10px] uppercase tracking-wider text-black/40">{section.title}</p>
-            <div className="grid grid-cols-3 gap-1.5">
-              {section.presets.map((preset) => (
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-[10px] uppercase tracking-wider text-black/40">{section.title}</p>
+              {section.presets.length > PHONE_PREVIEW && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpanded((open) => (open.includes(section.title) ? open.filter((t) => t !== section.title) : [...open, section.title]))
+                  }
+                  className="text-[10px] font-medium text-[#6B5D42] md:hidden"
+                >
+                  {expanded.includes(section.title) ? "Show less" : `See all (${section.presets.length})`}
+                </button>
+              )}
+            </div>
+            {/* Phones get the panel full-width, so small tiles, six to a row, two rows until "See all". */}
+            <div className="grid grid-cols-6 gap-1 md:grid-cols-10 lg:grid-cols-3 lg:gap-1.5">
+              {section.presets.map((preset, index) => (
                 <button
                   key={section.title + preset.label}
                   type="button"
                   onClick={() => api.addElements(preset.make())}
                   title={`Add ${preset.label.toLowerCase()}`}
-                  className="flex aspect-square flex-col items-center justify-center gap-1 rounded-md border border-black/10 p-1 text-[9px] text-black/55 hover:border-[#6B5D42]/50 hover:bg-[#F7F2EC]"
+                  className={cn(
+                    "flex aspect-square flex-col items-center justify-center gap-0.5 rounded-md border border-black/10 p-0.5 text-[8px] text-black/55 lg:gap-1 lg:p-1 lg:text-[9px] hover:border-[#6B5D42]/50 hover:bg-[#F7F2EC]",
+                    index >= PHONE_PREVIEW && !expanded.includes(section.title) && "max-md:hidden"
+                  )}
                 >
                   <PresetPreview make={preset.make} />
                   <span className="w-full truncate text-center leading-none">{preset.label}</span>
@@ -681,13 +973,16 @@ function ElementsPanel({ api }: { api: EditorApi }) {
 }
 
 /** A preset drawn small from the very elements it adds, so the tile is what you get. */
-function PresetPreview({ make }: { make: () => DesignElement[] }) {
+function PresetPreview({ make, size = 34 }: { make: () => DesignElement[]; size?: number }) {
   const [elements] = useState(make);
   const box = unionBox(elements.map(boundsOf)) ?? { x: 0, y: 0, w: 1, h: 1 };
-  const size = 34;
   const scale = Math.min(size / Math.max(box.w, 1), size / Math.max(box.h, 1));
   return (
-    <span className="pointer-events-none relative block shrink-0" style={{ width: size, height: size }}>
+    // A shape tile is a touch smaller on phones, where six of them share a row.
+    <span
+      className={cn("pointer-events-none relative block shrink-0", size === 34 && "max-md:-my-1 max-md:scale-75")}
+      style={{ width: size, height: size }}
+    >
       <span
         className="absolute block"
         style={{
@@ -714,6 +1009,73 @@ function PresetPreview({ make }: { make: () => DesignElement[] }) {
         ))}
       </span>
     </span>
+  );
+}
+
+/* ── Templates ─────────────────────────────────────────────────────────── */
+
+/** What the tile shows: the card with sample words in it, so its layout reads at a glance. */
+const SAMPLE_CARD = () =>
+  productCard({ x: 0, y: 0, label: "Pendant", code: "DPF-0000", title: "Product name", caption: "Metal · stones · total weight" });
+
+/**
+ * Ready-made blocks for the page. A product card is the deck's own card —
+ * same size, fonts and spacing — so an extra piece or two slots in beside the
+ * rest without rebuilding one by hand. Each lands in the page's next free spot.
+ */
+function TemplatesPanel({ api, onTab }: { api: EditorApi; onTab: (tab: PanelTab) => void }) {
+  /** The photo slot of the card just added, for "Choose its photo". */
+  const [lastPhoto, setLastPhoto] = useState<string | null>(null);
+  const lastPhotoOnPage = lastPhoto && api.slide.elements.some((element) => element.id === lastPhoto) ? lastPhoto : null;
+
+  function addCard() {
+    const { x, y } = freeCardSlot(api.slide.elements);
+    const card = productCard({ x, y });
+    api.addElements(card);
+    setLastPhoto(card.find((element) => element.type === "image")?.id ?? null);
+  }
+
+  return (
+    <>
+      <PanelTitle>Templates</PanelTitle>
+      <div className="space-y-2 px-2.5 pb-4">
+        <button
+          type="button"
+          onClick={addCard}
+          title="Add a product card"
+          className="flex w-full items-center gap-3 rounded-md border border-black/10 p-2 text-left hover:border-[#6B5D42]/50 hover:bg-[#F7F2EC] lg:flex-col lg:items-stretch lg:gap-1.5"
+        >
+          <span className="flex shrink-0 justify-center rounded bg-white">
+            <PresetPreview make={SAMPLE_CARD} size={110} />
+          </span>
+          <span className="min-w-0">
+            <span className="flex items-center gap-1 text-[11px] font-semibold">
+              <Plus size={11} /> Product card
+            </span>
+            <span className="block text-[10px] leading-snug text-black/50">
+              Photo, label, code, name and details — added in the page&apos;s next free spot.
+            </span>
+          </span>
+        </button>
+
+        {lastPhotoOnPage && (
+          <div className="space-y-1.5 rounded-md bg-[#8B5CF6]/10 px-2 py-1.5 text-[10px] leading-snug text-[#5B3FB0]">
+            <p>Card added. Double-click any line on it to type.</p>
+            <button
+              type="button"
+              onClick={() => {
+                // The photo alone, so the Images panel swaps a picture into it.
+                api.setSelected([lastPhotoOnPage]);
+                onTab("images");
+              }}
+              className="flex items-center gap-1 rounded bg-white px-2 py-1 font-medium shadow-sm hover:bg-white/80"
+            >
+              <ImageIcon size={11} /> Choose its photo
+            </button>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -786,7 +1148,7 @@ function ImagesPanel({ api, pieces }: { api: EditorApi; pieces: AffinityPiece[] 
         {uploads.length > 0 && (
           <div>
             <p className="mb-1.5 text-[10px] uppercase tracking-wider text-black/40">Your uploads</p>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-5 gap-1 md:grid-cols-8 lg:grid-cols-3 lg:gap-1.5">
               {uploads.map((src) => (
                 <PhotoButton key={src.slice(-40)} src={src} onClick={() => place({ src }, src)} />
               ))}
@@ -796,7 +1158,7 @@ function ImagesPanel({ api, pieces }: { api: EditorApi; pieces: AffinityPiece[] 
 
         <div>
           <p className="mb-1.5 text-[10px] uppercase tracking-wider text-black/40">Pieces in this deck · {photos.length}</p>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-5 gap-1 md:grid-cols-8 lg:grid-cols-3 lg:gap-1.5">
             {photos.map(({ index, image }) => (
               <PhotoButton key={index} src={image} onClick={() => place({ pieceIndex: index }, image)} />
             ))}

@@ -97,6 +97,12 @@ async function runGenerationJob({
    * live preview, so what arrives on screen is what is stored.
    */
   finishImage,
+  /**
+   * `async ({ output, refineImage, instruction }) => output` — the follow-up
+   * counterpart of `finishImage`: Lifestyle pulls an edit's colour back to the
+   * photo it edited. Runs before the live preview, like `finishImage`.
+   */
+  finishRefine,
 }) {
   const dbUser = await User.findById(job.userId);
   if (!dbUser) throw new Error("the user who queued this job no longer exists");
@@ -137,7 +143,10 @@ async function runGenerationJob({
     const settled = await withProgress({ from: 20, to: 85, phase: "generating", steps: variations }, ({ stepDone }) =>
       Promise.allSettled(
         prompts.map(async (variationPrompt) => {
-          const result = await routeProviderCall({ tenant, provider, modelId: model, prompt: variationPrompt, quality, images });
+          let result = await routeProviderCall({ tenant, provider, modelId: model, prompt: variationPrompt, quality, images });
+          if (finishRefine) {
+            result = { ...result, output: await finishRefine({ output: result.output, refineImage, instruction }) };
+          }
 
           // Shown while the result is still being uploaded and recorded, so the
           // wait ends when the model answers rather than when storage does.

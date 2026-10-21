@@ -6,7 +6,7 @@ const {
 } = require("./sketchMasterPrompts");
 const { buildReferenceNote } = require("./shared");
 const { RELATED_DIRECTIONS } = require("./intent");
-const { VARIATION_FOCI } = require("./textToImage");
+const { VARIATION_FOCI, referenceNote } = require("./textToImage");
 
 /**
  * The instructions behind the three sketch tools.
@@ -73,9 +73,7 @@ function buildTextToSketchPrompt({ description, style, aspect, count = 1, hasRef
 
   prompt += variationNote(count);
 
-  if (hasReference) {
-    prompt = `A reference jewellery photo is attached — keep that exact design (its jewelry type, silhouette, stones, setting and details) and change only what the design brief below asks for. Where the brief specifies something, it wins over the reference; everything it does not mention stays as in the photo.\n\n${prompt}`;
-  }
+  if (hasReference) prompt = `${referenceNote(hasReference)}\n\n${prompt}`;
 
   return prompt;
 }

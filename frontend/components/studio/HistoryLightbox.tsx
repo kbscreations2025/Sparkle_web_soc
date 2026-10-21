@@ -381,7 +381,7 @@ export function HistoryLightbox({
                       This run produced a catalog deck. Open it to read, edit and export it.
                     </p>
                     <a
-                      href={kitHref({ id: item.kitId, kind: item.kitKind ?? "affinity" })}
+                      href={kitHref({ id: item.kitId, kind: item.kitKind ?? "collection_story" })}
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/15 px-3 text-xs font-semibold text-gold transition-colors hover:bg-gold/25"
                     >
                       Open the deck

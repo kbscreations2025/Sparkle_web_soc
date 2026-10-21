@@ -12,7 +12,16 @@ const router = express.Router();
 router.use(requireAuth, requirePermission("tool.cleaning.run"));
 
 /** Which built-in prompt a first-pass run falls back to — see jobs/cleaning.js. */
-const VARIANTS = ["default", "new", "shank"];
+const VARIANTS = ["default", "new", "shank", "studio"];
+
+/**
+ * The only models a studio run may use — the ones that kept the design
+ * intact and the gold consistent against the studio prompt (frontend
+ * lib/api.ts OFFERED_TESTING_CLEANING_MODELS). First is the default, used in
+ * place of anything else asked for, so the page's restriction can't be
+ * sidestepped by posting another model id.
+ */
+const STUDIO_MODELS = ["google/gemini-nano-banana-2.1", "openai/gpt-image-2.5-flare"];
 
 const isChecksum = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 
@@ -171,9 +180,12 @@ router.post("/", async (req, res) => {
   // shouldn't sink an otherwise-good refinement.
   const parsedReferences = parseImages(referenceImages);
 
+  const runModel =
+    !isRefinement && resolvedVariant === "studio" && !STUDIO_MODELS.includes(requestedModel) ? STUDIO_MODELS[0] : requestedModel;
+
   // Resolved here as well as in the handler: the handler needs it to run, and
   // this copy is what the queue panel shows while the job is still waiting.
-  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel);
+  const { provider, model, modelLabel, quality } = resolveProviderModel(runModel);
 
   return queueGeneration(req, res, {
     type: CLEANING_JOB,
@@ -197,7 +209,7 @@ router.post("/", async (req, res) => {
     payload: {
       image: parsed,
       references: parsedReferences,
-      requestedModel,
+      requestedModel: runModel,
       isRefinement,
       instruction,
       // The image to refine carries the user's marks — see jobs/cleaning.js.

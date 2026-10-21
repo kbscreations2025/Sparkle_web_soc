@@ -5,6 +5,7 @@ const { createLivePreview } = require("../storage/thumbnail");
 const { loadPreset } = require("../services/lifestylePresets");
 const { createModel } = require("../services/lifestyleModels");
 const { logAudit } = require("../auditLog");
+const { matchColour, wantsColourChange } = require("../services/colorMatch");
 const {
   buildLifestylePrompt,
   buildLifestyleSetPrompt,
@@ -36,6 +37,10 @@ registerJobHandler(LIFESTYLE_JOB, (context) =>
         ? buildLifestyleSetPrompt({ count: data.jewelryCount, ...data.options })
         : buildLifestylePrompt(data.options),
     buildRefinePrompt: buildLifestyleRefinePrompt,
+    // Each edit drifted pinker and redder than the shot it edited; its colour
+    // is pulled back to that shot unless the edit asks for a colour change.
+    finishRefine: ({ output, refineImage, instruction }) =>
+      wantsColourChange(instruction) ? output : matchColour(output, refineImage),
     params: context.data.options,
   })
 );

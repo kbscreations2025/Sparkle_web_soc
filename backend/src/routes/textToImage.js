@@ -2,7 +2,7 @@ const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri } = require("../generationService");
-const { queueGeneration, parseImages } = require("./queueGeneration");
+const { queueGeneration, parseImages, MAX_REFERENCE_PHOTOS } = require("./queueGeneration");
 const { TEXT_TO_IMAGE_JOB, MAX_IMAGE_COUNT, DEFAULT_IMAGE_COUNT } = require("../jobs/textToImage");
 const { readTrendCues } = require("../services/trends");
 
@@ -79,7 +79,7 @@ router.post("/", async (req, res) => {
   }
 
   // A reference photo alone is enough to start from, as in Text to Sketch.
-  const reference = parseImages(referenceImage);
+  const reference = parseImages(referenceImage).slice(0, MAX_REFERENCE_PHOTOS);
   if ((!prompt || !String(prompt).trim()) && !reference.length) {
     return res.status(400).json({ status: "error", message: "a prompt or a reference photo is required", code: "invalid" });
   }

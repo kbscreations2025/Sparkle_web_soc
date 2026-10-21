@@ -30,8 +30,30 @@ const REALISM_NOTE = `REALISM — CRITICAL: This must read as an authentic photo
  */
 const FOCUS_NOTE = `FOCUS HIERARCHY — CRITICAL: The jewelry is the single sharpest, most in-focus element in the entire frame — every facet, stone, and metal edge must be tack-sharp. Everything else exists only to make the shot feel real and alive, never to compete with the piece: shoot with a shallow depth of field (wide aperture, e.g. f/1.4–f/2.8) so the model's skin falls into gentle, natural focus and anything further back — flowers, foliage, furniture, drapery, other people, the wider environment — falls into soft, natural bokeh, exactly as a real lens would render it. The background must read as a genuine physical location caught candidly by the camera, not an arrangement staged and rendered for the shot — natural imperfections, uneven lighting, believable depth, never symmetrical, over-tidy, or suspiciously perfect. Anything in the background stays secondary and out-of-focus enough that the eye is never pulled away from the jewelry.`;
 
-/** Used only when the client sends no explicit shot type — see `shotType` below. */
-const DEFAULT_SHOT_TYPE = "close-up macro shot, the camera moved in tight enough that the jewelry fills a large part of the frame";
+/**
+ * A product photo is taken from a few centimetres away, so the piece fills it
+ * — and a model told only to keep it "proportional" carries much of that size
+ * over, which is what makes a shot read as AI: a ring like a knuckleduster, a
+ * stud as big as the earlobe. Each kind's rules give its real measurements;
+ * this says why they win, and that a closer camera, not a bigger piece, is how
+ * the design gets shown.
+ */
+const SCALE_NOTE = `REAL-WORLD SIZE — CRITICAL: The reference is a close-up product photo, so the piece looks large in it. In real life it is small and delicate, and it is rendered at its true physical size on the body — the real size for its kind is given above. To show the design clearly, the camera comes closer; the piece itself never grows. When in doubt, smaller and more delicate, never larger: a tight crop and a shallow depth of field are what make it the focus, never enlarging it. Before finalizing, compare the piece against the body part next to it (earlobe, fingertip, finger, wrist) and check it is within the maximum size given above; if it is not, shrink it.`;
+
+/**
+ * Some model photos come with jewellery of their own, and without this it
+ * stays on: a preset's bangles kept beside the bracelet being sold, a second
+ * ring next to the one placed.
+ */
+const ONLY_THIS_PIECE_NOTE = `ONLY THIS PIECE — CRITICAL: Any jewellery or watch the model already wears in her photo is removed — all of it. The finished photo shows the reference piece and nothing else, so the eye goes straight to it. Never invent matching or extra jewellery anywhere on the model.`;
+
+/**
+ * Used only when the client sends no explicit shot type — see `shotType` below.
+ * It moves the camera in on the body, never the piece: the old wording, "the
+ * jewelry fills a large part of the frame", was read as leave to enlarge it.
+ */
+const DEFAULT_SHOT_TYPE =
+  "close-up shot, the camera moved in close on where the piece is worn so that part of the body fills the frame, the piece at its real size and the sharpest point of the frame";
 const DEFAULT_SET_SHOT_TYPE = "three-quarter editorial shot, framed to keep every piece in the set clearly visible";
 
 /**
@@ -43,7 +65,7 @@ const DEFAULT_SET_SHOT_TYPE = "three-quarter editorial shot, framed to keep ever
  * non-negotiable rule at the end is what keeps it from getting lost in that
  * list.
  */
-const FIDELITY_REMINDER = `REMINDER — the jewelry's shape, stone count, cut, color, metal, and proportions must come out identical to the reference photo(s). Do not simplify, restyle, or reinterpret the design in any way.`;
+const FIDELITY_REMINDER = `REMINDER — the jewelry's DESIGN must come out identical to the reference photo(s): shape, stone count, cut, color, metal, and its internal proportions (how its parts compare to each other). Do not simplify, restyle, or reinterpret the design in any way. Identical design does NOT mean identical size: the reference is a close-up, so the piece is shown there far larger than life. On the model it is scaled down, as a whole, to its real small size — the same design, just smaller.`;
 /**
  * Used only if the client sends no scene at all — in normal use the client
  * always resolves one of its theme options (including "Surprise Me") first.
@@ -58,28 +80,42 @@ function aspectLine(aspectRatio) {
 
 function placementToJewelryType(placement) {
   const p = (placement || "").toLowerCase();
-  // Ears before rings: "earring" contains "ring", so testing the other way
-  // round classified every earring placement as a ring — and prompted for
-  // one, bare fingers and all.
-  if (p.includes("ear")) return "earrings";
-  if (p.includes("ring")) return "ring";
-  if (p.includes("neck")) return "necklace";
-  if (p.includes("wrist") || p.includes("bangle")) return "bracelet";
-  if (p.includes("nose")) return "nose pin";
-  if (p.includes("maang") || p.includes("tikka")) return "maang tikka";
+  // Whole words only: a bare substring test found "ear" inside "appear",
+  // which every finger option and the right wrist's contain, and prompted
+  // all of them for earrings. Ears still go before rings — "earring" ends in
+  // "ring", and the other order classified every earring as a ring.
+  if (/\bear(s|lobes?|rings?)?\b/.test(p)) return "earrings";
+  if (/\brings?\b/.test(p)) return "ring";
+  if (/\bneck/.test(p)) return "necklace";
+  if (/\b(wrists?|bangles?)\b/.test(p)) return "bracelet";
+  if (/\bnose\b/.test(p)) return "nose pin";
+  if (/\b(maang|tikka)\b/.test(p)) return "maang tikka";
   return "jewelry piece";
 }
 
 const ALL_FINGERS = ["thumb", "index finger", "middle finger", "ring finger", "pinky finger"];
 
-/** Which finger a placement phrase names, so every other one can be banned by name. */
+const FINGER_NAMES = [
+  ["thumb", /\bthumb\b/],
+  ["index finger", /\bindex\b/],
+  ["middle finger", /\bmiddle\b/],
+  ["ring finger", /\bring finger\b/],
+  ["pinky finger", /\bpinky\b/],
+];
+
+/**
+ * Which finger a placement phrase names, so every other one can be banned by
+ * name. The first one it names: the ring finger's own option goes on to place
+ * it "between middle and pinky", and a fixed checking order put that ring on
+ * the middle finger.
+ */
 function targetFingerFor(placement, fallback = "specified finger") {
   const p = (placement || "").toLowerCase();
-  if (p.includes("middle")) return "middle finger";
-  if (p.includes("index")) return "index finger";
-  if (p.includes("pinky")) return "pinky finger";
-  if (p.includes("thumb")) return "thumb";
-  if (p.includes("ring")) return "ring finger";
+  const named = FINGER_NAMES.map(([finger, pattern]) => ({ finger, at: p.search(pattern) }))
+    .filter(({ at }) => at >= 0)
+    .sort((a, b) => a.at - b.at);
+  if (named.length) return named[0].finger;
+  if (/\brings?\b/.test(p)) return "ring finger";
   return fallback;
 }
 
@@ -94,11 +130,13 @@ function jewelrySpecificRules(jewelryType, placement) {
 
     return `
 RING PLACEMENT — CRITICAL:
+- The reference piece is a ring, worn on a finger — it stays a ring and appears nowhere else on the model.
 - The ring goes on the ${targetFinger} ONLY. This is the single allowed finger.
 - BARE FINGERS — STRICTLY ENFORCED: The following fingers must have ZERO rings, completely bare skin with no jewelry: ${bareFingers}. No exceptions.
 - The ${neighbours} must be 100% bare — if you see yourself about to place anything on them, do not.
 - SCALE: The ring outer diameter ≈ 0.8× the width of the ${targetFinger}. Think real-life ring proportions — it is a small band that barely extends beyond the finger's edges.
 - The ring band height must be no more than 1/10th of the finger's total length — a thin delicate band, not a wide cuff.
+- REAL SIZE: a band about 1.5–3 mm wide, any stone only a few millimetres across — never wider than the finger it sits on.
 - The ring band encircles the finger's full circumference in 3D — physically worn at the base knuckle, not floating or overlaid flat.
 - One ring. One finger. Nothing else.`;
   }
@@ -108,7 +146,12 @@ RING PLACEMENT — CRITICAL:
 EARRING PLACEMENT — CRITICAL:
 - Place earrings ONLY at the piercing point specified (lobe or helix/cartilage), NOT floating.
 - Drop/dangle earrings hang freely below the lobe or attachment point — they should swing naturally.
-- Size earrings proportionally to the ear — a statement earring should read clearly without being oversized.
+- MAXIMUM SIZE — measure it against the ear itself:
+  - A stud's widest point is at most ONE-THIRD of the earlobe's width, about 5–8 mm. It sits wholly inside the lobe with bare lobe skin visible all around it, and never reaches the outer rim of the ear.
+  - A drop or dangle is at most HALF the height of the whole ear, about 2–4 cm, and ends well above the jawline.
+  - A hoop's diameter is at most the height of the ear, never larger.
+- The ear is a small part of the face, and the earring is a small part of the ear. If the earring looks as large as the earlobe, it is too big — shrink it.
+- Frame wide enough that the jawline and part of the cheek are in the shot, so the eye can read the earring's true scale against the face.
 - If both ears, both earrings must be perfectly mirrored: identical size, height, and angle.`;
   }
 
@@ -117,6 +160,8 @@ EARRING PLACEMENT — CRITICAL:
 BRACELET PLACEMENT — CRITICAL:
 - The bracelet must encircle the full wrist circumference, not sit on top of the wrist.
 - Size it proportionally to the wrist — it should look naturally worn, not loose or floating.
+- REAL SIZE: it fits closely around the wrist, about 6 cm across, the band as slim as the reference shows relative to its circle.
+- MAXIMUM SIZE: a chain or tennis band is at most one-quarter of the wrist's width; a charm or motif is at most the size of the model's thumbnail; a cuff at most one-third of the forearm's width.
 - The bracelet should appear solid and three-dimensional, following the wrist's curve.`;
   }
 
@@ -125,19 +170,28 @@ BRACELET PLACEMENT — CRITICAL:
 NECKLACE PLACEMENT — CRITICAL:
 - The chain must follow the natural curve of the neck/collarbone — not floating away from the skin.
 - The pendant should hang centered at the correct length position as specified.
-- Show the full chain drape; avoid cutting it off at the frame edges.`;
+- MAXIMUM SIZE — measure it against the body:
+  - A pendant is at most the size of ONE FINGERTIP, about 1–2.5 cm tall — never wider than two fingers side by side, and at most one-fifth of the distance between the two shoulders' collarbone ends.
+  - The chain is fine, about 1 mm thick — a thin line against the skin, far thinner than a finger.
+  - A tennis or statement band is no thicker than a pinky fingernail.
+- If the pendant looks as wide as the hollow of the throat or as large as a palm, it is too big — shrink it.
+- Show the full chain drape and keep the collarbones and base of the neck in frame as a scale reference; avoid cutting the chain off at the frame edges.`;
   }
 
   /*
    * No type named, because the browser left it to the photograph — the
    * picker only asks which finger or which wrist, the two things a photo
-   * cannot say. So the rules for every other kind are all sent, and the
-   * model applies the one matching what it sees.
+   * cannot say. So the rules for every kind are all sent, and the model
+   * applies the one matching what it sees. Rings and bracelets are listed
+   * too: this is the picker's default, so a ring uploaded without choosing a
+   * finger lands here.
    */
   return `
 PLACEMENT BY KIND — read the reference, then follow the matching rule:
-- Necklace: the chain follows the curve of the neck and collarbone against the skin, never floating; show the full drape rather than cropping it at the frame edge.
-- Earrings: at the earlobe piercing, not floating; a drop hangs freely below it; a pair is mirrored on both ears at identical size, height and angle.
+- Ring: on one finger only, every other finger bare; a band about 1.5–3 mm wide, any stone only a few millimetres across — never wider than the finger.
+- Bracelet or bangle: encircling one wrist and fitting closely, about 6 cm across, the band as slim as the reference shows relative to its circle.
+- Necklace: the chain follows the curve of the neck and collarbone against the skin, never floating; show the full drape rather than cropping it at the frame edge. A pendant is at most the size of one fingertip (1–2.5 cm), never wider than two fingers side by side, on a fine chain about 1 mm thick.
+- Earrings: at the earlobe piercing, not floating; a drop hangs freely below it; a pair is mirrored on both ears at identical size, height and angle. A stud is at most one-third of the earlobe's width (5–8 mm), with bare lobe visible all around it; a drop is at most half the ear's height (2–4 cm).
 - Nose pin: a small stud or ring at the nostril piercing point, scaled to the nose.
 - Anklet: encircling the full ankle, resting on the bone.
 - Whatever the kind: the piece appears on that one body location only. Every other part of the model is bare — no jewellery invented anywhere else in the frame.`;
@@ -158,12 +212,14 @@ function buildLifestylePrompt({ placement, poseInstruction, description, shotTyp
   return `Photorealistic image editing. Place the ${jewelryType} from the reference jewelry image onto the female model.
 
 JEWELRY FIDELITY — NON-NEGOTIABLE:
-- Every structural detail of the jewelry MUST match the reference exactly: shape, stone settings, filigree, chain links, clasps, color, and proportions.
+- Every structural detail of the jewelry MUST match the reference exactly: shape, stone settings, filigree, chain links, clasps, color, and internal proportions (how its parts compare to each other) — but NOT its size in the photo, which is a close-up; the size on the body follows the size rules below.
 - Stone count is exact — count every stone in the reference and render that exact same number, in the same positions. Do NOT add, remove, merge, or omit a single stone.
 - Do NOT simplify, alter, or hallucinate any part of the jewelry design.
 - Gold color, diamond brilliance, gemstone colors, and cut/shape of every stone — must be identical to the reference.
 - The jewelry is the hero of this image. A jeweller inspecting the output must be able to confirm every stone, setting, and metal detail matches the reference piece exactly.
 ${jewelrySpecificRules(jewelryType, placement)}
+${SCALE_NOTE}
+${ONLY_THIS_PIECE_NOTE}
 ${ANATOMY_NOTE}
 ${REALISM_NOTE}
 ${FOCUS_NOTE}
@@ -203,12 +259,12 @@ SET PLACEMENT — place each piece on its correct, natural body location:
 - Match each uploaded piece to the body location that fits its type. Do NOT place two different pieces on the same spot.
 
 JEWELRY FIDELITY — NON-NEGOTIABLE (applies to EVERY piece):
-- Every structural detail of each piece MUST match its reference exactly: shape, stone settings, filigree, chain links, clasps, metal color, and proportions.
+- Every structural detail of each piece MUST match its reference exactly: shape, stone settings, filigree, chain links, clasps, metal color, and internal proportions (how its parts compare to each other) — but NOT its size in the photo, which is a close-up; the size on the body follows the size rules below.
 - Stone count is exact for each piece — count every stone in each reference image and render that exact same number, in the same positions. Do NOT add, remove, merge, or omit a single stone on any piece.
 - Do NOT simplify, alter, merge, or hallucinate any part of any piece. Each rendered piece must be individually recognisable as its source image.
-- Render each piece at realistic, proportional real-life scale for where it is worn — no oversized or floating jewelry.
+- Render each piece at realistic, proportional real-life scale for where it is worn — no oversized or floating jewelry. Maximum sizes, measured against the body: a stud at most one-third of the earlobe's width; a drop earring at most half the ear's height; a pendant at most one fingertip; a ring's stone never wider than its finger; a bracelet band at most one-quarter of the wrist's width. When in doubt, smaller.
 
-STRICT — do NOT add any jewelry that was not provided in these ${count} images. Only the uploaded pieces appear on the model — nothing extra.
+STRICT — any jewellery or watch the model already wears in her photo is removed, and nothing is added that was not provided in these ${count} images. Only the uploaded pieces appear on the model — nothing extra.
 
 ${ANATOMY_NOTE}
 ${REALISM_NOTE}
@@ -242,14 +298,14 @@ function buildLifestyleRefinePrompt({ instruction, referenceCount = 0, data = {}
   const styleCount = Math.max(0, referenceCount - jewelryCount);
 
   const jewelryNote = jewelryCount
-    ? ` The ${jewelryCount > 1 ? `${jewelryCount} images` : "image"} immediately after the first photograph — before any style reference — are the ORIGINAL jewelry reference photo(s), the ground-truth design. Use them ONLY to verify and correct the jewelry: exact stone count, cut, color, metal, filigree, and proportions must match these originals exactly, correcting any drift from the prior edit. Do not use them for anything else about the scene.`
+    ? ` The ${jewelryCount > 1 ? `${jewelryCount} images` : "image"} immediately after the first photograph — before any style reference — are the ORIGINAL jewelry reference photo(s), the ground-truth design. Use them ONLY to verify and correct the jewelry: exact stone count, cut, color, metal, filigree, and internal proportions must match these originals exactly, correcting any drift from the prior edit — but not their size, which is a close-up; keep the piece's size on the body as it is unless the requested change says otherwise. Do not use them for anything else about the scene.`
     : "";
 
   const styleNote = styleCount
     ? ` ${styleCount > 1 ? `${styleCount} additional reference images are` : "A further reference image is"} also attached, purely as visual inspiration for the requested change — apply that idea onto the FIRST image, do NOT copy or blend in the reference(s)' own subject, composition or background.`
     : "";
 
-  return `Modify this lifestyle jewelry photograph (the first image): ${instruction}.${jewelryNote}${styleNote} PRESERVE EXACTLY: the model's identity, face, skin tone, hair, body proportions — do NOT change the model in any way. PRESERVE EXACTLY: the background, environment, lighting setup, and scene composition — do NOT alter the background. PRESERVE EXACTLY: the jewelry structure, design, and placement — matching the original jewelry reference(s) exactly. Only apply the single specifically requested change and nothing else. ${ANATOMY_NOTE}`;
+  return `Modify this lifestyle jewelry photograph (the first image): ${instruction}.${jewelryNote}${styleNote} PRESERVE EXACTLY: the model's identity, face, skin tone, hair, body proportions — do NOT change the model in any way. PRESERVE EXACTLY: the background, environment, lighting setup, and scene composition — do NOT alter the background. PRESERVE EXACTLY: the photo's colour — the same white balance, colour temperature, tint, saturation, contrast and exposure, and the same skin tone. The edited photo must match the first image's colours pixel-for-pixel wherever the change does not touch; never warm it, add a pink, red, orange or magenta cast, or regrade it in any way. PRESERVE EXACTLY: the jewelry structure, design, and placement — matching the original jewelry reference(s) exactly. Only apply the single specifically requested change and nothing else. ${ANATOMY_NOTE}`;
 }
 
 /*

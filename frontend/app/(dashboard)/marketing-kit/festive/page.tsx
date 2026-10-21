@@ -79,7 +79,8 @@ function FestivePosterWorkspace() {
 
   const [jewelry, setJewelry] = useState<UploadItem[]>([]);
   const [jewelryPreview, setJewelryPreview] = useState<PreviewImage | null>(null);
-  const [event, setEvent] = useState<string>("mothers_day");
+  /** "" is no event picked: a plain poster of the collection. */
+  const [event, setEvent] = useState<string>("");
   const [customEvent, setCustomEvent] = useState("");
   const [description, setDescription] = useState("");
   const [aspect, setAspect] = useState<string>(CAMPAIGN_ASPECTS[0].id);
@@ -99,7 +100,7 @@ function FestivePosterWorkspace() {
 
   const workspace = useGenerationWorkspace({
     tool: "marketing_kit",
-    resumeLabel: "Make a festive poster",
+    resumeLabel: "Make a poster",
     onRefine,
   });
 
@@ -123,10 +124,14 @@ function FestivePosterWorkspace() {
   }
 
   const isCustom = event === "custom";
-  const eventName = isCustom ? customEvent.trim() : FESTIVE_EVENT_OPTIONS.find((option) => option.id === event)?.label;
+  // No chip picked is the backend's own "collection" look — the pieces, no occasion.
+  const sentEvent = event || "collection";
+  const eventName = isCustom
+    ? customEvent.trim()
+    : (FESTIVE_EVENT_OPTIONS.find((option) => option.id === event)?.label ?? "Collection");
   const ready = jewelry.length > 0 && Boolean(eventName);
   // The event's own copy fills any line left empty — the user only types to change it.
-  const suggestedCopy = EVENT_COPY[event] ?? { headline: `${eventName || "Festive"} Collection`, tagline: "" };
+  const suggestedCopy = EVENT_COPY[sentEvent] ?? { headline: `${eventName || "Festive"} Collection`, tagline: "" };
 
   async function handleGenerate() {
     if (!ready) return;
@@ -136,7 +141,7 @@ function FestivePosterWorkspace() {
       () =>
         festivePoster({
           jewelryImages: jewelry.map((item) => item.dataUrl),
-          ...(isCustom ? { customEvent: customEvent.trim() } : { event }),
+          ...(isCustom ? { customEvent: customEvent.trim() } : { event: sentEvent }),
           description,
           ...(posterText.enabled
             ? {
@@ -201,7 +206,18 @@ function FestivePosterWorkspace() {
             you hand over — the pieces, the shape, the note — on the right. */}
         <div className="grid w-full items-start gap-6 lg:grid-cols-[65fr_35fr] lg:gap-8">
           <div className="space-y-5">
-            <OptionChips label="Event" options={FESTIVE_EVENT_OPTIONS} value={event} onChange={setEvent} />
+            {/* Optional: a second click clears the pick, back to a plain collection poster. */}
+            <OptionChips
+              label="Event (optional)"
+              options={FESTIVE_EVENT_OPTIONS}
+              value={event}
+              onChange={(id) => setEvent(id === event ? "" : id)}
+            />
+            {!event && (
+              <p className="-mt-3 text-[11px] text-faint">
+                No event picked — you&apos;ll get a clean poster of the collection itself.
+              </p>
+            )}
             {isCustom && (
               <input
                 value={customEvent}

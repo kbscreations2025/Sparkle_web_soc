@@ -3,12 +3,12 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { ChevronDown, ChevronUp, Globe, Loader2, Lock, type LucideIcon, Maximize2, Trash2, Upload, Wand2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Globe, Loader2, Lock, type LucideIcon, Maximize2, MoreVertical, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
 import { Chip } from "./OptionChips";
 import { Lightbox } from "./Lightbox";
 import { ConfirmDialog } from "./ToolChrome";
 import { useAuth } from "@/lib/auth-context";
-import { LIFESTYLE_PRESETS } from "@/lib/api";
+import { LIFESTYLE_PRESETS, type LifestyleModel } from "@/lib/api";
 import { MODEL_ATTRS, outfitsFor } from "@/lib/lifestyleOptions";
 import type { ModelLibraryState } from "@/lib/useModelLibrary";
 import { useEscapeKey } from "@/lib/useEscapeKey";
@@ -27,10 +27,18 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
   const [building, setBuilding] = useState(false);
   /** The saved model open in the viewer, and the one being renamed in place. */
   const [preview, setPreview] = useState<string | null>(null);
+  /** The saved model being previewed, for its details panel — none for a preset. */
+  const [previewModel, setPreviewModel] = useState<LifestyleModel | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   /** A pending share/unshare, held until it is confirmed. */
   const [confirming, setConfirming] = useState<{ id: string; name: string; share: boolean } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  /**
+   * Shown before the file picker: a model photo with jewellery already on
+   * her carries it into every shot, and a photo of a piece itself isn't a
+   * model at all — both were being uploaded here.
+   */
+  const [uploadNotice, setUploadNotice] = useState(false);
 
   const { choice, setChoice, models, generating, pendingJob } = library;
 
@@ -62,7 +70,7 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
             of buttons underneath: adding one is a choice alongside the
             models themselves, and reads that way at the head of the grid. */}
         <li className="flex aspect-[3/4] flex-col gap-1 rounded-lg border border-dashed border-white/[0.14] bg-white/[0.02] p-1.5">
-          <AddModelAction icon={Upload} label="Upload a photo" onClick={() => fileInput.current?.click()} />
+          <AddModelAction icon={Upload} label="Upload a photo" onClick={() => setUploadNotice(true)} />
           <AddModelAction
             icon={Wand2}
             label={building ? "Close" : "Build a model"}
@@ -83,7 +91,10 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
             label={`Model ${preset.number}`}
             active={choice?.kind === "preset" && choice.number === preset.number}
             onSelect={() => setChoice({ kind: "preset", number: preset.number, src: preset.src })}
-            onPreview={() => setPreview(preset.src)}
+            onPreview={() => {
+              setPreviewModel(null);
+              setPreview(preset.src);
+            }}
           />
         ))}
 
@@ -92,12 +103,16 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
             key={model.id}
             src={model.thumbnailUrl}
             label={model.name}
+            owner={model.isOwn ? undefined : model.userName}
             shared={model.isPublic}
             active={choice?.kind === "saved" && choice.id === model.id}
             onSelect={() => setChoice({ kind: "saved", id: model.id, src: model.thumbnailUrl })}
-            onPreview={() => setPreview(model.imageUrl || model.thumbnailUrl)}
+            onPreview={() => {
+              setPreviewModel(model);
+              setPreview(model.imageUrl || model.thumbnailUrl);
+            }}
             renaming={renaming === model.id}
-            onRename={() => setRenaming(model.id)}
+            onRename={model.isOwn ? () => setRenaming(model.id) : undefined}
             onRenamed={(name) => {
               setRenaming(null);
               if (name && name !== model.name) library.rename(model.id, name);
@@ -124,12 +139,33 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
 
       {/* The grid's tiles are ~100px wide; this is how you actually look at
           a model before placing jewellery on her. */}
-      <Lightbox src={preview} onClose={() => setPreview(null)} downloadName="model.jpg" />
+      <Lightbox
+        src={preview}
+        onClose={() => {
+          setPreview(null);
+          setPreviewModel(null);
+        }}
+        downloadName="model.jpg"
+        info={previewModel ? <ModelDetails model={previewModel} /> : undefined}
+      />
 
       {/* Who can see a photograph of a person is worth one deliberate click
           — in either direction: sharing exposes her to the whole
           organization, and unsharing pulls her out of everyone else's
           picker, including runs they were about to make. */}
+      {uploadNotice && (
+        <ConfirmDialog
+          title="Upload a plain model photo"
+          body="Use a photo of the person only, with no jewellery on: no earrings, necklace, rings, bracelets or watch. Any jewellery already in the photo can end up in the final image next to your piece. Don't upload a photo of the jewellery itself here; add that under The jewellery."
+          confirmLabel="Choose photo"
+          onCancel={() => setUploadNotice(false)}
+          onConfirm={() => {
+            setUploadNotice(false);
+            fileInput.current?.click();
+          }}
+        />
+      )}
+
       {confirming && (
         <ConfirmDialog
           title={confirming.share ? "Share with the organization?" : "Stop sharing?"}
@@ -146,6 +182,25 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/** The essentials about a saved model, for the preview: its name, who added it, and when. */
+function ModelDetails({ model }: { model: LifestyleModel }) {
+  const created = new Date(model.createdAt);
+  const date = Number.isNaN(created.getTime()) ? null : created.toLocaleDateString(undefined, { dateStyle: "medium" });
+  const by = model.isOwn ? "you" : model.userName;
+
+  // Laid out like the History viewer's header: the name as a chip, then when and by whom.
+  return (
+    <div className="flex flex-wrap items-center gap-2 md:gap-3">
+      <span className="max-w-[60vw] truncate rounded-full border border-gold/30 bg-gold/10 px-2.5 py-1 text-[11px] font-semibold text-gold">
+        {model.name}
+      </span>
+      <p className="whitespace-nowrap text-[11px] text-white/60">
+        {date ? `${date} · ` : ""}by {by}
+      </p>
     </div>
   );
 }
@@ -261,6 +316,7 @@ function AddModelAction({
 function ModelTile({
   src,
   label,
+  owner,
   active,
   shared,
   renaming,
@@ -273,6 +329,8 @@ function ModelTile({
 }: {
   src: string;
   label: string;
+  /** Whose model it is, shown when it isn't the viewer's own. */
+  owner?: string;
   active: boolean;
   shared?: boolean;
   /** Whether the name is currently an input rather than a caption. */
@@ -302,6 +360,15 @@ function ModelTile({
         )}
       >
         <Image src={src} alt={label} fill sizes="140px" className="object-cover" />
+        {owner && (
+          <span
+            title={`${owner}'s model`}
+            // Steps aside on hover, where the action pill takes the top edge.
+            className="absolute left-1 top-1 max-w-[calc(100%-0.5rem)] truncate rounded-full bg-black/60 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm transition-opacity group-hover:opacity-0 [@media(hover:none)]:max-w-[calc(100%-2.25rem)] [@media(hover:none)]:opacity-100"
+          >
+            {owner}
+          </span>
+        )}
         {!renaming && (
           <span
             className={cn(
@@ -341,7 +408,7 @@ function ModelTile({
         <div
           className={cn(
             "absolute bottom-1 right-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/60 p-0.5 backdrop-blur-sm transition-opacity",
-            !shared && "opacity-0 focus-within:opacity-100 group-hover:opacity-100"
+            !shared && "opacity-0 focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:hidden"
           )}
         >
           {onShare ? (
@@ -384,13 +451,84 @@ function ModelTile({
 
       {/* The actions, pooled in one pill on hover — three separate circles
           over a ~100px tile is more chrome than picture. */}
+      {/* A touch screen has no hover, so the pill there is a ⋯ menu instead. */}
+      {(onPreview || onDelete || onShare || onRename) && !renaming && (
+        <TileMenu
+          title={owner ? `${label} · ${owner}` : label}
+          items={[
+            onPreview && { icon: Maximize2, label: "Preview", onClick: onPreview },
+            onRename && { icon: Pencil, label: "Rename", onClick: onRename },
+            onShare && {
+              icon: shared ? Lock : Globe,
+              label: shared ? "Stop sharing" : "Share with organization",
+              onClick: onShare,
+            },
+            onDelete && { icon: Trash2, label: "Delete", onClick: onDelete, danger: true },
+          ]}
+        />
+      )}
+
       {(onPreview || onDelete) && (
-        <div className="absolute right-1 top-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/60 p-0.5 opacity-0 backdrop-blur-sm transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        <div className="absolute right-1 top-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/60 p-0.5 opacity-0 backdrop-blur-sm transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:hidden">
           {onPreview && <TileAction icon={Maximize2} label={`Preview ${label}`} onClick={onPreview} />}
           {onDelete && <TileAction icon={Trash2} label={`Delete ${label}`} onClick={onDelete} danger />}
         </div>
       )}
     </li>
+  );
+}
+
+type TileMenuItem = { icon: LucideIcon; label: string; onClick: () => void; danger?: boolean };
+
+/** A tile's actions behind a ⋯ button — touch screens only, where hover can't reveal them. */
+function TileMenu({ title, items }: { title: string; items: (TileMenuItem | undefined | false)[] }) {
+  const [open, setOpen] = useState(false);
+  const actions = items.filter(Boolean) as TileMenuItem[];
+
+  return (
+    <div className="absolute right-1 top-1 hidden [@media(hover:none)]:block">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-label="Model options"
+        aria-expanded={open}
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white/90 backdrop-blur-sm"
+      >
+        <MoreVertical size={13} />
+      </button>
+      {/* A sheet from the bottom rather than a dropdown: a dropdown off a
+          ~100px tile runs off the screen edge, and a sheet is what a phone
+          expects. Portalled so no tile's stacking can sit above it. */}
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-end bg-black/50" onClick={() => setOpen(false)}>
+            <div
+              className="animate-drawer-up w-full rounded-t-2xl border-t border-white/10 bg-surface-raised px-2 pb-6 pt-3"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p className="truncate px-3 pb-2 text-xs font-semibold text-cream">{title}</p>
+              {actions.map((action) => (
+                <button
+                  key={action.label}
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    action.onClick();
+                  }}
+                  className={cn(
+                    "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm",
+                    action.danger ? "text-error" : "text-cream"
+                  )}
+                >
+                  <action.icon size={16} /> {action.label}
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body
+        )}
+    </div>
   );
 }
 

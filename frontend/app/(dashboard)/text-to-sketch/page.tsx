@@ -112,11 +112,11 @@ export default function TextToSketchPage() {
           style,
           aspect,
           count,
-          referenceImage: reference.photo ?? undefined,
+          referenceImage: reference.photos.length ? reference.photos : undefined,
           trends: builder.trendCuesFor(count),
           designVariations,
         }),
-      { count, prompt: finalDescription, images: reference.photo ? [reference.photo] : [] }
+      { count, prompt: finalDescription, images: reference.photos }
     );
   }
 
@@ -165,7 +165,7 @@ export default function TextToSketchPage() {
             </div>
           </div>
 
-          <ReferencePhotoField photo={reference.photo} onPick={reference.pick} onChange={reference.setPhoto} />
+          <ReferencePhotoField photos={reference.photos} onPick={reference.pick} onChange={reference.setPhotos} />
 
           <div className="space-y-1">
             <PromptCard

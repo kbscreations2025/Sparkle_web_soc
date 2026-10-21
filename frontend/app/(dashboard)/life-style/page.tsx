@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Sparkles, Users } from "lucide-react";
+import { Lock, Sparkles, Users } from "lucide-react";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { OptionChips } from "@/components/studio/OptionChips";
@@ -14,15 +14,15 @@ import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImageP
 import {
   lifestyle,
   refineLifestyle,
-  IMAGE_EDIT_MODELS,
-  DEFAULT_IMAGE_EDIT_MODEL,
+  LIFESTYLE_MODELS,
+  DEFAULT_LIFESTYLE_MODEL,
   LIFESTYLE_ASPECTS,
   DEFAULT_LIFESTYLE_ASPECT,
   toModelOptions,
-  type ImageEditModelId,
+  type LifestyleModelId,
   type LifestyleAspectId,
 } from "@/lib/api";
-import { ALL_PLACEMENTS, PLACEMENT_GROUPS, POSES, THEMES, HINTS, resolveScene } from "@/lib/lifestyleOptions";
+import { PLACEMENT_GROUPS, POSES, THEMES, HINTS, resolvePlacement, resolveScene } from "@/lib/lifestyleOptions";
 import { makeThumbnail } from "@/lib/image";
 import { filesToUploadItems, uploadErrorMessage } from "@/lib/uploads";
 import { useGenerationWorkspace, type RefineRequest } from "@/lib/useGenerationWorkspace";
@@ -34,7 +34,14 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.life_style.run";
-const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
+const MODEL_OPTIONS = toModelOptions(LIFESTYLE_MODELS);
+
+/**
+ * Sent with every Lifestyle shot, ahead of the user's own notes. Shown in the
+ * "Anything else" box as a locked chip rather than typed text: it gives the
+ * best-sized results, so it can't be cleared or edited away.
+ */
+const FIXED_NOTE = "make the Jewelry very very very small";
 
 export default function LifeStylePage() {
   const { user } = useAuth();
@@ -43,12 +50,15 @@ export default function LifeStylePage() {
   const [jewelry, setJewelry] = useState<UploadItem[]>([]);
   /** A jewellery photo opened for a closer look, or to annotate before it's placed. */
   const [jewelryPreview, setJewelryPreview] = useState<PreviewImage | null>(null);
-  const [placement, setPlacement] = useState(ALL_PLACEMENTS[0].id);
+  const [category, setCategory] = useState<string | null>(null);
+  const [spot, setSpot] = useState<string | null>(null);
   const [pose, setPose] = useState(POSES[0].id);
   const [theme, setTheme] = useState(THEMES[0].id);
   const [aspectRatio, setAspectRatio] = useState<LifestyleAspectId>(DEFAULT_LIFESTYLE_ASPECT);
   const [description, setDescription] = useState("");
-  const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
+  // The fixed size note always leads; whatever the user types is added after it.
+  const fullDescription = [FIXED_NOTE, description.trim()].filter(Boolean).join(". ");
+  const [model, setModel] = useState<LifestyleModelId>(DEFAULT_LIFESTYLE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
 
   /**
@@ -86,7 +96,7 @@ export default function LifeStylePage() {
   async function handleGenerate() {
     if (jewelry.length === 0 || !library.choice) return;
 
-    const chosenPlacement = ALL_PLACEMENTS.find((entry) => entry.id === placement);
+    const chosenPlacement = resolvePlacement(category, spot);
     const chosenPose = POSES.find((entry) => entry.id === pose);
     // Resolved here so the request always names a concrete scene — "Surprise
     // Me" is a choice the picker makes, never one the model is left to make.
@@ -104,7 +114,7 @@ export default function LifeStylePage() {
           shotType: chosenPose?.shot ?? "",
           sceneInstruction: scene.value,
           aspectRatio,
-          description,
+          description: fullDescription,
           model,
           quality,
           preview,
@@ -114,7 +124,8 @@ export default function LifeStylePage() {
         count: 1,
         prompt:
           `Place ${jewelry.length > 1 ? `these ${jewelry.length} pieces` : "this piece"} on the model — ` +
-          `${chosenPlacement?.label ?? "on the model"}, ${scene.label}`,
+          `${chosenPlacement?.label ?? "on the model"}, ${scene.label}` +
+          `\n${fullDescription}`,
         // The piece leads; the model it goes on follows, small.
         images: [...jewelry.map((item) => item.dataUrl), library.choice.src],
       }
@@ -134,7 +145,7 @@ export default function LifeStylePage() {
         busyLabel="Placing the jewellery…"
         resetLabel="New shot"
         downloadName="lifestyle.png"
-        modelLabel={IMAGE_EDIT_MODELS.find((entry) => entry.id === model)?.label}
+        modelLabel={LIFESTYLE_MODELS.find((entry) => entry.id === model)?.label}
       />
     );
   }
@@ -166,7 +177,15 @@ export default function LifeStylePage() {
               <ModelLibrary library={library} />
             </section>
 
-            <PlacementPicker value={placement} onChange={setPlacement} />
+            <PlacementPicker
+              category={category}
+              spot={spot}
+              onCategoryChange={(next) => {
+                setCategory(next);
+                setSpot(null);
+              }}
+              onSpotChange={setSpot}
+            />
 
             <OptionChips label="Pose & Framing" options={POSES} value={pose} onChange={setPose} />
             <OptionChips label="Scene" options={THEMES} value={theme} onChange={setTheme} />
@@ -196,12 +215,20 @@ export default function LifeStylePage() {
             </section>
 
             <PromptCard
+              topSlot={
+                <span
+                  title="Always sent — gives the best-sized results"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-gold/25 bg-gold/10 px-2 py-1 text-[12px] text-gold"
+                >
+                  <Lock size={11} /> {FIXED_NOTE}
+                </span>
+              }
               label="Anything else"
               value={description}
               onChange={setDescription}
               onPasteImage={(file) => addJewelry([file])}
               placeholder="Optional — e.g. warmer light, a softer background"
-              footerEnd={<InlineModelSelect models={IMAGE_EDIT_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
+              footerEnd={<InlineModelSelect models={LIFESTYLE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} disabled={!ready} icon={<Sparkles size={14} />}>
@@ -224,48 +251,76 @@ export default function LifeStylePage() {
 }
 
 
-/** The id `PlacementPicker` falls back to — no chip is shown for it, it's just what an unset or cancelled choice resolves to. */
-const AUTO_PLACEMENT_ID = "auto";
+function PlacementChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "min-h-8 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+        active
+          ? "border-gold/30 bg-gold/10 text-gold"
+          : "border-white/[0.07] bg-white/[0.03] text-muted hover:border-white/[0.14] hover:text-cream"
+      )}
+    >
+      {label}
+    </button>
+  );
+}
 
 /**
- * Placement, grouped by the kind of piece.
+ * Placement in two steps: what the piece is, then — optionally — exactly
+ * where it goes. They know they have a ring before they know which finger.
  *
- * A flat list of 20 is unreadable, and the groups are how someone actually
- * looks for one: they know they have a ring before they know which finger.
- *
- * The "Anything else" / auto group has no chip of its own — it is the
- * silent default, not a choice someone makes on purpose. It's what `value`
- * already starts as, and clicking a chip a second time returns to it, so
- * there's always a way back to "let the photo decide" without a button that
- * says so.
+ * Clicking a chip a second time clears it: a category back to "from the
+ * photo", a spot back to that category's standard placement.
  */
-function PlacementPicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+function PlacementPicker({
+  category,
+  spot,
+  onCategoryChange,
+  onSpotChange,
+}: {
+  category: string | null;
+  spot: string | null;
+  onCategoryChange: (category: string | null) => void;
+  onSpotChange: (spot: string | null) => void;
+}) {
+  const group = PLACEMENT_GROUPS.find((entry) => entry.group === category);
+
   return (
     <div className="space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-wider text-cream">Where it goes</p>
-      {PLACEMENT_GROUPS.filter((group) => group.group !== "Anything else").map((group) => (
-        <div key={group.group} className="space-y-1.5">
-          <p className="text-[10px] font-medium uppercase tracking-widest text-faint">{group.group}</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-cream">What is it</p>
+      <div className="flex flex-wrap gap-1.5">
+        {PLACEMENT_GROUPS.map((entry) => (
+          <PlacementChip
+            key={entry.group}
+            label={entry.group}
+            active={entry.group === category}
+            onClick={() => onCategoryChange(entry.group === category ? null : entry.group)}
+          />
+        ))}
+      </div>
+
+      {group && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
+            Where it goes{" "}
+            <span className="normal-case tracking-normal">— optional, standard placement if none picked</span>
+          </p>
           <div className="flex flex-wrap gap-1.5">
             {group.items.map((item) => (
-              <button
+              <PlacementChip
                 key={item.id}
-                type="button"
-                onClick={() => onChange(item.id === value ? AUTO_PLACEMENT_ID : item.id)}
-                aria-pressed={item.id === value}
-                className={cn(
-                  "min-h-8 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
-                  item.id === value
-                    ? "border-gold/30 bg-gold/10 text-gold"
-                    : "border-white/[0.07] bg-white/[0.03] text-muted hover:border-white/[0.14] hover:text-cream"
-                )}
-              >
-                {item.label}
-              </button>
+                label={item.label}
+                active={item.id === spot}
+                onClick={() => onSpotChange(item.id === spot ? null : item.id)}
+              />
             ))}
           </div>
         </div>
-      ))}
+      )}
     </div>
   );
 }

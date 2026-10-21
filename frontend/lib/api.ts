@@ -567,6 +567,95 @@ export type NewCleaningModelId = (typeof NEW_CLEANING_MODELS)[number]["id"];
 export const DEFAULT_NEW_CLEANING_MODEL: NewCleaningModelId = "openai/gpt-image-2";
 
 /**
+ * Cleaning in Testing — photo editors from other makers, on trial against the
+ * standard cleaning instructions, all through OpenRouter. Mirrors the backend's
+ * EDIT_STYLE_MODELS (and the two GPT Image 2.5 tiers) in providers/openrouter.
+ *
+ * Labels must match the backend's: a result is reopened on the testing page
+ * by its model's name (see lib/nav.ts workspacePathFor). None of these appear
+ * on another cleaning page, which is what makes that unambiguous.
+ */
+const EDIT_TIERS = ["2K", "1K"] as const;
+/** The one trial model that renders 4K — see the backend's EDIT_4K_MODELS. */
+const EDIT_4K_TIERS = ["4K", "2K", "1K"] as const;
+const GPT_TIERS = ["high", "medium", "low"] as const;
+export const TESTING_CLEANING_MODELS = [
+  { id: "google/gemini-nano-banana-2.1", label: "Nano Banana 2.1", provider: "Google", quality: "4K", qualities: EDIT_4K_TIERS, description: "Most faithful retouch · most consistent gold · 4K", badge: "Recommended" },
+  { id: "openai/gpt-image-2.5-sunburst", label: "GPT Image 2.5 Sunburst", provider: "OpenAI", quality: "high", qualities: GPT_TIERS, description: "Precision tier of GPT Image 2.5" },
+  { id: "openai/gpt-image-2.5-flare", label: "GPT Image 2.5 Flare", provider: "OpenAI", quality: "high", qualities: GPT_TIERS, description: "Brightest gold · may redraw small details · up to 1.2K", badge: "Backup" },
+  { id: "black-forest-labs/flux-3-image", label: "FLUX 3 Image", provider: "Black Forest Labs", quality: "2K", qualities: EDIT_TIERS, description: "Flagship editor · multi-reference" },
+  { id: "black-forest-labs/flux.2-max", label: "FLUX.2 Max", provider: "Black Forest Labs", quality: "2K", qualities: EDIT_TIERS, description: "Top FLUX.2 tier · consistent edits" },
+  { id: "bytedance-seed/seedream-5-0-pro", label: "Seedream 5.0 Pro", provider: "ByteDance", quality: "2K", qualities: EDIT_TIERS, description: "Precise editing for commercial product work" },
+  { id: "qwen/qwen-image-3-pro", label: "Qwen Image 3 Pro", provider: "Qwen", quality: "2K", qualities: EDIT_TIERS, description: "Holds details as small as 10px" },
+  { id: "krea/k3-edit", label: "Krea K3 Edit", provider: "Krea", quality: "2K", qualities: EDIT_TIERS, description: "Image-to-image editor · follows instructions closely" },
+  { id: "microsoft/mai-image-2.6", label: "MAI-Image-2.6", provider: "Microsoft", quality: "2K", qualities: EDIT_TIERS, description: "Precision tier of MAI-Image" },
+  { id: "x-ai/grok-imagine-image-2.0", label: "Grok Imagine Image 2.0", provider: "xAI", quality: "2K", qualities: EDIT_TIERS, description: "Edits from references" },
+  { id: "sourceful/riverflow-v2.5-pro", label: "Riverflow V2.5 Pro", provider: "Sourceful", quality: "2K", qualities: EDIT_TIERS, description: "Built for product imagery · top control" },
+  { id: "tencent/hy-image-v3.5-preview", label: "Hy Image 3.5", provider: "Tencent", quality: "2K", qualities: EDIT_TIERS, description: "Preview · multi-turn editing" },
+  { id: "meta/muse-image", label: "Muse Image", provider: "Meta", quality: "2K", qualities: EDIT_TIERS, description: "Reasons before it renders" },
+] as const;
+
+export type TestingCleaningModelId = (typeof TESTING_CLEANING_MODELS)[number]["id"];
+
+/**
+ * What the testing page actually offers: only the badged models — the ones
+ * that kept the design intact, the white metal white and the gold consistent
+ * across a benchmark set with the studio prompt. Nano Banana 2.1 led on all
+ * three and is the only one that renders 4K; Flare is the backup for when it
+ * is unavailable. The full list above stays, so a run made on a retired
+ * model still reopens on this page (lib/nav.ts) and falls back to these.
+ */
+type OfferedTestingCleaningModel = Extract<(typeof TESTING_CLEANING_MODELS)[number], { badge: string }>;
+export const OFFERED_TESTING_CLEANING_MODELS = TESTING_CLEANING_MODELS.filter(
+  (model): model is OfferedTestingCleaningModel => "badge" in model
+);
+export const DEFAULT_TESTING_CLEANING_MODEL: OfferedTestingCleaningModel["id"] = "google/gemini-nano-banana-2.1";
+
+/**
+ * Lifestyle's models — only the three that held up in a side-by-side test on
+ * real pieces (a thin bamboo ring, a letter pendant, halo studs, a pavé
+ * bangle): the exact design, true-to-life size, a close crop that shows it,
+ * nothing else on the model. Sparkle 3.1 Flash passed every case too, just
+ * with stones a little less crisp than 3 Pro's, so it is the fast option. Of
+ * the rest, GPT Image 2 and 2.5 framed rings as portraits with the ring too
+ * small to read (and reject Lifestyle's default 4:5 frame, as Grok does);
+ * Grok redrew the ring as a wide band; FLUX shot full-length; GPT Image 1
+ * replaced the designs. Its own list, so the tools sharing IMAGE_EDIT_MODELS
+ * keep theirs.
+ */
+export const LIFESTYLE_MODELS = [
+  {
+    id: "gemini-3-pro-image",
+    label: "Sparkle 3 Pro Image",
+    provider: "Gemini",
+    quality: "4K",
+    qualities: ["4K", "2K", "1K"],
+    description: "Finest detail · 4K",
+    badge: "Best quality",
+  },
+  {
+    id: "gemini-3.1-flash-image",
+    label: "Sparkle 3.1 Flash Image",
+    provider: "Gemini",
+    quality: "4K",
+    qualities: ["4K", "2K", "1K"],
+    description: "Faster · slightly softer stones · 4K",
+    badge: "Fast",
+  },
+  {
+    id: "bytedance-seed/seedream-5-0-pro",
+    label: "Seedream 5.0 Pro",
+    provider: "ByteDance",
+    quality: "2K",
+    qualities: EDIT_TIERS,
+    description: "Natural look, true to size · 2K",
+    badge: "Most natural",
+  },
+] as const;
+export type LifestyleModelId = (typeof LIFESTYLE_MODELS)[number]["id"];
+export const DEFAULT_LIFESTYLE_MODEL: LifestyleModelId = "gemini-3-pro-image";
+
+/**
  * The sizes a model can actually be run at, and the one it defaults to.
  *
  * `qualities` mirrors `GEMINI_IMAGE_QUALITIES` in backend/src/gemini.js — one
@@ -579,12 +668,15 @@ export const DEFAULT_NEW_CLEANING_MODEL: NewCleaningModelId = "openai/gpt-image-
  * shows), which is always the first and best entry in `qualities`.
  */
 export function qualitiesFor(modelId: string): readonly string[] {
-  // Searches both extra-model lists, not just `CLEANING_MODELS`: each adds an
-  // id the other doesn't have (`gpt-image-1` native OpenAI vs. `gpt-image-2`
-  // via OpenRouter), so a lookup that only checked one would miss the other.
+  // Searches every extra-model list, not just `CLEANING_MODELS`: each adds ids
+  // the others don't have (`gpt-image-1` native OpenAI vs. `gpt-image-2` via
+  // OpenRouter, Seedream for Lifestyle), so a lookup that checked one would
+  // miss the rest.
   return (
     IMAGE_EDIT_MODELS.find((m) => m.id === modelId)?.qualities ??
     OPTIONAL_IMAGE_MODELS.find((m) => m.id === modelId)?.qualities ??
+    TESTING_CLEANING_MODELS.find((m) => m.id === modelId)?.qualities ??
+    LIFESTYLE_MODELS.find((m) => m.id === modelId)?.qualities ??
     ["1K"]
   );
 }
@@ -849,11 +941,12 @@ export function cleanImage(body: {
   /** Replaces the built-in cleaning prompt entirely when given. */
   customPrompt?: string;
   /**
-   * Which built-in prompt a plain "Clean this image" resolves to — "default"
-   * or "new", one per cleaning mode's page. Ignored once `customPrompt` is
-   * set, and irrelevant to a refinement, which never reads either.
+   * Which built-in prompt a plain "Clean this image" resolves to, one per
+   * cleaning mode's page ("studio" is Cleaning in Testing's). Ignored once
+   * `customPrompt` is set, and irrelevant to a refinement, which never reads
+   * either.
    */
-  variant?: "default" | "new" | "shank";
+  variant?: "default" | "new" | "shank" | "studio";
   /**
    * What the user also wants in the image, added on top of the built-in
    * prompt (unlike `customPrompt`, which replaces it). Ignored with `customPrompt`.
@@ -958,8 +1051,8 @@ export function textToImage(body: {
   aspect: string;
   /** How many variations to generate in parallel, e.g. 2/4/6/8. */
   count: number;
-  /** An optional photo to start the design from, as a data URI. */
-  referenceImage?: string;
+  /** Optional photos to start the design from, as data URIs (up to 4). */
+  referenceImage?: string[];
   /** Current trends to follow, one per image in turn — see `JewelryTrend`. */
   trends?: TrendCue[];
   /** With a reference photo: each image a new design option grown from it, not a recreation. */
@@ -1031,8 +1124,8 @@ export function textToSketch(body: {
   style: string;
   aspect: string;
   count: number;
-  /** Optional photo the design is drawn from, as a data URI. */
-  referenceImage?: string;
+  /** Optional photos the design is drawn from, as data URIs (up to 4). */
+  referenceImage?: string[];
   /** Current trends to follow, one per sketch in turn — see `JewelryTrend`. */
   trends?: TrendCue[];
   /** With a reference photo: each sketch a new design option grown from it, not a redraw. */
@@ -1195,6 +1288,8 @@ export type LifestyleModel = {
   thumbnailUrl: string;
   /** Shared with the whole organization. Only a super admin can set this. */
   isPublic: boolean;
+  /** False for a member's model reached through the viewer's data scope: usable, not renamable. */
+  isOwn: boolean;
   userName: string;
   createdAt: string;
 };
@@ -1483,6 +1578,8 @@ export type MarketingKitSummary = {
   status: "draft" | "ready" | "failed";
   error: string | null;
   previewUrl: string | null;
+  /** The run that made it — Campaign Kit and Festive Poster tiles open it in the results viewer. */
+  generationId?: string | null;
   pieceCount: number;
   userName: string;
   /** Absent outside a listing; only the owner may edit or delete a kit. */
@@ -1940,6 +2037,15 @@ export function fetchHistory(
   return apiRequest<{ items: HistoryItem[]; nextCursor: string | null; canReadTeam: boolean; totalImages?: number }>(
     `/api/history${qs ? `?${qs}` : ""}`
   );
+}
+
+/**
+ * One result by its generation id — what a Campaign Kit or Festive Poster
+ * tile in the Kits tab opens in the results viewer. Those runs are left out
+ * of `fetchHistory`, which is why they are fetched one by one.
+ */
+export function fetchHistoryItem(generationId: string) {
+  return apiRequest<{ item: HistoryItem }>(`/api/history/item/${generationId}`);
 }
 
 /**

@@ -4,10 +4,12 @@ import { useMemo } from "react";
 import { Wand2, Film, Type, PenTool, PenLine, Image as ImageIcon, ScanText, Newspaper, MessageSquare, Leaf, History, ScrollText, Gem, Package, type LucideIcon } from "lucide-react";
 import { useAuth } from "./auth-context";
 import { can } from "./permissions";
-import { NEW_CLEANING_MODELS } from "./api";
+import { NEW_CLEANING_MODELS, TESTING_CLEANING_MODELS } from "./api";
 
 /** New Cleaning/High-Res Image Generation's model labels — what a run recorded when it was made on that page's GPT models rather than Default's Gemini ones. */
 const NEW_CLEANING_MODEL_LABELS = new Set<string>(NEW_CLEANING_MODELS.map((m) => m.label));
+/** Cleaning in Testing's model labels — none of them is offered on another cleaning page. */
+const TESTING_CLEANING_MODEL_LABELS = new Set<string>(TESTING_CLEANING_MODELS.map((m) => m.label));
 
 export type NavItem = {
   id: string;
@@ -248,8 +250,16 @@ export function workspacePathFor(tool: string, modelLabel?: string | null, mode?
   // Views Generator and Jewellery Swap are cards on Image Cleaning with pages of their own.
   if (tool === "cleaning" && mode === "product_views") return "/cleaning/views";
   if (tool === "cleaning" && mode === "replacement") return "/cleaning/replace";
+  // Marketing Kit's picture tools each reopen a thread on their own page —
+  // the hub at /marketing-kit has no chat to open it in.
+  if (tool === "marketing_kit" && mode === "campaign") return "/marketing-kit/campaign";
+  if (tool === "marketing_kit" && mode === "festive") return "/marketing-kit/festive";
   if (tool === "cleaning" && modelLabel && NEW_CLEANING_MODEL_LABELS.has(modelLabel)) {
     return "/cleaning/new";
+  }
+  // A model on trial reopens on the testing page — the only one that offers it.
+  if (tool === "cleaning" && modelLabel && TESTING_CLEANING_MODEL_LABELS.has(modelLabel)) {
+    return "/cleaning/testing";
   }
   return TOOL_WORKSPACE_PATHS[tool];
 }

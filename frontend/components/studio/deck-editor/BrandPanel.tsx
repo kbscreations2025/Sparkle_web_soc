@@ -155,7 +155,7 @@ export function BrandPanel({ api }: { api: EditorApi }) {
     <>
       <div className="sticky top-0 z-10 bg-white px-2.5 pb-1.5 pt-2">
         <p className="text-[12px] font-semibold">Brand</p>
-        <p className="text-[9px] leading-snug text-black/45">Saved with this deck, and remembered for your next one.</p>
+        <p className="text-[9px] leading-snug text-black/45 max-lg:hidden">Saved with this deck, and remembered for your next one.</p>
       </div>
 
       <div className="space-y-3 px-2.5 pb-3 text-[10px]">
@@ -163,7 +163,8 @@ export function BrandPanel({ api }: { api: EditorApi }) {
         <section>
           <Heading>Logos</Heading>
           <input ref={logoInput} type="file" accept="image/*" multiple hidden onChange={(event) => { uploadLogos(event.target.files); event.target.value = ""; }} />
-          <div className="grid grid-cols-3 gap-1">
+          {/* Phones: small tiles, six to a row. */}
+          <div className="grid grid-cols-6 gap-1 md:grid-cols-10 lg:grid-cols-3">
             {brand.logos.map((src, index) => (
               <div key={index} className="group/logo relative">
                 <button
@@ -263,7 +264,7 @@ export function BrandPanel({ api }: { api: EditorApi }) {
         {/* Colours */}
         <section>
           <Heading>Brand colours</Heading>
-          <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+          <div className="grid grid-cols-12 gap-1 lg:grid-cols-6">
             {brand.colors.map((color) => (
               <button
                 key={color}
@@ -284,14 +285,17 @@ export function BrandPanel({ api }: { api: EditorApi }) {
               <input ref={colorInput} type="color" defaultValue="#6B5D42" className="absolute inset-0 cursor-pointer opacity-0" />
             </label>
           </div>
-          <p className="mt-1 leading-snug text-black/45">Shown first in every colour picker.</p>
+          <p className="mt-1 leading-snug text-black/45 max-lg:hidden">Shown first in every colour picker.</p>
         </section>
 
         {/* Fonts */}
         <section className="space-y-1">
           <Heading>Brand fonts</Heading>
-          <FontRow label="Headings" value={brand.headingFont ?? "Cambria"} onChange={(headingFont) => api.setBrand({ ...brand, headingFont })} />
-          <FontRow label="Body" value={brand.bodyFont ?? "Helvetica"} onChange={(bodyFont) => api.setBrand({ ...brand, bodyFont })} />
+          {/* Phones: the two pickers side by side. */}
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-1 lg:gap-1">
+            <FontRow label="Headings" value={brand.headingFont ?? "Cambria"} onChange={(headingFont) => api.setBrand({ ...brand, headingFont })} />
+            <FontRow label="Body" value={brand.bodyFont ?? "Helvetica"} onChange={(bodyFont) => api.setBrand({ ...brand, bodyFont })} />
+          </div>
           {/* With logos, the switch above (in the corner-logo box) sets the pages for both. */}
           {brand.logos.length === 0 && <ScopeSwitch api={api} scope={scope} onScope={setScope} />}
           <button
@@ -315,7 +319,7 @@ function Heading({ children }: { children: string }) {
 function FontRow({ label, value, onChange }: { label: string; value: string; onChange: (font: string) => void }) {
   return (
     <label className="flex items-center gap-1.5">
-      <span className="w-[48px] shrink-0 text-black/60">{label}</span>
+      <span className="shrink-0 text-black/60 lg:w-[48px]">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}

@@ -1,9 +1,11 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Download, Pencil, X, ZoomIn, ZoomOut } from "lucide-react";
 import { downloadImage } from "@/lib/image";
 import { useEscapeKey } from "@/lib/useEscapeKey";
 import { useImageZoom } from "@/lib/useImageZoom";
+import { cn } from "@/lib/utils";
 
 /** Full-screen "just look at it" preview. Closes on backdrop click or Escape. */
 export function Lightbox({
@@ -11,9 +13,12 @@ export function Lightbox({
   onClose,
   downloadName,
   onAnnotate,
+  info,
 }: {
   src: string | null;
   onClose: () => void;
+  /** Details about the picture, in a header bar above it alongside the actions. */
+  info?: ReactNode;
   /** Filename offered when downloading `src`. Omit to hide the download button. */
   downloadName?: string;
   /** Omit to hide the annotate button — e.g. a plain expand with nothing to mark up. */
@@ -28,6 +33,8 @@ export function Lightbox({
 
   if (!src) return null;
 
+  const actions = <LightboxActions src={src} downloadName={downloadName} onAnnotate={onAnnotate} onClose={onClose} />;
+
   return (
     <div
       ref={frameRef}
@@ -37,15 +44,29 @@ export function Lightbox({
       onDoubleClick={zoom.reset}
       {...zoom.panHandlers}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- transform-scaled, so next/image's fill sizing doesn't apply */}
-      <img
-        src={src}
-        alt="Preview"
-        draggable={false}
-        className="block max-h-[86vh] max-w-[86vw] select-none"
-        style={zoom.imageStyle}
-        onClick={(event) => event.stopPropagation()}
-      />
+      {/* With details, a header bar sits above the picture, the way the
+          History viewer lays out its own: what it is on the left, the
+          actions on the right. */}
+      <div className="flex max-w-[86vw] flex-col items-center">
+        {info && (
+          <div
+            className="relative z-10 mb-2 flex w-full flex-wrap items-center justify-between gap-2 md:mb-3 md:gap-4"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="min-w-0">{info}</div>
+            {actions}
+          </div>
+        )}
+        {/* eslint-disable-next-line @next/next/no-img-element -- transform-scaled, so next/image's fill sizing doesn't apply */}
+        <img
+          src={src}
+          alt="Preview"
+          draggable={false}
+          className={cn("block max-w-[86vw] select-none", info ? "max-h-[78vh]" : "max-h-[86vh]")}
+          style={zoom.imageStyle}
+          onClick={(event) => event.stopPropagation()}
+        />
+      </div>
 
       <div
         className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-white/15 bg-black/60 px-1.5 py-1 backdrop-blur-sm"
@@ -79,36 +100,56 @@ export function Lightbox({
         </button>
       </div>
 
-      <div className="absolute right-4 top-4 flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
-        {onAnnotate && (
-          <button
-            type="button"
-            onClick={onAnnotate}
-            title="Annotate — draw, add shapes or text to point out changes"
-            className="flex h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-black/50 px-3 text-xs font-medium text-white/90 transition-colors hover:bg-black/70 hover:text-white"
-          >
-            <Pencil size={14} /> Annotate
-          </button>
-        )}
-        {downloadName && (
-          <button
-            type="button"
-            onClick={() => downloadImage(src, downloadName)}
-            title="Download"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-black/50 text-white/90 transition-colors hover:bg-black/70 hover:text-white"
-          >
-            <Download size={16} />
-          </button>
-        )}
+      {!info && (
+        <div className="absolute right-4 top-4" onClick={(event) => event.stopPropagation()}>
+          {actions}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LightboxActions({
+  src,
+  downloadName,
+  onAnnotate,
+  onClose,
+}: {
+  src: string;
+  downloadName?: string;
+  onAnnotate?: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {onAnnotate && (
         <button
           type="button"
-          onClick={onClose}
-          title="Close"
+          onClick={onAnnotate}
+          title="Annotate — draw, add shapes or text to point out changes"
+          className="flex h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-black/50 px-3 text-xs font-medium text-white/90 transition-colors hover:bg-black/70 hover:text-white"
+        >
+          <Pencil size={14} /> Annotate
+        </button>
+      )}
+      {downloadName && (
+        <button
+          type="button"
+          onClick={() => downloadImage(src, downloadName)}
+          title="Download"
           className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-black/50 text-white/90 transition-colors hover:bg-black/70 hover:text-white"
         >
-          <X size={16} />
+          <Download size={16} />
         </button>
-      </div>
+      )}
+      <button
+        type="button"
+        onClick={onClose}
+        title="Close"
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-black/50 text-white/90 transition-colors hover:bg-black/70 hover:text-white"
+      >
+        <X size={16} />
+      </button>
     </div>
   );
 }

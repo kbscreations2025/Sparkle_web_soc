@@ -12,8 +12,9 @@ const NAV_LABEL_BY_HREF: Record<string, string> = Object.fromEntries(
 
 /** One level below a tool's own href — pages `useNavItems` doesn't know about. */
 const SUB_LABELS: Record<string, string> = {
-  "/cleaning/default": "Default",
-  "/cleaning/new": "High-Res Image Generation",
+  "/cleaning/default": "Cleaning 2 (up to 4K)",
+  "/cleaning/new": "Cleaning 1 (up to 1K)",
+  "/cleaning/testing": "Cleaning Testing",
   "/cleaning/shank": "Shank Retouch",
   "/cleaning/views": "Views Generator",
   "/cleaning/replace": "Jewellery Swap",
@@ -22,7 +23,7 @@ const SUB_LABELS: Record<string, string> = {
   "/marketing-kit/affinity": "Affinity",
   "/marketing-kit/campaign": "Campaign Kit",
   "/marketing-kit/collection-story": "Collection Story",
-  "/marketing-kit/festive": "Festive Poster",
+  "/marketing-kit/festive": "Poster",
 };
 
 /** Dashboard → tool → sub-page, derived from the current route. */

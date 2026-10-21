@@ -1455,13 +1455,22 @@ function ChecklistFilter({
   stacked?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // A long list — 40-odd people — is found by typing, not by scrolling.
+  const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismissable(rootRef, open, close);
+  // Each opening starts from the whole list.
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
 
   function toggle(id: string) {
     onChange(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
   }
+
+  const needle = query.trim().toLowerCase();
+  const shown = needle ? options.filter((option) => option.name.toLowerCase().includes(needle)) : options;
 
   // One name is worth showing; more than one is not worth the width.
   const label =
@@ -1509,13 +1518,25 @@ function ChecklistFilter({
         <div
           role="listbox"
           className={cn(
-            "absolute top-full z-30 mt-1 max-h-72 w-56 overflow-y-auto rounded-lg border border-white/10 bg-surface-raised py-1 shadow-lg",
+            "thin-scrollbar absolute top-full z-30 mt-1 max-h-72 w-56 overflow-y-auto rounded-lg border border-white/10 bg-surface-raised py-1 shadow-lg",
             // The bar's icons sit at its right end, where a left-anchored
             // panel runs off the screen. Inside the popover there is nothing
             // to the right to run into.
             stacked ? "left-0" : "right-0"
           )}
         >
+          {/* Pinned above the list, so it stays put while the names scroll. */}
+          <div className="sticky top-0 z-10 -mt-1 flex items-center gap-2 border-b border-white/5 bg-surface-raised px-2.5 py-1.5">
+            <Search size={12} className="shrink-0 text-faint" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={`Search ${plural}…`}
+              aria-label={`Search ${plural}`}
+              className="min-w-0 flex-1 bg-transparent text-[11px] text-cream outline-none placeholder:text-faint"
+            />
+          </div>
           {selected.length > 0 && (
             <button
               onClick={() => onChange([])}
@@ -1524,7 +1545,8 @@ function ChecklistFilter({
               Clear selection
             </button>
           )}
-          {options.map((option) => (
+          {shown.length === 0 && <p className="px-2.5 py-2 text-[11px] text-faint">No matches.</p>}
+          {shown.map((option) => (
             <button
               key={option.id}
               type="button"
