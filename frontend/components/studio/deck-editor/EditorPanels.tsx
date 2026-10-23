@@ -3,8 +3,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
-  ArrowDown,
-  ArrowUp,
   Copy,
   Files,
   Group,
@@ -377,12 +375,6 @@ function PagesPanel({ api, pieces, open }: { api: EditorApi; pieces: AffinityPie
               </button>
             </div>
             <div className="absolute right-1 top-1 hidden gap-0.5 opacity-0 transition-opacity group-hover/page:opacity-100 lg:flex">
-              <MiniButton title="Move up" onClick={() => api.moveSlide(index, index - 1)} disabled={index === 0}>
-                <ArrowUp size={11} />
-              </MiniButton>
-              <MiniButton title="Move down" onClick={() => api.moveSlide(index, index + 1)} disabled={index === api.design.slides.length - 1}>
-                <ArrowDown size={11} />
-              </MiniButton>
               <MiniButton title="Duplicate page" onClick={() => api.duplicateSlide(index)}>
                 <Copy size={11} />
               </MiniButton>

@@ -2101,8 +2101,8 @@ export type LibraryItem = {
  */
 export function fetchLibrary(params: {
   section: LibrarySection;
-  /** One tool's folder. Omitted is every tool. */
-  tool?: string | null;
+  /** These tools' folders. Empty or omitted is every tool. */
+  tools?: string[];
   scope?: "own" | "team";
   /** Just these people inside the team scope — user ids, "me" for the caller. Empty is everyone in reach. */
   members?: string[];
@@ -2110,7 +2110,7 @@ export function fetchLibrary(params: {
   limit?: number;
 }) {
   const query = new URLSearchParams({ section: params.section });
-  if (params.tool) query.set("tool", params.tool);
+  if (params.tools?.length) query.set("tool", params.tools.join(","));
   if (params.scope === "team") query.set("scope", "team");
   if (params.scope === "team" && params.members?.length) query.set("members", params.members.join(","));
   if (params.before) query.set("before", params.before);

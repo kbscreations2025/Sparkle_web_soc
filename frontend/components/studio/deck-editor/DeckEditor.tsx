@@ -173,9 +173,13 @@ export function DeckEditor({
 
   /* ── Moving ──────────────────────────────────────────────────────────── */
 
-  function startMove(event: ReactPointerEvent, ids: string[]) {
+  /** `onClick` runs instead when the pointer comes up without having dragged. */
+  function startMove(event: ReactPointerEvent, ids: string[], onClick?: () => void) {
     const movable = slide.elements.filter((element) => ids.includes(element.id) && !element.locked);
-    if (movable.length === 0) return;
+    if (movable.length === 0) {
+      onClick?.();
+      return;
+    }
     const snapshot = api.designRef.current;
     const origin = { x: event.clientX, y: event.clientY };
     const starts = new Map(movable.map((element) => [element.id, { x: element.x, y: element.y }]));
@@ -223,6 +227,7 @@ export function DeckEditor({
       window.removeEventListener("pointerup", up);
       setGuides([]);
       if (moved) api.commitFrom(snapshot);
+      else onClick?.();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -244,7 +249,15 @@ export function DeckEditor({
 
     const ids = selected.includes(element.id) ? selected : api.unitOf(element);
     setSelected(ids);
-    startMove(event, ids);
+    /*
+     * As in Canva: the first click on a grouped element selects its whole
+     * group, and a second click (without dragging) on a member of the
+     * selected group picks out just that member. Dragging still moves the
+     * whole group.
+     */
+    const unit = api.unitOf(element);
+    const groupSelected = unit.length > 1 && selected.includes(element.id) && unit.every((id) => selected.includes(id));
+    startMove(event, ids, groupSelected ? () => setSelected([element.id]) : undefined);
   }
 
   function onElementDoubleClick(element: DesignElement) {

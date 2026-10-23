@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, BookOpen, CalendarHeart, Gem, Newspaper } from "lucide-react";
+import { ArrowRight, BookOpen, CalendarHeart, FileSpreadsheet, Gem, Newspaper } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
@@ -35,12 +35,25 @@ const SURFACES = [
     Icon: BookOpen,
   },
   {
+    id: "line-sheet",
+    label: "Line Sheet",
+    tagline: "Excel price list with photos · a ready PowerPoint, four products a slide",
+    href: "/marketing-kit/line-sheet",
+    Icon: FileSpreadsheet,
+  },
+  {
     id: "festive",
     label: "Poster",
     tagline: "Up to six pieces in one poster · a collection poster, or styled for Mother's Day, Christmas, Diwali and more",
     href: "/marketing-kit/festive",
     Icon: CalendarHeart,
   },
+];
+
+/** The page's sections, in order: the presentation-style stories first, then the image kits. */
+const GROUPS = [
+  { title: "PPT", ids: ["brand-story", "collection-story", "line-sheet"] },
+  { title: "Images", ids: ["campaign", "festive"] },
 ];
 
 export default function MarketingKitPage() {
@@ -53,8 +66,11 @@ export default function MarketingKitPage() {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-4xl space-y-8">
+        {GROUPS.map((group) => (
+        <section key={group.title} className="space-y-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">{group.title}</h2>
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {SURFACES.map(({ id, label, tagline, href, Icon }) => (
+          {SURFACES.filter((surface) => group.ids.includes(surface.id)).map(({ id, label, tagline, href, Icon }) => (
             <li key={id}>
               <Link
                 href={href}
@@ -73,6 +89,8 @@ export default function MarketingKitPage() {
             </li>
           ))}
         </ul>
+        </section>
+        ))}
       </div>
     </div>
   );

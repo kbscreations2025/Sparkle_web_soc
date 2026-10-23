@@ -6,6 +6,7 @@ const {
   SHANK_CLEANING_PROMPT,
   STUDIO_CLEANING_PROMPT,
   GOLD_SWATCH_NOTE,
+  COLOR_NOTE,
   buildReferenceNote,
 } = require("../prompts");
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
@@ -97,7 +98,8 @@ function buildPrompt({ isRefinement, instruction, customPrompt, variant, extraNo
     return (
       `Modify this jewelry photograph (the first image) as follows: ${instruction}. ` +
       "Preserve the pure white studio background, professional lighting, and all other " +
-      "photographic qualities. Only apply the specifically requested changes." +
+      "photographic qualities. Only apply the specifically requested changes. " +
+      COLOR_NOTE +
       buildReferenceNote(referenceCount)
     );
   }

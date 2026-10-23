@@ -26,7 +26,7 @@ const SECTIONS: LibrarySection[] = ["results", "uploads"];
  * `people` is whose pictures — teammates' user ids, "me" for the viewer.
  * Empty is the viewer's own, as is just "me"; anyone else makes it a team query.
  */
-type View = { section: LibrarySection; tool: string | null; people: string[] };
+type View = { section: LibrarySection; tools: string[]; people: string[] };
 type Member = { id: string; name: string };
 
 function scopeOf(view: View) {
@@ -40,7 +40,7 @@ function scopeOf(view: View) {
  * The case this is for is a chain (clean a photo, then use the result in
  * Lifestyle), which is the same folder twice in a row.
  */
-let lastView: View = { section: "results", tool: null, people: [] };
+let lastView: View = { section: "results", tools: [], people: [] };
 
 /** The sidebar's draggable width, in px — small by default, kept across openings like `lastView`. */
 const SIDEBAR_MIN = 100;
@@ -212,7 +212,8 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
         // A remembered folder that has nothing in it here — the team view
         // was switched, or its pictures were deleted — opens as "All" instead.
         const current = viewRef.current;
-        if (current.tool && !next[current.section].includes(current.tool)) changeView({ tool: null });
+        const kept = current.tools.filter((tool) => next[current.section].includes(tool));
+        if (kept.length !== current.tools.length) changeView({ tools: kept });
       })
       // Only the folder list is lost — the grid below still loads on its own.
       .catch(() => {});
@@ -226,7 +227,7 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
     let live = true;
     fetchLibrary({
       section: view.section,
-      tool: view.tool,
+      tools: view.tools,
       ...scopeOf(view),
       limit: PAGE_SIZE,
     })
@@ -261,7 +262,7 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
     setLoadingMore(true);
     fetchLibrary({
       section: asked.section,
-      tool: asked.tool,
+      tools: asked.tools,
       ...scopeOf(asked),
       before: page.cursor,
       limit: PAGE_SIZE,
@@ -429,40 +430,51 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
         {/* Phones and narrow windows: the upload box tops the sheet, always in
             view, with the folders as tabs and chips under it. From `md` all of
             this is the sidebar instead. */}
-        <div className="shrink-0 space-y-2 px-4 sm:px-5 md:hidden">
-          <UploadBox ref={uploadButton} onClick={() => input.current?.click()} />
-          <div className="flex items-center gap-2 pt-1">
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-1 rounded-lg border border-white/[0.08] bg-white/[0.03] p-0.5">
+        <div className="shrink-0 space-y-2 border-b border-white/[0.06] px-4 pb-2 pt-3 sm:px-5 md:hidden">
+          {/* One slim row on a phone — the tall box would cost a row of photos. */}
+          <button
+            ref={uploadButton}
+            type="button"
+            onClick={() => input.current?.click()}
+            className="flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-gold/40 bg-gold/[0.06] px-3 text-xs font-semibold text-gold transition-colors active:bg-gold/[0.14]"
+          >
+            <Upload size={15} />
+            Upload from device
+          </button>
+          {/* One compact row: the half as two icons, then which tools and
+              whose — each a checklist, so nothing scrolls sideways. */}
+          <div className="flex items-center gap-1.5">
+            <div className="grid shrink-0 grid-cols-2 gap-0.5 rounded-lg border border-white/[0.08] bg-white/[0.03] p-0.5">
               {SECTIONS.map((section) => (
                 <button
                   key={section}
                   type="button"
-                  onClick={() => changeView({ section, tool: null })}
+                  onClick={() => changeView({ section, tools: [] })}
                   aria-pressed={view.section === section}
+                  aria-label={section === "uploads" ? "Uploaded" : "Generated"}
+                  title={section === "uploads" ? "Uploaded" : "Generated"}
                   className={cn(
-                    "min-h-8 truncate rounded-md px-1 text-xs font-medium transition-colors",
+                    "flex h-7 w-8 items-center justify-center rounded-md transition-colors",
                     view.section === section ? "bg-gold/15 text-gold" : "text-muted hover:text-cream"
                   )}
                 >
-                  {owner} {section}
+                  {section === "uploads" ? <Upload size={13} /> : <Sparkles size={13} />}
                 </button>
               ))}
             </div>
+            <div className="min-w-0 flex-1">
+              <ToolSelect
+                section={view.section}
+                tools={folders?.[view.section] ?? []}
+                selected={view.tools}
+                onChange={(tools) => changeView({ tools })}
+              />
+            </div>
             {canReadTeam && (
-              <div className="w-36 shrink-0">
+              <div className="w-28 shrink-0">
                 <PersonSelect view={view} members={members} selfName={user?.name} onChange={changeView} />
               </div>
             )}
-          </div>
-          <div className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 sm:-mx-5 sm:px-5">
-            <FolderChip active={!view.tool} onClick={() => changeView({ tool: null })}>
-              All {view.section}
-            </FolderChip>
-            {(folders?.[view.section] ?? []).map((tool) => (
-              <FolderChip key={tool} active={view.tool === tool} onClick={() => changeView({ tool })} tool={tool}>
-                {TOOL_LABELS[tool] ?? tool}
-              </FolderChip>
-            ))}
           </div>
         </div>
 
@@ -481,7 +493,7 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
                   aria-selected={view.section === section}
                   aria-label={section === "uploads" ? "Uploaded" : "Generated"}
                   title={section === "uploads" ? "Uploaded" : "Generated"}
-                  onClick={() => changeView({ section, tool: null })}
+                  onClick={() => changeView({ section, tools: [] })}
                   className={cn(
                     "flex min-h-7 items-center justify-center rounded-md text-[11px] font-medium transition-colors",
                     view.section === section ? "bg-gold/15 text-gold" : "text-muted hover:text-cream"
@@ -497,11 +509,11 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
                 </button>
               ))}
             </div>
-            <FolderButton active={!view.tool} onClick={() => changeView({ tool: null })}>
+            <FolderButton active={view.tools.length === 0} onClick={() => changeView({ tools: [] })}>
               All {view.section}
             </FolderButton>
             {folders?.[view.section].map((tool) => (
-              <FolderButton key={tool} tool={tool} active={view.tool === tool} onClick={() => changeView({ tool })}>
+              <FolderButton key={tool} tool={tool} active={view.tools.length === 1 && view.tools[0] === tool} onClick={() => changeView({ tools: [tool] })}>
                 {TOOL_LABELS[tool] ?? tool}
               </FolderButton>
             ))}
@@ -787,24 +799,133 @@ function TileSizeSlider({ columns, onChange }: { columns: number; onChange: (col
   const size = COLUMNS_MAX + COLUMNS_MIN - columns;
   const step = (delta: number) => onChange(Math.min(COLUMNS_MAX, Math.max(COLUMNS_MIN, columns - delta)));
   return (
-    <div className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.03] px-2 text-muted">
+    <div className="flex h-7 items-center gap-1 rounded-md border border-white/[0.1] bg-white/[0.03] px-1.5 text-muted">
       <button type="button" onClick={() => step(-1)} aria-label="Smaller photos" title="Smaller photos" className="hover:text-cream">
-        <ZoomOut size={13} />
+        <ZoomOut size={11} />
       </button>
-      <input
-        type="range"
-        min={COLUMNS_MIN}
-        max={COLUMNS_MAX}
-        step={1}
-        value={size}
-        onChange={(event) => onChange(COLUMNS_MAX + COLUMNS_MIN - Number(event.target.value))}
-        aria-label="Photo size"
-        className="w-20 cursor-pointer"
-        style={{ accentColor: "var(--color-gold)" }}
-      />
+      {/* Drawn by hand — a thin line with a dot per stop and a round knob —
+          over a transparent native range that does the dragging and keys. */}
+      <div className="relative mx-1 flex h-4 w-16 items-center">
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-faint/50" />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-1/2 h-px -translate-y-1/2 bg-gold"
+          style={{ width: `${((size - COLUMNS_MIN) / (COLUMNS_MAX - COLUMNS_MIN)) * 100}%` }}
+        />
+        {Array.from({ length: COLUMNS_MAX - COLUMNS_MIN + 1 }, (_, index) => (
+          <span
+            key={index}
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full",
+              index + COLUMNS_MIN <= size ? "bg-gold" : "bg-faint/70"
+            )}
+            style={{ left: `${(index / (COLUMNS_MAX - COLUMNS_MIN)) * 100}%` }}
+          />
+        ))}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-gold bg-surface-raised shadow-sm"
+          style={{ left: `${((size - COLUMNS_MIN) / (COLUMNS_MAX - COLUMNS_MIN)) * 100}%` }}
+        />
+        <input
+          type="range"
+          min={COLUMNS_MIN}
+          max={COLUMNS_MAX}
+          step={1}
+          value={size}
+          onChange={(event) => onChange(COLUMNS_MAX + COLUMNS_MIN - Number(event.target.value))}
+          aria-label="Photo size"
+          title={`${columns} per row`}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        />
+      </div>
       <button type="button" onClick={() => step(1)} aria-label="Bigger photos" title="Bigger photos" className="hover:text-cream">
-        <ZoomIn size={13} />
+        <ZoomIn size={11} />
       </button>
+    </div>
+  );
+}
+
+/** Which tools' pictures, as a checklist — the phone's form of the sidebar's folders. Nothing ticked is all of them. */
+function ToolSelect({
+  section,
+  tools,
+  selected,
+  onChange,
+}: {
+  section: LibrarySection;
+  tools: string[];
+  selected: string[];
+  onChange: (tools: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  const toggle = (tool: string) =>
+    onChange(selected.includes(tool) ? selected.filter((t) => t !== tool) : [...selected, tool]);
+  const summary =
+    selected.length === 0
+      ? `All ${section}`
+      : selected.length === 1
+        ? TOOL_LABELS[selected[0]] ?? selected[0]
+        : `${selected.length} tools`;
+
+  return (
+    <div className="relative" ref={boxRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label="Which tools"
+        className="flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.03] px-2 text-xs text-muted transition-colors hover:border-white/20"
+      >
+        {selected.length === 1 && <ToolDot tool={selected[0]} />}
+        <span className="min-w-0 flex-1 truncate text-left font-medium text-cream">{summary}</span>
+        <ChevronDown size={12} className="shrink-0" />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-multiselectable="true"
+          className="absolute left-0 top-full z-50 mt-1.5 w-52 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg"
+        >
+          <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
+            <span className="flex-1 text-[10px] text-faint">{selected.length ? `${selected.length} selected` : "All tools"}</span>
+            {selected.length > 0 && (
+              <button type="button" onClick={() => onChange([])} className="shrink-0 text-[11px] font-medium text-gold hover:text-cream">
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="thin-scrollbar max-h-64 overflow-y-auto py-1">
+            {tools.length === 0 && <p className="px-3 py-1.5 text-[11px] text-faint">Nothing yet</p>}
+            {tools.map((tool) => (
+              <label key={tool} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(tool)}
+                  onChange={() => toggle(tool)}
+                  style={{ accentColor: "var(--color-gold)" }}
+                />
+                <ToolDot tool={tool} />
+                <span className="truncate">{TOOL_LABELS[tool] ?? tool}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -897,7 +1018,7 @@ function PersonSelect({
   }, [open]);
 
   const selected = view.people;
-  const set = (people: string[]) => onChange({ people, tool: null });
+  const set = (people: string[]) => onChange({ people, tools: [] });
   const toggle = (id: string) => set(selected.includes(id) ? selected.filter((v) => v !== id) : [...selected, id]);
 
   const others = selected.filter((id) => id !== "me");

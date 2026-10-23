@@ -362,7 +362,7 @@ export function AffinityWorkspace({ kind = "affinity" }: { kind?: "affinity" | "
   );
 }
 
-function HeaderAction({
+export function HeaderAction({
   onClick,
   icon: Icon,
   label,

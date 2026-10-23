@@ -20,6 +20,19 @@ const ANATOMY_NOTE =
   "proportioned.";
 
 /**
+ * Each edit runs on the previous result, so any small colour drift compounds
+ * turn after turn — in practice a warm, reddish/pink cast creeping into the
+ * metal, the white background and skin. Spelled out on every edit; a request
+ * that does change a colour ("in rose gold") still wins for that one thing.
+ */
+const COLOR_NOTE =
+  "COLOUR: keep every colour exactly as it is in the first image — the same white balance, colour " +
+  "temperature, exposure and saturation; the metal's exact tone (yellow gold stays the same yellow, " +
+  "white metal stays neutral); the stones' colours; a white background pure neutral white; skin tones " +
+  "unchanged. Do NOT add any warm, red, pink, magenta or orange tint or colour cast anywhere. Only " +
+  "change a colour if the instruction explicitly asks for it.";
+
+/**
  * Builds one turn's prompt. `instruction` is whatever the user typed (already
  * carrying any annotation-guidance prefix the client adds); `referenceCount`
  * is how many reference images ride along after the base image, purely as
@@ -31,8 +44,8 @@ function buildChatEditPrompt(instruction, referenceCount = 0) {
   return (
     `Edit this photograph (the first image) exactly as instructed: ${instruction}.${referenceNote} ` +
     "Keep the same photorealistic quality, composition, and everything not specifically mentioned " +
-    `unchanged. Only apply the requested change. ${SCALE_NOTE} ${ANATOMY_NOTE}`
+    `unchanged. Only apply the requested change. ${COLOR_NOTE} ${SCALE_NOTE} ${ANATOMY_NOTE}`
   );
 }
 
-module.exports = { SCALE_NOTE, ANATOMY_NOTE, buildChatEditPrompt };
+module.exports = { SCALE_NOTE, ANATOMY_NOTE, COLOR_NOTE, buildChatEditPrompt };

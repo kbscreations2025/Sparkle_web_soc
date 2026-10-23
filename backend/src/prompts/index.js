@@ -8,7 +8,7 @@ const { IMAGE_CLEANING_PROMPT } = require("./imageCleaning");
 const { NEW_CLEANING_PROMPT } = require("./newCleaning");
 const { SHANK_CLEANING_PROMPT } = require("./shankCleaning");
 const { STUDIO_CLEANING_PROMPT, GOLD_SWATCH_NOTE } = require("./studioCleaning");
-const { SCALE_NOTE, ANATOMY_NOTE, buildChatEditPrompt } = require("./chatToEdit");
+const { SCALE_NOTE, ANATOMY_NOTE, COLOR_NOTE, buildChatEditPrompt } = require("./chatToEdit");
 const { buildReferenceNote } = require("./shared");
 const { buildTextToImagePrompt, buildTextToImageRefinePrompt } = require("./textToImage");
 
@@ -20,6 +20,7 @@ module.exports = {
   GOLD_SWATCH_NOTE,
   SCALE_NOTE,
   ANATOMY_NOTE,
+  COLOR_NOTE,
   buildChatEditPrompt,
   buildReferenceNote,
   buildTextToImagePrompt,

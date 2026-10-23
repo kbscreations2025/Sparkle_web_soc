@@ -176,8 +176,10 @@ router.get(
   handle(async (req, res) => {
     const section = req.query.section || "uploads";
     if (!SECTIONS[section]) return bad(res, "unknown section");
-    const tool = req.query.tool || null;
-    if (tool && !GENERATION_TOOLS.includes(tool)) return bad(res, "unknown tool");
+    // One tool or several, comma-separated — the phone's checklist can tick more than one.
+    const tools = String(req.query.tool || "").split(",").filter(Boolean);
+    if (tools.some((t) => !GENERATION_TOOLS.includes(t))) return bad(res, "unknown tool");
+    const tool = tools.length === 0 ? null : tools.length === 1 ? tools[0] : { $in: tools };
     if (req.query.before && !mongoose.isValidObjectId(req.query.before)) return bad(res, "invalid cursor");
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
 
