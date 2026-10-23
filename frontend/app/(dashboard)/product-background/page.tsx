@@ -8,6 +8,7 @@ import { GenerationResults } from "@/components/studio/GenerationResults";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import {
   CLEANING_MODELS,
@@ -22,6 +23,7 @@ import {
   type ProductShadow,
 } from "@/lib/api";
 import { compressGraphic, compressImage, makeThumbnail } from "@/lib/image";
+import { useLibraryPicker } from "@/lib/library";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -117,6 +119,10 @@ export default function ProductBackgroundPage() {
   const [showChecker, setShowChecker] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const backdropInput = useRef<HTMLInputElement>(null);
+  // Earlier uploads and results as well as the disk — a cleaned photo goes
+  // straight on a new background. One per box, since each fills its own slot.
+  const library = useLibraryPicker(fileInput);
+  const backdropLibrary = useLibraryPicker(backdropInput);
 
   const workspace = useGenerationWorkspace({
     tool: "product_background",
@@ -265,6 +271,13 @@ export default function ProductBackgroundPage() {
               event.target.value = "";
             }}
           />
+          <LibraryPicker open={library.open} onClose={library.close} onFiles={(files) => accept(files[0])} room={1} />
+          <LibraryPicker
+            open={backdropLibrary.open}
+            onClose={backdropLibrary.close}
+            onFiles={(files) => acceptBackdrop(files[0])}
+            room={1}
+          />
 
           {/* The photo */}
           {photo ? (
@@ -292,7 +305,7 @@ export default function ProductBackgroundPage() {
           ) : (
             <button
               type="button"
-              onClick={() => fileInput.current?.click()}
+              onClick={library.show}
               onDragOver={(event) => {
                 event.preventDefault();
                 setDragging(true);
@@ -309,7 +322,11 @@ export default function ProductBackgroundPage() {
               )}
             >
               <Upload size={20} className="text-faint" />
-              <p className="text-sm font-medium text-cream">Drop a product photo here, or click to choose</p>
+              <p className="text-sm font-medium text-cream">
+                {library.available
+                  ? "Drop a product photo here, or click to upload or pick from your library"
+                  : "Drop a product photo here, or click to choose"}
+              </p>
               <p className="text-[11px] text-faint">Works best on a plain backdrop — busy photos are cleaned up first.</p>
             </button>
           )}
@@ -451,7 +468,7 @@ export default function ProductBackgroundPage() {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => backdropInput.current?.click()}
+                    onClick={backdropLibrary.show}
                     className="flex w-full items-center gap-2 rounded-xl border border-dashed border-white/[0.12] px-3 py-2.5 text-[12px] text-faint transition-colors hover:border-white/25 hover:text-cream"
                   >
                     <ImagePlus size={15} /> Add a photo of a setting — a shelf, a tray, a shop window…

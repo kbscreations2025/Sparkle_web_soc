@@ -626,3 +626,6 @@ async function deleteGeneration(req, res) {
 }
 
 module.exports = router;
+// The upload boxes' library (routes/library.js) reaches exactly as far as
+// History does — one filter, so the two can never disagree about who sees what.
+module.exports.buildScopeFilter = buildScopeFilter;

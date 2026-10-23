@@ -26,6 +26,7 @@ import {
   type CleaningDuplicate,
 } from "@/lib/api";
 import { fingerprintDataUrl, fingerprintFile } from "@/lib/fingerprint";
+import { libraryOriginOf } from "@/lib/library";
 import { workspacePathFor } from "@/lib/nav";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
@@ -79,8 +80,9 @@ type Job = {
  * A photo waiting in the upload box, with its fingerprints: the original
  * file's and the resized upload's. Either can be null where the browser
  * couldn't hash (an insecure origin) — that photo just isn't checked.
+ * `fromLibrary` marks one picked from the library rather than the disk.
  */
-type CleaningUpload = UploadItem & { sourceChecksum: string | null; checksum: string | null };
+type CleaningUpload = UploadItem & { sourceChecksum: string | null; checksum: string | null; fromLibrary?: boolean };
 
 /** The first turn of a cleaning thread: the instruction, with the photo it was about. */
 function openingTurn(id: string, original: string, content: string): ChatMsg {
@@ -350,8 +352,19 @@ export function CleaningWorkspace<TModel extends string>({
       added = await Promise.all(
         files.map(async (file) => {
           const dataUrl = await compressImage(file);
-          const [sourceChecksum, checksum] = await Promise.all([fingerprintFile(file), fingerprintDataUrl(dataUrl)]);
-          return { id: crypto.randomUUID(), name: file.name, dataUrl, sourceChecksum, checksum };
+          /*
+           * A pick from the library is the stored copy, not the file that was
+           * first uploaded — so it carries the photo's own fingerprint (the
+           * original file's, where there is one). Stored with this upload, that
+           * keeps it the same photo to every later check and to the library;
+           * a hash of the stored bytes would record it as a new one.
+           */
+          const origin = libraryOriginOf(file);
+          const [sourceChecksum, checksum] = await Promise.all([
+            origin ? origin.fingerprint : fingerprintFile(file),
+            fingerprintDataUrl(dataUrl),
+          ]);
+          return { id: crypto.randomUUID(), name: file.name, dataUrl, sourceChecksum, checksum, fromLibrary: Boolean(origin) };
         })
       );
     } catch (err) {
@@ -603,6 +616,12 @@ export function CleaningWorkspace<TModel extends string>({
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
   const showResults = jobs.length > 0;
   const generatingSelected = selected?.status === "running" || selected?.status === "queued";
+  /*
+   * Picked back out of the library rather than uploaded. Usually from its
+   * Image Cleaning folder, so "used before" is expected; the dialog then
+   * speaks of adding the photo, since nothing is being uploaded.
+   */
+  const duplicatesPicked = Boolean(duplicates?.added.every((item) => item.fromLibrary));
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
@@ -784,9 +803,9 @@ export function CleaningWorkspace<TModel extends string>({
             ? `${duplicates.flagged.length} of these photos were used before`
             : "This photo was used before"
         }
-        message={duplicates ? <DuplicateList flagged={duplicates.flagged} /> : null}
-        confirmLabel="Upload anyway"
-        cancelLabel={duplicates && duplicates.flagged.length > 1 ? "Skip these" : "Don't upload"}
+        message={duplicates ? <DuplicateList flagged={duplicates.flagged} picked={duplicatesPicked} /> : null}
+        confirmLabel={duplicatesPicked ? "Add anyway" : "Upload anyway"}
+        cancelLabel={duplicates && duplicates.flagged.length > 1 ? "Skip these" : duplicatesPicked ? "Don't add" : "Don't upload"}
         destructive={false}
         onConfirm={() => resolveDuplicates(true)}
         onCancel={() => resolveDuplicates(false)}
@@ -803,8 +822,11 @@ export function CleaningWorkspace<TModel extends string>({
  */
 function DuplicateList({
   flagged,
+  picked,
 }: {
   flagged: { item: CleaningUpload; inBatch: string | null; earlier: CleaningDuplicate | null }[];
+  /** Picked from the library, so "add" rather than "upload". */
+  picked: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -852,7 +874,9 @@ function DuplicateList({
           );
         })}
       </ul>
-      <p className="text-[11px] text-faint">Cleaning it again uses credits again. You can still upload it if you need to.</p>
+      <p className="text-[11px] text-faint">
+        Cleaning it again uses credits again. You can still {picked ? "add" : "upload"} it if you need to.
+      </p>
     </div>
   );
 }

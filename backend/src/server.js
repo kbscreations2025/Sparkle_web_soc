@@ -21,6 +21,7 @@ const replacementRoutes = require("./routes/replacement");
 const lexiconRoutes = require("./routes/lexicon");
 const trendRoutes = require("./routes/trends");
 const historyRoutes = require("./routes/history");
+const libraryRoutes = require("./routes/library");
 const jobRoutes = require("./routes/jobs");
 const auditLogRoutes = require("./routes/auditLog");
 const creditRoutes = require("./routes/credits");
@@ -71,6 +72,8 @@ app.use("/api/replacement", replacementRoutes);
 app.use("/api/lexicon", lexiconRoutes);
 app.use("/api/trends", trendRoutes);
 app.use("/api/history", historyRoutes);
+// Every upload box's "pick from your library" — earlier uploads and results.
+app.use("/api/library", libraryRoutes);
 app.use("/api/jobs", jobRoutes);
 app.use("/api/audit-log", auditLogRoutes);
 app.use("/api/credits", creditRoutes);

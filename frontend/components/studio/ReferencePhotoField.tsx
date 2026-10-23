@@ -4,7 +4,9 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import { ImagePlus, Pencil, Plus, X } from "lucide-react";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import { compressImage } from "@/lib/image";
+import { useLibraryPicker } from "@/lib/library";
 
 /** Reference photos per run — several views of a piece, or pieces to combine. */
 export const MAX_REFERENCE_PHOTOS = 4;
@@ -51,6 +53,8 @@ export function ReferencePhotoField({
   onChange: (photos: string[]) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  // Earlier uploads and results as well as the disk — see UploadZone.
+  const library = useLibraryPicker(input);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   const full = photos.length >= MAX_REFERENCE_PHOTOS;
 
@@ -72,6 +76,12 @@ export function ReferencePhotoField({
           Array.from(event.target.files ?? []).forEach((file) => onPick(file));
           event.target.value = "";
         }}
+      />
+      <LibraryPicker
+        open={library.open}
+        onClose={library.close}
+        onFiles={(files) => files.forEach((file) => onPick(file))}
+        room={MAX_REFERENCE_PHOTOS - photos.length}
       />
       {photos.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -103,7 +113,7 @@ export function ReferencePhotoField({
           {!full && (
             <button
               type="button"
-              onClick={() => input.current?.click()}
+              onClick={library.show}
               title="Add another reference photo"
               aria-label="Add another reference photo"
               className="flex h-16 w-16 items-center justify-center rounded-lg border border-dashed border-white/[0.14] text-faint transition-colors hover:border-gold/40 hover:text-gold"
@@ -115,7 +125,7 @@ export function ReferencePhotoField({
       ) : (
         <button
           type="button"
-          onClick={() => input.current?.click()}
+          onClick={library.show}
           className="flex items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-[11px] text-muted transition-colors hover:border-white/[0.14] hover:text-cream"
         >
           <ImagePlus size={13} /> Start from photos

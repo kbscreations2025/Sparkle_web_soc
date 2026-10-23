@@ -7,6 +7,7 @@ import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import { OptionChips } from "@/components/studio/OptionChips";
 import {
   replaceJewellery,
@@ -21,6 +22,7 @@ import {
   type ReplacementSize,
 } from "@/lib/api";
 import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
+import { useLibraryPicker } from "@/lib/library";
 import { useGenerationWorkspace, type RefineRequest } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -79,8 +81,9 @@ export default function ReplacementPage() {
   const [quality, setQuality] = useModelQuality(model);
   const [dropTarget, setDropTarget] = useState<Slot | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  /** Which box the file picker is filling. */
+  /** Which box the file picker — or the library — is filling. */
   const pickingFor = useRef<Slot>("photo");
+  const library = useLibraryPicker(fileInput);
 
   const kind = CATEGORIES.find((entry) => entry.id === category)!;
   const sizeValue = size === "described" ? null : size;
@@ -157,7 +160,7 @@ export default function ReplacementPage() {
 
   function pick(slot: Slot) {
     pickingFor.current = slot;
-    fileInput.current?.click();
+    library.show();
   }
 
   const busy = workspace.isGenerating;
@@ -243,6 +246,12 @@ export default function ReplacementPage() {
               void place(pickingFor.current, event.target.files?.[0]);
               event.target.value = "";
             }}
+          />
+          <LibraryPicker
+            open={library.open}
+            onClose={library.close}
+            onFiles={(files) => void place(pickingFor.current, files[0])}
+            room={1}
           />
 
           <section className="space-y-2">

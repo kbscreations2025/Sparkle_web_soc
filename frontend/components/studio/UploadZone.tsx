@@ -4,7 +4,9 @@ import { useRef, useState, type DragEvent } from "react";
 import Image from "next/image";
 import { ImagePlus, Maximize2, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLibraryPicker } from "@/lib/library";
 import { Lightbox } from "@/components/studio/Lightbox";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 
 export type UploadItem = {
   id: string;
@@ -49,6 +51,12 @@ export function UploadZone({
 }) {
   const full = max !== undefined && items.length >= max;
   const inputRef = useRef<HTMLInputElement>(null);
+  /*
+   * A click offers the library as well as the disk — earlier uploads and
+   * results, picked back as files — while a drop still uploads straight
+   * away. Someone without the grant gets the file dialog, as before.
+   */
+  const library = useLibraryPicker(inputRef);
   const [dragging, setDragging] = useState(false);
   // Every uploaded photo can be opened full-size to check what was picked.
   // A page passing `onPreview` keeps its own viewer; otherwise this one opens.
@@ -59,9 +67,9 @@ export function UploadZone({
     <Lightbox src={previewSrc} onClose={() => setPreviewSrc(null)} />
   );
 
-  function accept(fileList: FileList | null) {
-    if (!fileList) return;
-    const images = [...fileList].filter((file) =>
+  /** Files off the disk, dropped, or picked from the library — all the same from here on. */
+  function accept(files: File[]) {
+    const images = files.filter((file) =>
       file.type.startsWith("image/"),
     );
     const room = max === undefined ? images.length : Math.max(0, max - items.length);
@@ -71,9 +79,14 @@ export function UploadZone({
   function handleDrop(event: DragEvent) {
     event.preventDefault();
     setDragging(false);
-    if (!disabled) accept(event.dataTransfer.files);
+    if (!disabled) accept([...event.dataTransfer.files]);
   }
 
+  /*
+   * Only for someone without the library — the dialog has its own. Kept out
+   * of the drop target so its `click()` can't bubble back into the target's
+   * onClick and ask for the dialog again.
+   */
   const input = (
     <input
       ref={inputRef}
@@ -82,16 +95,29 @@ export function UploadZone({
       multiple={max !== 1}
       hidden
       onChange={(event) => {
-        accept(event.target.files);
+        accept([...(event.target.files ?? [])]);
         // Cleared so picking the same file twice still fires onChange.
         event.target.value = "";
       }}
     />
   );
+  const picker = (
+    <LibraryPicker
+      open={library.open}
+      onClose={library.close}
+      onFiles={accept}
+      room={max === undefined ? undefined : Math.max(0, max - items.length)}
+    />
+  );
 
+  // The input and the dialog come first in both layouts. Neither takes up any
+  // room, but a hidden last child would still count as `:last-child` and give
+  // the photos above it a stray margin from the page's `space-y`.
   if (compact) {
     return (
       <>
+        {input}
+        {picker}
         <ul className="flex flex-wrap gap-2">
           {items.map((item) => (
             <li key={item.id} className="group relative h-16 w-16 shrink-0">
@@ -128,8 +154,8 @@ export function UploadZone({
                 if (!disabled) setDragging(true);
               }}
               onDragLeave={() => setDragging(false)}
-              onClick={() => !disabled && inputRef.current?.click()}
-              title="Add a photo"
+              onClick={() => !disabled && library.show()}
+              title={library.available ? "Add a photo — upload one, or pick from your library" : "Add a photo"}
               className={cn(
                 "flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-dashed transition-colors",
                 dragging
@@ -139,7 +165,6 @@ export function UploadZone({
               )}
             >
               <Plus size={18} className="text-faint" />
-              {input}
             </div>
           </li>}
         </ul>
@@ -150,6 +175,8 @@ export function UploadZone({
 
   return (
     <div className="space-y-3">
+      {input}
+      {picker}
       {!full && <div
         onDrop={handleDrop}
         onDragOver={(event) => {
@@ -157,7 +184,7 @@ export function UploadZone({
           if (!disabled) setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
-        onClick={() => !disabled && inputRef.current?.click()}
+        onClick={() => !disabled && library.show()}
         className={cn(
           "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center transition-colors",
           dragging
@@ -168,13 +195,13 @@ export function UploadZone({
       >
         <ImagePlus size={22} className="text-faint" />
         <p className="text-[13px] text-cream">
-          Drop photos here, or click to choose
+          {library.available
+            ? "Drop photos here, or click to upload or pick from your library"
+            : "Drop photos here, or click to choose"}
         </p>
         <p className="text-[11px] text-faint">
           JPG or PNG. Large photos are resized to 2048px before upload.
         </p>
-
-        {input}
       </div>}
 
       {items.length > 0 && (

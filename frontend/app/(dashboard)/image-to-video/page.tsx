@@ -9,6 +9,7 @@ import { AspectChips } from "@/components/studio/AspectChips";
 import { OptionChips } from "@/components/studio/OptionChips";
 import { PromptCard } from "@/components/studio/PromptCard";
 import { InlineDropdown } from "@/components/studio/InlineDropdown";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import {
   imageToVideo,
@@ -29,6 +30,7 @@ import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 import { failureMessage, useSettledJob } from "@/lib/useSettledJob";
 import { useAuth } from "@/lib/auth-context";
+import { LIBRARY_PERMISSION } from "@/lib/library";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
@@ -110,6 +112,13 @@ export default function ImageToVideoPage() {
 
   /** Each named slot owns its own picker, so one file lands in one slot. */
   const slotInputs = useRef<Partial<Record<NamedViewId, HTMLInputElement | null>>>({});
+  /**
+   * The angle the library is filling while it is open — one dialog for the
+   * page, aimed at whichever slot was clicked. Without the grant a slot opens
+   * its own file dialog, as before.
+   */
+  const [librarySlot, setLibrarySlot] = useState<NamedViewId | null>(null);
+  const canBrowseLibrary = can(user, LIBRARY_PERMISSION);
   /**
    * The run this page is following. State rather than a ref because the
    * progress bar renders from it — a ref write would not re-render, so the
@@ -338,7 +347,7 @@ export default function ImageToVideoPage() {
                     >
                       <button
                         type="button"
-                        onClick={() => slotInputs.current[view.id]?.click()}
+                        onClick={() => (canBrowseLibrary ? setLibrarySlot(view.id) : slotInputs.current[view.id]?.click())}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={(event) => {
                           event.preventDefault();
@@ -423,6 +432,12 @@ export default function ImageToVideoPage() {
                   );
                 })}
               </div>
+              <LibraryPicker
+                open={librarySlot !== null}
+                onClose={() => setLibrarySlot(null)}
+                onFiles={(files) => librarySlot && acceptSlot(librarySlot, files)}
+                room={1}
+              />
 
               <p className="text-[11px] leading-relaxed text-faint">
                 {!slots.front

@@ -10,6 +10,7 @@ import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { OptionChips } from "@/components/studio/OptionChips";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import {
   imageToSketch,
   refineOn,
@@ -25,6 +26,7 @@ import {
   type SketchStyleId,
 } from "@/lib/jewelryConfigurator";
 import { compressImage, makeThumbnail } from "@/lib/image";
+import { useLibraryPicker } from "@/lib/library";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -55,6 +57,8 @@ export default function ImageToSketchPage() {
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // A cleaned result can be sketched without saving it to disk first.
+  const library = useLibraryPicker(fileInput);
 
   const workspace = useGenerationWorkspace({
     tool: "image_to_sketch",
@@ -119,6 +123,7 @@ export default function ImageToSketchPage() {
               event.target.value = "";
             }}
           />
+          <LibraryPicker open={library.open} onClose={library.close} onFiles={(files) => accept(files[0])} room={1} />
 
           {photo ? (
             <div className="relative inline-block overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
@@ -147,7 +152,7 @@ export default function ImageToSketchPage() {
           ) : (
             <button
               type="button"
-              onClick={() => fileInput.current?.click()}
+              onClick={library.show}
               onDragOver={(event) => {
                 event.preventDefault();
                 setDragging(true);
@@ -164,7 +169,9 @@ export default function ImageToSketchPage() {
               )}
             >
               <Upload size={20} className="text-faint" />
-              <p className="text-sm font-medium text-cream">Drop a photo here, or click to choose</p>
+              <p className="text-sm font-medium text-cream">
+                {library.available ? "Drop a photo here, or click to upload or pick from your library" : "Drop a photo here, or click to choose"}
+              </p>
               <p className="text-[11px] text-faint">The sketch follows this piece exactly — design, stones and angle.</p>
             </button>
           )}

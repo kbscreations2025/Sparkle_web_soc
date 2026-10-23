@@ -16,6 +16,8 @@ export default function CleaningNewPage() {
       defaultModel={DEFAULT_NEW_CLEANING_MODEL}
       promptVariant="new"
       defaultNotes={DEFAULT_CLEANING_NOTES}
+      // One photo at a time, like Testing.
+      maxImages={1}
     />
   );
 }

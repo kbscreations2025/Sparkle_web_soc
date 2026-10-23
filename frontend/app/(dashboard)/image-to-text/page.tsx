@@ -8,8 +8,10 @@ import { Check, Copy, Loader2, ScanText, Upload, X } from "lucide-react";
 import { JobProgressBar } from "@/components/studio/JobProgressBar";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import { fetchConversationForTool, imageToText } from "@/lib/api";
 import { compressImage, makeThumbnail } from "@/lib/image";
+import { useLibraryPicker } from "@/lib/library";
 import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 import { failureMessage, useSettledJob } from "@/lib/useSettledJob";
@@ -44,6 +46,8 @@ export default function ImageToTextPage() {
   const [readOnly, setReadOnly] = useState<{ ownerName: string | null } | null>(null);
 
   const fileInput = useRef<HTMLInputElement>(null);
+  // Earlier uploads and results as well as the disk — see UploadZone.
+  const library = useLibraryPicker(fileInput);
   const searchParams = useSearchParams();
 
   // Arriving from History with ?conversationId=... reopens that reading
@@ -176,6 +180,7 @@ export default function ImageToTextPage() {
                 event.target.value = "";
               }}
             />
+            <LibraryPicker open={library.open} onClose={library.close} onFiles={(files) => accept(files[0])} room={1} />
 
             {photo ? (
               <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
@@ -196,7 +201,7 @@ export default function ImageToTextPage() {
             ) : (
               <button
                 type="button"
-                onClick={() => fileInput.current?.click()}
+                onClick={library.show}
                 onDragOver={(event) => {
                   event.preventDefault();
                   setDragging(true);
@@ -213,7 +218,9 @@ export default function ImageToTextPage() {
                 )}
               >
                 <Upload size={20} className="text-faint" />
-                <p className="text-sm font-medium text-cream">Drop a photo here, or click to choose</p>
+                <p className="text-sm font-medium text-cream">
+                  {library.available ? "Drop a photo here, or click to upload or pick from your library" : "Drop a photo here, or click to choose"}
+                </p>
                 <p className="text-[11px] text-faint">
                   It is read as a gemologist would — stone counts, settings, metal, lighting.
                 </p>

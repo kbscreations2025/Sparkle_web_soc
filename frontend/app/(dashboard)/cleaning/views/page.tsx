@@ -7,6 +7,7 @@ import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import { Lightbox } from "@/components/studio/Lightbox";
 import {
   generateProductViews,
@@ -20,6 +21,7 @@ import {
   type ProductViewId,
 } from "@/lib/api";
 import { compressImage, downloadImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
+import { useLibraryPicker } from "@/lib/library";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -115,8 +117,9 @@ export default function ProductViewsPage() {
   /** An example view opened full size. */
   const [example, setExample] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  /** Which box the file picker is filling. */
+  /** Which box the file picker — or the library — is filling. */
   const pickingFor = useRef<ProductViewId>("front");
+  const library = useLibraryPicker(fileInput);
 
   const workspace = useGenerationWorkspace({
     tool: "cleaning",
@@ -182,7 +185,7 @@ export default function ProductViewsPage() {
 
   function pick(view: ProductViewId) {
     pickingFor.current = view;
-    fileInput.current?.click();
+    library.show();
   }
 
   const views = CATEGORIES.find((entry) => entry.id === category)!.views;
@@ -290,6 +293,12 @@ export default function ProductViewsPage() {
               void place(pickingFor.current, event.target.files?.[0]);
               event.target.value = "";
             }}
+          />
+          <LibraryPicker
+            open={library.open}
+            onClose={library.close}
+            onFiles={(files) => void place(pickingFor.current, files[0])}
+            room={1}
           />
 
           {/* What kind of piece — each is showcased from its own angles. */}

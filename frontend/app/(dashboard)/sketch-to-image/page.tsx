@@ -9,6 +9,7 @@ import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
+import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import { SketchPad } from "@/components/studio/SketchPad";
 import {
   sketchToImage,
@@ -21,6 +22,7 @@ import {
 import { PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT } from "@/lib/jewelryConfigurator";
 import { useStoredImageCount } from "@/lib/useStoredImageCount";
 import { compressImage, makeThumbnail } from "@/lib/image";
+import { useLibraryPicker } from "@/lib/library";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -68,6 +70,8 @@ export default function SketchToImagePage() {
   /** Whether the blank drawing sheet is open, for a design with no sketch to upload. */
   const [drawing, setDrawing] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // A sketch made in Text to Sketch can be rendered without saving it first.
+  const library = useLibraryPicker(fileInput);
   const [smallWarning, setSmallWarning] = useState<string | null>(null);
 
   const workspace = useGenerationWorkspace({
@@ -148,6 +152,12 @@ export default function SketchToImagePage() {
               event.target.value = "";
             }}
           />
+          <LibraryPicker
+            open={library.open}
+            onClose={library.close}
+            onFiles={accept}
+            room={Math.max(0, MAX_SKETCHES - sketches.length)}
+          />
 
           <section className="space-y-2">
             <div className="flex items-center justify-between">
@@ -177,11 +187,15 @@ export default function SketchToImagePage() {
                 <div className="flex w-full flex-col items-center justify-center gap-3 py-8">
                   <button
                     type="button"
-                    onClick={() => fileInput.current?.click()}
+                    onClick={library.show}
                     className="flex w-full flex-col items-center justify-center gap-2"
                   >
                     <Upload size={20} className="text-faint" />
-                    <p className="text-sm font-medium text-cream">Drop your sketches here, or click to choose</p>
+                    <p className="text-sm font-medium text-cream">
+                      {library.available
+                        ? "Drop your sketches here, or click to upload or pick from your library"
+                        : "Drop your sketches here, or click to choose"}
+                    </p>
                     <p className="text-[11px] text-faint">
                       Add up to {MAX_SKETCHES} views of the same piece — they are rendered as one design.
                     </p>
@@ -237,7 +251,7 @@ export default function SketchToImagePage() {
                     <>
                       <button
                         type="button"
-                        onClick={() => fileInput.current?.click()}
+                        onClick={library.show}
                         title="Upload another view"
                         className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-white/[0.12] text-faint transition-colors hover:border-white/25 hover:text-cream"
                       >

@@ -9,6 +9,8 @@ export default function CleaningDefaultPage() {
       modelOptions={CLEANING_MODELS}
       defaultModel={DEFAULT_CLEANING_MODEL}
       defaultNotes={DEFAULT_CLEANING_NOTES}
+      // One photo at a time, like Testing.
+      maxImages={1}
     />
   );
 }

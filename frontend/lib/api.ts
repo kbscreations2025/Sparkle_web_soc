@@ -2059,6 +2059,79 @@ export function fetchHistoryFacets(scope: "own" | "team" = "team") {
   );
 }
 
+// ── library ──────────────────────────────────────────────────────────────────
+
+/** The library's two halves: the photos people put in, and the pictures the tools made. */
+export type LibrarySection = "uploads" | "results";
+
+/**
+ * One picture an upload box can offer again — an earlier upload or result,
+ * straight off its stored asset. The grid shows `thumbnailUrl`; `url` is the
+ * full-size original a pick actually adds.
+ */
+export type LibraryItem = {
+  id: string;
+  url: string;
+  /** Falls back to `url` server-side when the thumbnail was never made. */
+  thumbnailUrl: string;
+  tool: string;
+  /** "uploaded" or "reference" in the uploads half, "generated" in the results. */
+  role: string;
+  mimeType: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+  userName: string;
+  isOwn: boolean;
+  /**
+   * Which photo this is — the key repeats are collapsed on, so a photo
+   * uploaded ten times is offered once. Image Cleaning sends it as a pick's
+   * source fingerprint, so "cleaned before" recognises it however it arrived.
+   */
+  fingerprint: string;
+};
+
+/**
+ * One page of one library folder, newest first, each photo once. The caller's
+ * own pictures unless `scope: "team"`, which reaches exactly as far as
+ * History's team view (see `canReadTeam`). `before` is the previous page's
+ * `nextCursor`; a page can come back short of `limit` with a cursor still
+ * set, which means keep going rather than stop.
+ */
+export function fetchLibrary(params: {
+  section: LibrarySection;
+  /** One tool's folder. Omitted is every tool. */
+  tool?: string | null;
+  scope?: "own" | "team";
+  /** Just these people inside the team scope — user ids, "me" for the caller. Empty is everyone in reach. */
+  members?: string[];
+  before?: string | null;
+  limit?: number;
+}) {
+  const query = new URLSearchParams({ section: params.section });
+  if (params.tool) query.set("tool", params.tool);
+  if (params.scope === "team") query.set("scope", "team");
+  if (params.scope === "team" && params.members?.length) query.set("members", params.members.join(","));
+  if (params.before) query.set("before", params.before);
+  if (params.limit) query.set("limit", String(params.limit));
+  return apiRequest<{ items: LibraryItem[]; nextCursor: string | null; canReadTeam: boolean }>(`/api/library?${query}`);
+}
+
+/** Which tools each half of the library has anything from — the folders worth offering. */
+export function fetchLibraryFolders(scope: "own" | "team" = "own", members: string[] = []) {
+  const query = new URLSearchParams();
+  if (scope === "team") query.set("scope", "team");
+  if (scope === "team" && members.length) query.set("members", members.join(","));
+  return apiRequest<{
+    uploads: string[];
+    results: string[];
+    /** Teammates in reach with pictures, not counting the caller. Empty without `result.read.others`. */
+    members: { id: string; name: string }[];
+    canReadTeam: boolean;
+  }>(`/api/library/folders${query.size ? `?${query}` : ""}`);
+}
+
 /** Permanently removes one generation (and its images) from history. */
 // ── credits ─────────────────────────────────────────────────────────────────
 
