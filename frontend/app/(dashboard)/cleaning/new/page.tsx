@@ -1,6 +1,6 @@
 "use client";
 
-import { CleaningWorkspace } from "@/components/studio/CleaningWorkspace";
+import { CleaningWorkspace, DEFAULT_CLEANING_NOTES } from "@/components/studio/CleaningWorkspace";
 import { NEW_CLEANING_MODELS, DEFAULT_NEW_CLEANING_MODEL } from "@/lib/api";
 
 /**
@@ -15,6 +15,7 @@ export default function CleaningNewPage() {
       modelOptions={NEW_CLEANING_MODELS}
       defaultModel={DEFAULT_NEW_CLEANING_MODEL}
       promptVariant="new"
+      defaultNotes={DEFAULT_CLEANING_NOTES}
     />
   );
 }

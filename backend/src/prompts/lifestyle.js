@@ -48,6 +48,14 @@ const SCALE_NOTE = `REAL-WORLD SIZE — CRITICAL: The reference is a close-up pr
 const ONLY_THIS_PIECE_NOTE = `ONLY THIS PIECE — CRITICAL: Any jewellery or watch the model already wears in her photo is removed — all of it. The finished photo shows the reference piece and nothing else, so the eye goes straight to it. Never invent matching or extra jewellery anywhere on the model.`;
 
 /**
+ * A tight crop on the neck or collarbone of a model in a strapless or
+ * off-shoulder dress cuts the dress out of the frame entirely, and the shot
+ * reads as though she is wearing nothing — not something a brand can post.
+ * Repeated on every prompt that renders a model, including edits.
+ */
+const MODESTY_NOTE = `MODEST, TASTEFUL STYLING — CRITICAL: This is a luxury jewellery brand image that must be appropriate for any audience — a website, social media, print. The model is always clearly and visibly dressed: she keeps the outfit from her photo, and part of it stays in frame in every shot — the neckline, a strap, the bodice, a sleeve or a collar — even in a tight close-up on the neck, ears, hands or wrist. If a close crop would leave no clothing visible, frame a little wider or turn the angle so some of the garment shows; a bare-shouldered crop must never read as unclothed. Never nude, topless or implied nudity, no sheer or see-through fabric over the body, no lingerie or swimwear, no emphasised cleavage, and no suggestive pose or expression. Elegant, graceful and dignified — the attention is on the jewellery, never on the body.`;
+
+/**
  * Used only when the client sends no explicit shot type — see `shotType` below.
  * It moves the camera in on the body, never the piece: the old wording, "the
  * jewelry fills a large part of the frame", was read as leave to enlarge it.
@@ -220,6 +228,7 @@ JEWELRY FIDELITY — NON-NEGOTIABLE:
 ${jewelrySpecificRules(jewelryType, placement)}
 ${SCALE_NOTE}
 ${ONLY_THIS_PIECE_NOTE}
+${MODESTY_NOTE}
 ${ANATOMY_NOTE}
 ${REALISM_NOTE}
 ${FOCUS_NOTE}
@@ -266,6 +275,7 @@ JEWELRY FIDELITY — NON-NEGOTIABLE (applies to EVERY piece):
 
 STRICT — any jewellery or watch the model already wears in her photo is removed, and nothing is added that was not provided in these ${count} images. Only the uploaded pieces appear on the model — nothing extra.
 
+${MODESTY_NOTE}
 ${ANATOMY_NOTE}
 ${REALISM_NOTE}
 ${FOCUS_NOTE}
@@ -305,7 +315,7 @@ function buildLifestyleRefinePrompt({ instruction, referenceCount = 0, data = {}
     ? ` ${styleCount > 1 ? `${styleCount} additional reference images are` : "A further reference image is"} also attached, purely as visual inspiration for the requested change — apply that idea onto the FIRST image, do NOT copy or blend in the reference(s)' own subject, composition or background.`
     : "";
 
-  return `Modify this lifestyle jewelry photograph (the first image): ${instruction}.${jewelryNote}${styleNote} PRESERVE EXACTLY: the model's identity, face, skin tone, hair, body proportions — do NOT change the model in any way. PRESERVE EXACTLY: the background, environment, lighting setup, and scene composition — do NOT alter the background. PRESERVE EXACTLY: the photo's colour — the same white balance, colour temperature, tint, saturation, contrast and exposure, and the same skin tone. The edited photo must match the first image's colours pixel-for-pixel wherever the change does not touch; never warm it, add a pink, red, orange or magenta cast, or regrade it in any way. PRESERVE EXACTLY: the jewelry structure, design, and placement — matching the original jewelry reference(s) exactly. Only apply the single specifically requested change and nothing else. ${ANATOMY_NOTE}`;
+  return `Modify this lifestyle jewelry photograph (the first image): ${instruction}.${jewelryNote}${styleNote} PRESERVE EXACTLY: the model's identity, face, skin tone, hair, body proportions — do NOT change the model in any way. PRESERVE EXACTLY: the background, environment, lighting setup, and scene composition — do NOT alter the background. PRESERVE EXACTLY: the photo's colour — the same white balance, colour temperature, tint, saturation, contrast and exposure, and the same skin tone. The edited photo must match the first image's colours pixel-for-pixel wherever the change does not touch; never warm it, add a pink, red, orange or magenta cast, or regrade it in any way. PRESERVE EXACTLY: the jewelry structure, design, and placement — matching the original jewelry reference(s) exactly. Only apply the single specifically requested change and nothing else. ${MODESTY_NOTE} ${ANATOMY_NOTE}`;
 }
 
 /*
@@ -466,6 +476,7 @@ function buildLifestyleModelPrompt(attrs = {}, notes) {
 
 module.exports = {
   ANATOMY_NOTE,
+  MODESTY_NOTE,
   REALISM_NOTE,
   FOCUS_NOTE,
   FIDELITY_REMINDER,

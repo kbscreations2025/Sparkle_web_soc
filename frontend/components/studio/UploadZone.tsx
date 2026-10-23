@@ -20,6 +20,7 @@ export function UploadZone({
   disabled,
   compact,
   onPreview,
+  max,
 }: {
   items: UploadItem[];
   onAdd: (files: File[]) => void;
@@ -40,7 +41,13 @@ export function UploadZone({
    * only the remove corner does anything, same as before this existed.
    */
   onPreview?: (item: UploadItem) => void;
+  /**
+   * The most photos it takes. Once reached, the drop target steps aside and
+   * only the photos show — removing one brings it back. Unset is unlimited.
+   */
+  max?: number;
 }) {
+  const full = max !== undefined && items.length >= max;
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   // Every uploaded photo can be opened full-size to check what was picked.
@@ -57,7 +64,8 @@ export function UploadZone({
     const images = [...fileList].filter((file) =>
       file.type.startsWith("image/"),
     );
-    if (images.length) onAdd(images);
+    const room = max === undefined ? images.length : Math.max(0, max - items.length);
+    if (images.length && room) onAdd(images.slice(0, room));
   }
 
   function handleDrop(event: DragEvent) {
@@ -71,7 +79,7 @@ export function UploadZone({
       ref={inputRef}
       type="file"
       accept="image/*"
-      multiple
+      multiple={max !== 1}
       hidden
       onChange={(event) => {
         accept(event.target.files);
@@ -112,7 +120,7 @@ export function UploadZone({
             </li>
           ))}
 
-          <li>
+          {!full && <li>
             <div
               onDrop={handleDrop}
               onDragOver={(event) => {
@@ -133,7 +141,7 @@ export function UploadZone({
               <Plus size={18} className="text-faint" />
               {input}
             </div>
-          </li>
+          </li>}
         </ul>
         {lightbox}
       </>
@@ -142,7 +150,7 @@ export function UploadZone({
 
   return (
     <div className="space-y-3">
-      <div
+      {!full && <div
         onDrop={handleDrop}
         onDragOver={(event) => {
           event.preventDefault();
@@ -167,7 +175,7 @@ export function UploadZone({
         </p>
 
         {input}
-      </div>
+      </div>}
 
       {items.length > 0 && (
         <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">

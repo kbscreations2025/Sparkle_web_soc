@@ -99,15 +99,28 @@ type ModelOption = { id: string; label: string; quality: string; description: st
  * the backend still builds every cleaning instruction, from `customPrompt` or
  * whichever built-in prompt the key names (see backend/src/jobs/cleaning.js).
  */
+/**
+ * The changes asked for on almost every photo, filled into the "Changes" box
+ * on the pages that pass it as `defaultNotes`, so they needn't be retyped.
+ */
+export const DEFAULT_CLEANING_NOTES =
+  "High resolution image with white background And diamond make it Sharp & diamond yellow tone remove & metal more shine & make it stamp remove & add Shadow";
+
 export function CleaningWorkspace<TModel extends string>({
   modelOptions,
   defaultModel,
   promptVariant = "default",
+  defaultNotes = "",
+  maxImages,
 }: {
   modelOptions: readonly (ModelOption & { id: TModel })[];
   defaultModel: TModel;
   /** Which built-in prompt "Default" instructions resolve to — see above. */
   promptVariant?: "default" | "new" | "shank" | "studio";
+  /** What the "Changes" box starts filled with — the person can edit or clear it. */
+  defaultNotes?: string;
+  /** How many photos one run takes — unset is a batch of any size. */
+  maxImages?: number;
 }) {
   const { user } = useAuth();
 
@@ -124,7 +137,7 @@ export function CleaningWorkspace<TModel extends string>({
    * Optional extras for "Default": added on top of the built-in retouch
    * instructions rather than replacing them, unlike "Write my own".
    */
-  const [extraNotes, setExtraNotes] = useState("");
+  const [extraNotes, setExtraNotes] = useState(defaultNotes);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
@@ -327,6 +340,11 @@ export function CleaningWorkspace<TModel extends string>({
    */
   async function handleAdd(files: File[]) {
     setError("");
+    // A paste reaches here without the upload zone's own limit.
+    if (maxImages !== undefined) {
+      files = files.slice(0, Math.max(0, maxImages - items.length));
+      if (files.length === 0) return;
+    }
     let added: CleaningUpload[];
     try {
       added = await Promise.all(
@@ -600,6 +618,7 @@ export function CleaningWorkspace<TModel extends string>({
               onAdd={handleAdd}
               onRemove={(id) => setItems((c) => c.filter((i) => i.id !== id))}
               disabled={running}
+              max={maxImages}
             />
 
             <section className="space-y-2">

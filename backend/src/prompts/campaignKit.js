@@ -8,6 +8,8 @@
  */
 
 const { ASPECT_TEXT } = require("./textToImage");
+// The same "always visibly dressed" rule Lifestyle sends — the worn shots use the same models.
+const { MODESTY_NOTE } = require("./lifestyle");
 
 /**
  * The single most common failure mode in AI jewelry renders is
@@ -138,6 +140,7 @@ const SHOTS = [
     instruction: ({ aspectNote, description, poseNote }) => `Photorealistic lifestyle jewelry photograph. Place the jewelry from the reference image(s) naturally and accurately onto the model (the first image), ${FIDELITY_NOTE}
 ${SCALE_NOTE}
 ${WORN_SIZE_NOTE}
+${MODESTY_NOTE}
 ${ANATOMY_NOTE}
 STYLE: Warm editorial lifestyle photography — golden-hour glow, soft warm rim light, inviting and aspirational, magazine-cover quality.
 POSE: ${poseNote || "a relaxed, elegant pose"}.
@@ -153,6 +156,7 @@ ${description ? `ADDITIONAL NOTES: ${description}` : ""}`,
     instruction: ({ aspectNote, description, poseNote }) => `Photorealistic lifestyle jewelry photograph. Place the jewelry from the reference image(s) naturally and accurately onto the model (the first image), ${FIDELITY_NOTE}
 ${SCALE_NOTE}
 ${WORN_SIZE_NOTE}
+${MODESTY_NOTE}
 ${ANATOMY_NOTE}
 STYLE: Dramatic high-fashion editorial mood — deep shadows, a single dramatic rim or spotlight highlighting the jewelry, bold and striking, the calibre of a Cartier or Bulgari campaign.
 POSE: ${poseNote || "a confident, intense pose"}.
@@ -278,7 +282,7 @@ function buildCampaignKitRefinePrompt({ instruction, referenceCount = 0, data = 
   // studio shot of a bare ring is instruction the model has to read past.
   const isLifestyle = String(data.shotLabel || "").toLowerCase().includes("lifestyle");
 
-  return `Modify this jewelry marketing photograph (the first image): ${instruction}.${referenceNote} Keep the same photorealistic quality, composition, and style. Keep the photo's colour exactly — the same white balance, colour temperature, tint, saturation, contrast and exposure (and the same skin tone, if a model is shown); never warm it, add a pink, red, orange or magenta cast, or regrade it, unless the requested change is about colour or light. Only apply the specifically requested changes. ${SCALE_NOTE}${isLifestyle ? ` ${ANATOMY_NOTE}` : ""}`;
+  return `Modify this jewelry marketing photograph (the first image): ${instruction}.${referenceNote} Keep the same photorealistic quality, composition, and style. Keep the photo's colour exactly — the same white balance, colour temperature, tint, saturation, contrast and exposure (and the same skin tone, if a model is shown); never warm it, add a pink, red, orange or magenta cast, or regrade it, unless the requested change is about colour or light. Only apply the specifically requested changes. ${SCALE_NOTE}${isLifestyle ? ` ${MODESTY_NOTE} ${ANATOMY_NOTE}` : ""}`;
 }
 
 module.exports = {

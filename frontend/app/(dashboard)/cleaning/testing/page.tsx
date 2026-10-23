@@ -20,6 +20,8 @@ export default function CleaningTestingPage() {
       modelOptions={OFFERED_TESTING_CLEANING_MODELS}
       defaultModel={DEFAULT_TESTING_CLEANING_MODEL}
       promptVariant="studio"
+      // One photo at a time while these models are on trial.
+      maxImages={1}
     />
   );
 }
