@@ -14,16 +14,3 @@ require("./marketingKit");
 require("./productBackground");
 require("./productViews");
 require("./replacement");
-
-module.exports = {
-  CLEANING_JOB: require("./cleaning").CLEANING_JOB,
-  TEXT_TO_IMAGE_JOB: require("./textToImage").TEXT_TO_IMAGE_JOB,
-  ...require("./sketchTools"),
-  ...require("./lifestyle"),
-  ...require("./imageToText"),
-  ...require("./imageToVideo"),
-  ...require("./marketingKit"),
-  ...require("./productBackground"),
-  ...require("./productViews"),
-  ...require("./replacement"),
-};

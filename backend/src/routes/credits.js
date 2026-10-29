@@ -2,7 +2,7 @@ const express = require("express");
 const { requireAuth, requirePermission, requireSuperAdmin } = require("../middleware/auth");
 const { hasPermission } = require("../permissions");
 const { handle, bad, isId } = require("./_shared");
-const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const { logRequestAudit } = require("../auditLog");
 const credit = require("../services/credits");
 const CreditAccount = require("../models/creditAccount");
 const CreditLedger = require("../models/creditLedger");
@@ -48,6 +48,97 @@ const toEntry = (entry) => ({
   actorName: entry.actorName,
   reason: entry.reason,
   createdAt: entry.createdAt,
+});
+
+/**
+ * One organization's credits page — the organization, its pool, and a line
+ * per member — for both an admin's own view (/my) and a super admin's view of
+ * any organization (/tenants/:id). Null when there is no such organization.
+ */
+async function loadOrgCredits(tenantId) {
+  // All four key off the one id, so none has to wait for another.
+  const [tenant, users, accounts, given] = await Promise.all([
+    Tenant.findOne({ _id: tenantId, deletedAt: null }).select("name slug status"),
+    User.find({ tenantId, deletedAt: null }).select("name email status role").sort({ name: 1 }).exec(),
+    CreditAccount.find({ tenantId }).exec(),
+    credit.givenByTenant(tenantId),
+  ]);
+  if (!tenant) return null;
+
+  const byUser = new Map(accounts.filter((a) => a.userId).map((a) => [String(a.userId), a]));
+  const pool = accounts.find((a) => a.userId === null);
+
+  return {
+    tenant: { id: tenant._id, name: tenant.name, slug: tenant.slug, status: tenant.status },
+    pool: pool
+      ? toAccount(pool, "Organization pool")
+      : { id: null, holder: "Organization pool", balance: 0, reserved: 0, available: 0 },
+    accounts,
+    given,
+    // Every member is listed, with or without an account — a person who
+    // has never been granted anything is exactly who a super admin is
+    // looking for on this page, and leaving them out would hide them.
+    members: users.map((user) => {
+      const account = byUser.get(String(user._id));
+      return {
+        userId: user._id,
+        name: user.name || user.email,
+        email: user.email,
+        status: user.status,
+        role: user.role,
+        balance: account?.balance ?? 0,
+        reserved: account?.reserved ?? 0,
+        available: account?.available ?? 0,
+        lifetimeSpent: account?.lifetimeSpent ?? 0,
+        dailyAllowance: account?.dailyAllowance ?? null,
+      };
+    }),
+  };
+}
+
+/** Answers a move refused for want of credits with 400 and `message`; anything else is rethrown. */
+function refuseInsufficient(res, err, message) {
+  if (err.code !== "insufficient_credits") throw err;
+  return res.status(400).json({ status: "error", message, code: "insufficient_credits" });
+}
+
+/**
+ * The body /distribute and /reclaim share, checked. The organization is
+ * always the signed-in admin's own. `{ error }` when it doesn't hold up.
+ */
+function readTransfer(req) {
+  const { userId, amount: rawAmount, reason } = req.body || {};
+  const tenantId = req.dbUser.tenantId;
+
+  if (!tenantId) return { error: "you are not a member of an organization" };
+  if (!isId(userId)) return { error: "a valid member is required" };
+
+  const amount = parseAmount(rawAmount);
+  if (amount === null) return { error: "amount must be a whole number of credits above zero" };
+
+  return { tenantId, userId, amount, reason: reason?.trim() || null };
+}
+
+/**
+ * The body /grant and /revoke share, checked: an organization, optionally
+ * one of its members (none means the pool), and an amount.
+ */
+function readPlatformMove(req) {
+  const { tenantId, userId = null, amount: rawAmount, reason } = req.body || {};
+
+  if (!isId(tenantId)) return { error: "a valid organization id is required" };
+  if (userId !== null && !isId(userId)) return { error: "invalid user id" };
+
+  const amount = parseAmount(rawAmount);
+  if (amount === null) return { error: "amount must be a whole number of credits above zero" };
+
+  return { tenantId, userId, amount, reason: reason?.trim() || null };
+}
+
+/** Who a platform-staff move is recorded against on the ledger. */
+const staffActor = (req) => ({
+  actorUserId: req.dbUser?._id ?? null,
+  actorName: req.appUser?.name || req.appUser?.email || "platform staff",
 });
 
 // ── what the signed-in person has ──────────────────────────────────────────
@@ -108,31 +199,21 @@ router.get(
     const tenantId = req.dbUser.tenantId;
     if (!tenantId) return bad(res, "you are not a member of an organization");
 
-    const [tenant, users, accounts, given] = await Promise.all([
-      Tenant.findOne({ _id: tenantId, deletedAt: null }).select("name slug status"),
-      User.find({ tenantId, deletedAt: null }).select("name email status role").sort({ name: 1 }).exec(),
-      CreditAccount.find({ tenantId }).exec(),
-      credit.givenByTenant(tenantId),
-    ]);
-    if (!tenant) return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
-
-    const byUser = new Map(accounts.filter((a) => a.userId).map((a) => [String(a.userId), a]));
-    const pool = accounts.find((a) => a.userId === null);
+    const org = await loadOrgCredits(tenantId);
+    if (!org) return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
 
     res.json({
       status: "success",
-      tenant: { id: tenant._id, name: tenant.name, slug: tenant.slug, status: tenant.status },
-      pool: pool
-        ? toAccount(pool, "Organization pool")
-        : { id: null, holder: "Organization pool", balance: 0, reserved: 0, available: 0 },
+      tenant: org.tenant,
+      pool: org.pool,
       /*
        * The same two figures the super-admin console shows for this
        * organization, so both sides read one number: what is left across the
        * pool and every member, and what platform staff have given in total.
        */
       totals: {
-        remaining: accounts.reduce((sum, account) => sum + (account.balance || 0), 0),
-        given: given.get(String(tenantId)) ?? 0,
+        remaining: org.accounts.reduce((sum, account) => sum + (account.balance || 0), 0),
+        given: org.given.get(String(tenantId)) ?? 0,
       },
       canManage: Boolean(req.isSuperAdmin || hasPermission(req.dbUser, "org.credits.manage")),
       /*
@@ -143,24 +224,12 @@ router.get(
        * one they look for first, so alphabetical order buries it somewhere
        * in the middle of a long roster.
        */
-      members: users
-        .map((user) => {
-          const account = byUser.get(String(user._id));
-          return {
-            userId: user._id,
-            name: user.name || user.email,
-            email: user.email,
-            status: user.status,
-            role: user.role,
-            /** Lets the row be labelled, so its position reads as deliberate. */
-            isSelf: String(user._id) === String(req.dbUser._id),
-            balance: account?.balance ?? 0,
-            reserved: account?.reserved ?? 0,
-            available: account?.available ?? 0,
-            lifetimeSpent: account?.lifetimeSpent ?? 0,
-            dailyAllowance: account?.dailyAllowance ?? null,
-          };
-        })
+      members: org.members
+        .map((member) => ({
+          ...member,
+          /** Lets the row be labelled, so its position reads as deliberate. */
+          isSelf: String(member.userId) === String(req.dbUser._id),
+        }))
         .sort((a, b) => Number(b.isSelf) - Number(a.isSelf) || a.name.localeCompare(b.name)),
     });
   })
@@ -177,14 +246,9 @@ router.post(
   "/distribute",
   requirePermission("org.credits.manage"),
   handle(async (req, res) => {
-    const { userId, amount: rawAmount, reason } = req.body || {};
-    const tenantId = req.dbUser.tenantId;
-
-    if (!tenantId) return bad(res, "you are not a member of an organization");
-    if (!isId(userId)) return bad(res, "a valid member is required");
-
-    const amount = parseAmount(rawAmount);
-    if (amount === null) return bad(res, "amount must be a whole number of credits above zero");
+    const move = readTransfer(req);
+    if (move.error) return bad(res, move.error);
+    const { tenantId, userId, amount, reason } = move;
 
     const member = await User.findOne({ _id: userId, tenantId, deletedAt: null }).select("_id name email");
     if (!member) return bad(res, "that user is not a member of your organization");
@@ -197,12 +261,10 @@ router.post(
         amount,
         actorUserId: req.dbUser._id,
         actorName: req.dbUser.name || req.dbUser.email,
-        reason: reason?.trim() || null,
+        reason,
       });
 
-      logAudit({
-        ...actorFrom(req),
-        ...requestMeta(req),
+      logRequestAudit(req, {
         tenantId,
         action: "credits.distributed",
         status: "success",
@@ -214,14 +276,7 @@ router.post(
 
       res.json({ status: "success", pool: toAccount(source, "Organization pool"), member: toAccount(target, "User") });
     } catch (err) {
-      if (err.code === "insufficient_credits") {
-        return res.status(400).json({
-          status: "error",
-          message: `The organization pool has only ${err.available} credits available.`,
-          code: "insufficient_credits",
-        });
-      }
-      throw err;
+      return refuseInsufficient(res, err, `The organization pool has only ${err.available} credits available.`);
     }
   })
 );
@@ -231,14 +286,9 @@ router.post(
   "/reclaim",
   requirePermission("org.credits.manage"),
   handle(async (req, res) => {
-    const { userId, amount: rawAmount, reason } = req.body || {};
-    const tenantId = req.dbUser.tenantId;
-
-    if (!tenantId) return bad(res, "you are not a member of an organization");
-    if (!isId(userId)) return bad(res, "a valid member is required");
-
-    const amount = parseAmount(rawAmount);
-    if (amount === null) return bad(res, "amount must be a whole number of credits above zero");
+    const move = readTransfer(req);
+    if (move.error) return bad(res, move.error);
+    const { tenantId, userId, amount, reason } = move;
 
     try {
       const { source, target } = await credit.transfer({
@@ -248,12 +298,10 @@ router.post(
         amount,
         actorUserId: req.dbUser._id,
         actorName: req.dbUser.name || req.dbUser.email,
-        reason: reason?.trim() || null,
+        reason,
       });
 
-      logAudit({
-        ...actorFrom(req),
-        ...requestMeta(req),
+      logRequestAudit(req, {
         tenantId,
         action: "credits.reclaimed",
         status: "success",
@@ -265,16 +313,13 @@ router.post(
 
       res.json({ status: "success", pool: toAccount(target, "Organization pool"), member: toAccount(source, "User") });
     } catch (err) {
-      if (err.code === "insufficient_credits") {
-        return res.status(400).json({
-          status: "error",
-          // Names the reason, because "not enough" is confusing when the
-          // balance on screen looks sufficient — the difference is frozen.
-          message: `Only ${err.available} of their credits are unspent — the rest is frozen by runs in progress.`,
-          code: "insufficient_credits",
-        });
-      }
-      throw err;
+      // Names the reason, because "not enough" is confusing when the
+      // balance on screen looks sufficient — the difference is frozen.
+      return refuseInsufficient(
+        res,
+        err,
+        `Only ${err.available} of their credits are unspent — the rest is frozen by runs in progress.`
+      );
     }
   })
 );
@@ -311,9 +356,7 @@ router.post(
 
     const account = await credit.setDailyAllowance({ tenantId, userId, amount, actorUserId: req.dbUser?._id });
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId,
       action: amount === null ? "credits.daily_allowance_disabled" : "credits.daily_allowance_set",
       status: "success",
@@ -408,45 +451,10 @@ router.get(
   handle(async (req, res) => {
     if (!isId(req.params.id)) return bad(res, "invalid organization id");
 
-    // All three key off the id in the path, so none has to wait for another —
-    // the sibling /my handler already does it this way.
-    const tenantId = req.params.id;
-    const [tenant, users, accounts, given] = await Promise.all([
-      Tenant.findOne({ _id: tenantId, deletedAt: null }).select("name slug status"),
-      User.find({ tenantId, deletedAt: null }).select("name email status role").sort({ name: 1 }).exec(),
-      CreditAccount.find({ tenantId }).exec(),
-      credit.givenByTenant(tenantId),
-    ]);
-    if (!tenant) return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+    const org = await loadOrgCredits(req.params.id);
+    if (!org) return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
 
-    const byUser = new Map(accounts.filter((a) => a.userId).map((a) => [String(a.userId), a]));
-    const pool = accounts.find((a) => a.userId === null);
-
-    res.json({
-      status: "success",
-      tenant: { id: tenant._id, name: tenant.name, slug: tenant.slug, status: tenant.status },
-      pool: pool
-        ? toAccount(pool, "Organization pool")
-        : { id: null, holder: "Organization pool", balance: 0, reserved: 0, available: 0 },
-      // Every member is listed, with or without an account — a person who
-      // has never been granted anything is exactly who a super admin is
-      // looking for on this page, and leaving them out would hide them.
-      members: users.map((user) => {
-        const account = byUser.get(String(user._id));
-        return {
-          userId: user._id,
-          name: user.name || user.email,
-          email: user.email,
-          status: user.status,
-          role: user.role,
-          balance: account?.balance ?? 0,
-          reserved: account?.reserved ?? 0,
-          available: account?.available ?? 0,
-          lifetimeSpent: account?.lifetimeSpent ?? 0,
-          dailyAllowance: account?.dailyAllowance ?? null,
-        };
-      }),
-    });
+    res.json({ status: "success", tenant: org.tenant, pool: org.pool, members: org.members });
   })
 );
 
@@ -538,13 +546,9 @@ router.get(
 router.post(
   "/grant",
   handle(async (req, res) => {
-    const { tenantId, userId = null, amount: rawAmount, reason } = req.body || {};
-
-    if (!isId(tenantId)) return bad(res, "a valid organization id is required");
-    if (userId !== null && !isId(userId)) return bad(res, "invalid user id");
-
-    const amount = parseAmount(rawAmount);
-    if (amount === null) return bad(res, "amount must be a whole number of credits above zero");
+    const move = readPlatformMove(req);
+    if (move.error) return bad(res, move.error);
+    const { tenantId, userId, amount, reason } = move;
 
     const tenant = await Tenant.findOne({ _id: tenantId, deletedAt: null }).select("_id name");
     if (!tenant) return res.status(404).json({ status: "error", message: "organization not found", code: "not_found" });
@@ -557,25 +561,16 @@ router.post(
       if (!member) return bad(res, "that user is not a member of this organization");
     }
 
-    const account = await credit.grant({
-      tenantId,
-      userId,
-      amount,
-      actorUserId: req.dbUser?._id ?? null,
-      actorName: req.appUser?.name || req.appUser?.email || "platform staff",
-      reason: reason?.trim() || null,
-    });
+    const account = await credit.grant({ tenantId, userId, amount, ...staffActor(req), reason });
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId,
       action: "credits.granted",
       status: "success",
       targetType: "credit_account",
       targetId: String(account._id),
       message: `granted ${amount} credits to ${userId ? "a user" : "the organization pool"} in ${tenant.name}`,
-      metadata: { amount, userId: userId ? String(userId) : null, reason: reason?.trim() || null },
+      metadata: { amount, userId: userId ? String(userId) : null, reason },
     });
 
     res.json({ status: "success", account: toAccount(account, userId ? "User" : "Organization pool") });
@@ -591,46 +586,30 @@ router.post(
 router.post(
   "/revoke",
   handle(async (req, res) => {
-    const { tenantId, userId = null, amount: rawAmount, reason } = req.body || {};
-
-    if (!isId(tenantId)) return bad(res, "a valid organization id is required");
-    if (userId !== null && !isId(userId)) return bad(res, "invalid user id");
-
-    const amount = parseAmount(rawAmount);
-    if (amount === null) return bad(res, "amount must be a whole number of credits above zero");
+    const move = readPlatformMove(req);
+    if (move.error) return bad(res, move.error);
+    const { tenantId, userId, amount, reason } = move;
 
     try {
-      const account = await credit.revoke({
-        tenantId,
-        userId,
-        amount,
-        actorUserId: req.dbUser?._id ?? null,
-        actorName: req.appUser?.name || req.appUser?.email || "platform staff",
-        reason: reason?.trim() || null,
-      });
+      const account = await credit.revoke({ tenantId, userId, amount, ...staffActor(req), reason });
 
-      logAudit({
-        ...actorFrom(req),
-        ...requestMeta(req),
+      logRequestAudit(req, {
         tenantId,
         action: "credits.revoked",
         status: "success",
         targetType: "credit_account",
         targetId: String(account._id),
         message: `revoked ${amount} credits`,
-        metadata: { amount, userId: userId ? String(userId) : null, reason: reason?.trim() || null },
+        metadata: { amount, userId: userId ? String(userId) : null, reason },
       });
 
       res.json({ status: "success", account: toAccount(account, userId ? "User" : "Organization pool") });
     } catch (err) {
-      if (err.code === "insufficient_credits") {
-        return res.status(400).json({
-          status: "error",
-          message: `Only ${err.available} credits are available to take back — the rest is frozen by runs in progress.`,
-          code: "insufficient_credits",
-        });
-      }
-      throw err;
+      return refuseInsufficient(
+        res,
+        err,
+        `Only ${err.available} credits are available to take back — the rest is frozen by runs in progress.`
+      );
     }
   })
 );

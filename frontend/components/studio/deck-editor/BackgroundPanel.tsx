@@ -3,10 +3,11 @@
 import { useRef, useState } from "react";
 import { Crosshair, Trash2, Upload } from "lucide-react";
 import type { AffinityPiece } from "@/lib/affinity";
-import { BRAND_COLORS, backgroundSource, chapterName, chapterPages, type PageScope, type SlideBackgroundImage } from "@/lib/deckDesign";
+import { BRAND_COLORS, backgroundSource, type PageScope, type SlideBackgroundImage } from "@/lib/deckDesign";
 import { compressGraphic } from "@/lib/image";
 import { cn } from "@/lib/utils";
 import type { EditorApi } from "./DeckEditor";
+import { ScopeSwitch, useScope } from "./ScopeSwitch";
 
 const PAGE_COLORS = [...BRAND_COLORS, "#F3E9DC", "#E8E1D6", "#1C1814", "#0F1B2D"];
 
@@ -36,15 +37,10 @@ export function BackgroundPanel({ api, pieces }: { api: EditorApi; pieces: Affin
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [scope, setScope] = useState<PageScope>("page");
+  const { effective: effectiveScope, reach } = useScope(api, scope);
   const slide = api.slide;
   const image = slide.backgroundImage ?? null;
   const current = image ? backgroundSource(image, pieces) : "";
-
-  const slides = api.design.slides;
-  const categoryPages = chapterPages(slides, api.active);
-  const hasCategories = categoryPages.length < slides.length;
-  const effectiveScope: PageScope = scope === "chapter" && !hasCategories ? "all" : scope;
-  const reach = effectiveScope === "all" ? slides.length : effectiveScope === "chapter" ? categoryPages.length : 1;
 
   /** A fresh picture starts as a soft watermark — the usual reason to put one behind a page. */
   function choose(source: { pieceIndex?: number; src?: string }) {
@@ -79,46 +75,10 @@ export function BackgroundPanel({ api, pieces }: { api: EditorApi; pieces: Affin
 
   return (
     <>
-      <div className="sticky top-0 z-10 bg-white px-2.5 pb-1.5 pt-2">
+      {/* Where every change below goes. */}
+      <ScopeSwitch api={api} scope={scope} onScope={setScope} className="sticky top-0 z-10 bg-white px-2.5 pb-1.5 pt-2">
         <p className="mb-1 text-[12px] font-semibold">Backdrop</p>
-        {/* Where every change below goes. */}
-        <div className="grid grid-cols-3 gap-0.5 rounded-md bg-black/5 p-0.5 text-[10px]">
-          {(
-            [
-              ["page", "This page"],
-              ["chapter", "Category"],
-              ["all", "All pages"],
-            ] as [PageScope, string][]
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setScope(value)}
-              disabled={value === "chapter" && !hasCategories}
-              title={
-                value === "chapter"
-                  ? hasCategories
-                    ? `Every page of “${chapterName(slides, api.active)}”`
-                    : "This deck has one category — use All pages"
-                  : undefined
-              }
-              className={cn(
-                "rounded py-0.5 transition-colors disabled:opacity-35",
-                scope === value ? "bg-white font-medium text-[#5B3FB0] shadow-sm" : "text-black/60 hover:text-black"
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <p className="mt-0.5 truncate text-[9px] text-black/45">
-          {effectiveScope === "page"
-            ? `Page ${api.active + 1} only`
-            : effectiveScope === "chapter"
-              ? `${reach} pages of “${chapterName(slides, api.active)}”`
-              : `All ${reach} pages`}
-        </p>
-      </div>
+      </ScopeSwitch>
 
       <div className="space-y-3 px-2.5 pb-3 text-[10px]">
         {/* Colour — the last swatch opens any colour. */}

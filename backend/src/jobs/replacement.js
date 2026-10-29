@@ -1,10 +1,9 @@
 const { registerJobHandler } = require("./registry");
 const { runGenerationJob } = require("./generationRunner");
-const { loadTenantOrThrow } = require("../aiRouting");
+const { loadJobActor } = require("./actor");
 const { segmentPiece } = require("../services/segmentation");
 const { decodeImage, prepareForModel, compositeIntoPhoto, exposedError } = require("../services/photoComposite");
 const { buildReplacePrompt, buildChangePrompt } = require("../prompts/replacement");
-const User = require("../models/user");
 
 const REPLACEMENT_JOB = "replacement.generate";
 
@@ -32,9 +31,7 @@ const REPLACEMENT_JOB = "replacement.generate";
  */
 registerJobHandler(REPLACEMENT_JOB, async (context) => {
   const { job, data, withProgress } = context;
-  const dbUser = await User.findById(job.userId);
-  if (!dbUser) throw new Error("the user who queued this job no longer exists");
-  const tenant = await loadTenantOrThrow(dbUser);
+  const { tenant } = await loadJobActor(job);
 
   const isChange = data.turn === "change";
   const original = isChange ? data.photo : data.sourceImages[0];

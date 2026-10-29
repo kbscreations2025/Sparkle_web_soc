@@ -129,7 +129,8 @@ export function useJewelryBuilder() {
     groups,
     toggle,
     clear,
-    trends: { trending },
+    /** What is in fashion row by row — the flames. */
+    trending,
     trendCuesFor,
     /** The brief these selections spell out, ready to join with free text. */
     text: buildJewelryPrompt(selections),
@@ -169,7 +170,7 @@ export function JewelryBuilder({
   /** Runs alongside clearing the selections — a page also clears its own free text. */
   onClear?: () => void;
 }) {
-  const { selections, groups, toggle, clear, selectedCount, trends } = builder;
+  const { selections, groups, toggle, clear, selectedCount, trending } = builder;
 
   // Only the first few open, so the panel starts readable rather than as one
   // long wall of chips. Keyed by group, so reopening survives a type change.
@@ -210,7 +211,7 @@ export function JewelryBuilder({
           const values = splitMulti(selections[group.key]);
           const summary = summaryOf(group, selections);
           const open = expanded[group.key];
-          const flagged = group.trendable ? trendingOptionsFor(group, trends.trending) : null;
+          const flagged = group.trendable ? trendingOptionsFor(group, trending) : null;
 
           return (
             <div key={group.key} className="border-b border-white/[0.04]">
@@ -246,7 +247,7 @@ export function JewelryBuilder({
                             active={active}
                             onClick={() => toggle(group.key, option)}
                             leading={<Flame size={10} className="shrink-0" />}
-                            title={trendingHint(group, trends.trending)}
+                            title={trendingHint(group, trending)}
                             className={active ? undefined : "border-gold/25 text-gold/80 hover:border-gold/40 hover:text-gold"}
                           />
                         );
@@ -271,7 +272,7 @@ export function JewelryBuilder({
                   {group.subRows
                     ?.filter((row) => values.includes(row.when))
                     .map((row) => {
-                      const hotInRow = new Set(trends.trending[row.key] ?? []);
+                      const hotInRow = new Set(trending[row.key] ?? []);
                       return (
                         <div key={row.key} className="ml-1 space-y-1.5 border-l border-gold/25 pl-2.5">
                           <p className="text-[9px] font-medium uppercase tracking-wide text-faint">{row.label}</p>

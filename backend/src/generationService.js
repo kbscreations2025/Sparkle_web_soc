@@ -80,6 +80,8 @@ async function recordGeneration({
   /** Which AI provider actually served this run — "gemini" by default, since every call site predates multi-provider routing except the ones that now pass it explicitly. */
   provider,
 }) {
+  const userName = user.name || user.email;
+
   // By owner as well as tenant: a colleague may be able to *read* this thread
   // (org.conversations.read) but never add to it. The routes refuse that up
   // front with isOwnConversation, before anything is charged — this is the
@@ -89,7 +91,7 @@ async function recordGeneration({
     : await Conversation.create({
         tenantId: tenant._id,
         userId: user._id,
-        userName: user.name || user.email,
+        userName,
         tool,
         title: (userPrompt || prompt).slice(0, 80),
       });
@@ -129,7 +131,7 @@ async function recordGeneration({
     _id: generationId,
     tenantId: tenant._id,
     userId: user._id,
-    userName: user.name || user.email,
+    userName,
     conversationId: conversation._id,
     sequence,
     tool,
@@ -172,7 +174,7 @@ async function recordGeneration({
     model: modelLabel || model,
     quality: quality || null,
     isOwn: true,
-    userName: user.name || user.email,
+    userName,
     createdAt: new Date().toISOString(),
     // Same shaper the REST route uses, so a result that arrives live and one
     // that arrives on the next fetch are indistinguishable to the client.
@@ -190,7 +192,7 @@ async function recordGeneration({
     actorUserId: user._id,
     actorAuthUserId: user.authUserId || null,
     actorEmail: user.email,
-    actorName: user.name || user.email,
+    actorName: userName,
     action: "generation.completed",
     status: "success",
     targetType: "generation",
@@ -247,6 +249,7 @@ async function createAsset({
   sourceChecksum = null,
 }) {
   const buffer = Buffer.from(image.base64, "base64");
+  const type = assetTypeFor(image.mimeType);
   /*
    * An empty asset is always a bug upstream, and storing one hides it in the
    * worst possible way: the job completes, the row appears in history, the
@@ -254,11 +257,10 @@ async function createAsset({
    * that there is nothing there. Better to fail the generation loudly.
    */
   if (!buffer.length) {
-    throw new Error(`The ${assetTypeFor(image.mimeType)} came back empty and was not saved`);
+    throw new Error(`The ${type} came back empty and was not saved`);
   }
 
   const extension = extensionFor(image.mimeType);
-  const type = assetTypeFor(image.mimeType);
   const assetId = new mongoose.Types.ObjectId();
 
   const key = buildAssetKey({
@@ -402,4 +404,4 @@ async function isOwnConversation(dbUser, conversationId) {
   );
 }
 
-module.exports = { recordGeneration, parseDataUri, fetchAsInlineImage, resolveInlineImage, isOwnConversation };
+module.exports = { recordGeneration, parseDataUri, resolveInlineImage, isOwnConversation };

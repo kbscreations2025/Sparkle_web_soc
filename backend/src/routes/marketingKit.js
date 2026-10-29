@@ -1,8 +1,9 @@
 const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { resolveProviderModel } = require("../aiRouting");
-const { parseDataUri, resolveInlineImage } = require("../generationService");
-const { queueGeneration, parseImages } = require("./queueGeneration");
+const { parseDataUri } = require("../generationService");
+const { queueGeneration, parseImages, refinementPayload } = require("./queueGeneration");
+const { resolveBaseModel } = require("./baseModel");
 const {
   BRAND_STORY_JOB,
   AFFINITY_JOB,
@@ -15,8 +16,6 @@ const { FESTIVE_EVENT_IDS, FESTIVE_ASPECT_RATIOS, POSTER_FONT_IDS, eventLabel } 
 const { clampCount } = require("../jobs/generationRunner");
 const { MARKETING_KIT_TYPES } = require("../models/marketingKit");
 const kits = require("../services/marketingKits");
-const lifestyleModels = require("../services/lifestyleModels");
-const { loadPreset, PRESET_IDS } = require("../services/lifestylePresets");
 
 const router = express.Router();
 
@@ -185,12 +184,9 @@ router.post("/campaign", async (req, res) => {
     model: requestedModel,
     quality: requestedQuality,
     refineImage,
-    referenceImages,
     instruction,
-    displayPrompt,
     shotLabel,
     conversationId,
-    parentGenerationId,
   } = req.body || {};
 
   const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
@@ -201,7 +197,6 @@ router.post("/campaign", async (req, res) => {
     if (!parsed) {
       return res.status(400).json({ status: "error", message: "refine image must be a data URI", code: "invalid" });
     }
-    const references = parseImages(referenceImages);
 
     return queueGeneration(req, res, {
       type: CAMPAIGN_KIT_JOB,
@@ -216,18 +211,7 @@ router.post("/campaign", async (req, res) => {
         shotLabel: shotLabel || null,
         conversationId: conversationId || null,
       },
-      payload: {
-        isRefinement: true,
-        refineImage: parsed,
-        references,
-        instruction,
-        displayPrompt,
-        shotLabel: shotLabel || null,
-        requestedModel,
-        requestedQuality,
-        conversationId,
-        parentGenerationId,
-      },
+      payload: { ...refinementPayload(req.body, parsed), shotLabel: shotLabel || null },
       message: `queued a Campaign Kit retouch on ${modelLabel}`,
     });
   }
@@ -320,11 +304,8 @@ router.post("/festive", async (req, res) => {
     model: requestedModel,
     quality: requestedQuality,
     refineImage,
-    referenceImages,
     instruction,
-    displayPrompt,
     conversationId,
-    parentGenerationId,
     preview,
   } = req.body || {};
 
@@ -336,23 +317,12 @@ router.post("/festive", async (req, res) => {
     if (!parsed) {
       return res.status(400).json({ status: "error", message: "refine image must be a data URI", code: "invalid" });
     }
-    const references = parseImages(referenceImages);
 
     return queueGeneration(req, res, {
       type: FESTIVE_POSTER_JOB,
       tool: "marketing_kit",
       request: { provider, model, modelLabel, quality, kind: "festive", isRefinement: true, conversationId: conversationId || null },
-      payload: {
-        isRefinement: true,
-        refineImage: parsed,
-        references,
-        instruction,
-        displayPrompt,
-        requestedModel,
-        requestedQuality,
-        conversationId,
-        parentGenerationId,
-      },
+      payload: refinementPayload(req.body, parsed),
       message: `queued a Poster retouch on ${modelLabel}`,
     });
   }
@@ -420,25 +390,6 @@ router.post("/festive", async (req, res) => {
 /** At most two picks per option — one per shot in its pair. */
 function asIdList(value) {
   return (Array.isArray(value) ? value : []).filter((id) => typeof id === "string").slice(0, 2);
-}
-
-/** Same three ways of naming a model as Lifestyle, and the same rule: never trust the bytes for a saved one. */
-async function resolveBaseModel({ dbUser, modelNumber, modelId, modelImage }) {
-  if (modelId) {
-    const saved = await lifestyleModels.findUsableModel({ dbUser, id: modelId });
-    if (!saved) throw new Error("that saved model is not available");
-    return resolveInlineImage(saved.imageUrl);
-  }
-  if (modelImage) {
-    const uploaded = await resolveInlineImage(modelImage);
-    if (!uploaded) throw new Error("the model photo must be an image");
-    return uploaded;
-  }
-  if (modelNumber !== undefined && modelNumber !== null && modelNumber !== "") {
-    if (!PRESET_IDS.includes(Number(modelNumber))) throw new Error(`there is no preset model ${modelNumber}`);
-    return loadPreset(modelNumber);
-  }
-  return null;
 }
 
 /*

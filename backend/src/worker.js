@@ -1,5 +1,4 @@
 const { Worker, UnrecoverableError } = require("bullmq");
-const config = require("./config");
 const { createRedisConnection, closeRedisConnections, throttledLogger } = require("./redis");
 const { getJobHandler } = require("./jobs/registry");
 const { LANE_IDS, laneConfig } = require("./jobs/lanes");
@@ -49,14 +48,6 @@ function rampedPercent(from, to, elapsedMs, estimatedMs) {
 const MAX_RESULT_BYTES = 32 * 1024;
 
 /**
- * Keeps an oversized result from being stored and broadcast.
- *
- * Nothing is lost that isn't recoverable: every one of these tools writes
- * its real output to Mongo first — a generation's `response.text`, a kit
- * document — so the client can fetch the whole thing by the ids that
- * remain. What is dropped is the convenience copy.
- */
-/**
  * Charges a finished run.
  *
  * `deliveredCount` comes from the batch runner and is the number of images
@@ -96,6 +87,14 @@ async function refundCredits(job, credits, reason) {
   }
 }
 
+/**
+ * Keeps an oversized result from being stored and broadcast.
+ *
+ * Nothing is lost that isn't recoverable: every one of these tools writes
+ * its real output to Mongo first — a generation's `response.text`, a kit
+ * document — so the client can fetch the whole thing by the ids that
+ * remain. What is dropped is the convenience copy.
+ */
 function withinResultBudget(result, jobId) {
   if (!result) return result;
 
@@ -342,7 +341,7 @@ function startWorker() {
 
   // Daily allowances: return yesterday's leftovers to the pool and pay out
   // today's. Idempotent per account per day, so extra worker replicas are safe.
-  const stopDailyResets = require("./services/credits").startDailyResetScheduler();
+  const stopDailyResets = credit.startDailyResetScheduler();
 
   return {
     /** Closes every lane, so callers can keep treating this as one worker. */

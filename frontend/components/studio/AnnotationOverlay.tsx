@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import {  draw as drawShape,  handlesFor,  hit,  isBox,  isTooSmall,  moved,  resized,  type Handle,  type HandleId,  type Shape} from "@/lib/annotationShapes";
+import {
+  draw as drawShape,
+  handlesFor,
+  hit,
+  isBox,
+  isTooSmall,
+  moved,
+  resized,
+  type HandleId,
+  type Shape,
+} from "@/lib/annotationShapes";
 import { DrawingToolbar, isShapeTool, type Tool } from "./DrawingToolbar";
 import { urlToDataUrl } from "@/lib/image";
 import { cn } from "@/lib/utils";
@@ -28,6 +38,12 @@ function surfaceSize(width: number, height: number) {
 
   const ratio = MAX_SURFACE / longest;
   return { width: Math.round(width * ratio), height: Math.round(height * ratio) };
+}
+
+/** Canvas pixels per CSS pixel, so handles stay one size on screen at any zoom. */
+function scaleOf(canvas: HTMLCanvasElement) {
+  const rect = canvas.getBoundingClientRect();
+  return rect.width > 0 ? canvas.width / rect.width : 1;
 }
 
 /** A measured, canvas-safe image, tagged with the src it was resolved from. */
@@ -103,10 +119,6 @@ export function AnnotationOverlay({
   const [undoStack, setUndoStack] = useState<Snapshot[]>([]);
   const [redoStack, setRedoStack] = useState<Snapshot[]>([]);
 
-  // Where a drag began, plus the canvas as it looked then — every pointermove
-  // repaints the freehand preview from that snapshot.
-  const dragStart = useRef<{ x: number; y: number } | null>(null);
-  const dragBase = useRef<ImageData | null>(null);
   /** What the current pointer drag is doing, once it has been decided on pointerdown. */
   const gesture = useRef<Gesture | null>(null);
 
@@ -222,7 +234,7 @@ export function AnnotationOverlay({
     const active = shapes.find((shape) => shape.id === selectedId);
     if (!active) return;
 
-    const scale = canvas.getBoundingClientRect().width > 0 ? canvas.width / canvas.getBoundingClientRect().width : 1;
+    const scale = scaleOf(canvas);
     const handleSize = HANDLE_SCREEN_SIZE * scale;
 
     // A dashed outline around a box, so a shape mid-resize still reads as the
@@ -357,9 +369,7 @@ export function AnnotationOverlay({
   /** Canvas pixels per CSS pixel, so handles stay one size on screen at any zoom. */
   function canvasScale() {
     const canvas = shapeCanvasRef.current;
-    if (!canvas) return 1;
-    const rect = canvas.getBoundingClientRect();
-    return rect.width > 0 ? canvas.width / rect.width : 1;
+    return canvas ? scaleOf(canvas) : 1;
   }
 
   /**
@@ -394,10 +404,11 @@ export function AnnotationOverlay({
   /** The handle of the selected shape under `point`, if the pointer is on one. */
   function handleAt(point: { x: number; y: number }): HandleId | null {
     if (!selected) return null;
-    const grab = (HANDLE_SCREEN_SIZE * canvasScale()) / 2 + 2 * canvasScale();
+    const scale = canvasScale();
+    const grab = (HANDLE_SCREEN_SIZE * scale) / 2 + 2 * scale;
 
     const found = handlesFor(selected).find(
-      (handle: Handle) => Math.abs(handle.x - point.x) <= grab && Math.abs(handle.y - point.y) <= grab
+      (handle) => Math.abs(handle.x - point.x) <= grab && Math.abs(handle.y - point.y) <= grab
     );
     return found?.id ?? null;
   }
@@ -413,9 +424,8 @@ export function AnnotationOverlay({
 
   function handlePointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
     const surface = shapeCanvasRef.current;
-    const canvas = canvasRef.current;
     const ctx = context();
-    if (!surface || !canvas || !ctx) return;
+    if (!surface || !ctx) return;
 
     const point = toCanvas(event);
     if (!point) return;
@@ -469,8 +479,6 @@ export function AnnotationOverlay({
 
     // ── freehand and eraser, straight onto the raster layer.
     gesture.current = { mode: "freehand" };
-    dragStart.current = point;
-    dragBase.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     applyStroke(ctx);
     ctx.beginPath();
@@ -526,8 +534,6 @@ export function AnnotationOverlay({
     }
 
     gesture.current = null;
-    dragStart.current = null;
-    dragBase.current = null;
   }
 
   function commitText() {
@@ -649,7 +655,7 @@ export function AnnotationOverlay({
         canUndo={undoStack.length > 0}
         canRedo={redoStack.length > 0}
         onDelete={selected ? deleteSelected : clearAll}
-        deleteLabel={selected ? 'Delete shape' : 'Clear all'}
+        deleteLabel={selected ? "Delete shape" : "Clear all"}
         onConfirm={attach}
         confirmLabel={attachLabel}
         onClose={onClose}

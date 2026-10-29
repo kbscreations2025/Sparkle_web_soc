@@ -11,12 +11,11 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { type QueuedJob } from "@/lib/api";
+import type { MarketingKitKind, QueuedJob } from "@/lib/api";
 import { describeJob, useNow } from "@/lib/job-progress";
 import { useCancelJob, useJobs, useQueueList } from "@/lib/jobs-context";
 import { conversationHref, TOOL_LABELS } from "@/lib/nav";
 import { kitHref } from "@/lib/marketingKits";
-import type { MarketingKitKind } from "@/lib/api";
 import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
 import { JobProgressBar } from "./JobProgressBar";

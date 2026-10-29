@@ -1,9 +1,8 @@
 const mongoose = require("mongoose");
 const config = require("../config");
 const MarketingKit = require("../models/marketingKit");
-const { hasPermission } = require("../permissions");
-const { buildLibraryKey, variantKeyFor, uploadObject, publicUrlFor } = require("../storage/r2");
-const { createThumbnail, THUMB_EXTENSION } = require("../storage/thumbnail");
+const { reachFilter } = require("../permissions");
+const { uploadLibraryImage } = require("../storage/libraryImage");
 
 /**
  * Saved Marketing Kits — the documents the Brand Story and Affinity result
@@ -15,15 +14,10 @@ const { createThumbnail, THUMB_EXTENSION } = require("../storage/thumbnail");
  * eight-piece kit that second trip was tens of megabytes.
  */
 
-const EXTENSION_BY_MIME = { "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 50;
 /** A saved deck design, serialised — well under Mongo's 16MB document cap with the rest of the kit. */
 const MAX_DESIGN_BYTES = 8_000_000;
-
-function extensionFor(mimeType) {
-  return EXTENSION_BY_MIME[mimeType] || "jpg";
-}
 
 /**
  * Uploads one picture and returns the subdocument describing it.
@@ -32,18 +26,7 @@ function extensionFor(mimeType) {
  * never re-parses a data URI — the same rule the generation path follows.
  */
 async function storeImage({ tenantId, userId, kitId, role, image, fileName = null, pdfName = null, pdfPage = null }) {
-  const buffer = Buffer.from(image.base64, "base64");
   const id = new mongoose.Types.ObjectId();
-
-  const key = buildLibraryKey({
-    tenantId,
-    userId,
-    collection: `marketing-kits/${kitId}`,
-    id,
-    extension: extensionFor(image.mimeType),
-  });
-
-  await uploadObject(key, buffer, image.mimeType);
 
   /*
    * A grid-sized copy beside the original, the same way an Asset gets one.
@@ -54,30 +37,27 @@ async function storeImage({ tenantId, userId, kitId, role, image, fileName = nul
    * resize that throws costs bandwidth, and every reader falls back to the
    * original.
    */
-  let thumbnail = null;
-  let dimensions = { width: null, height: null };
-  try {
-    const thumb = await createThumbnail(buffer);
-    const thumbKey = variantKeyFor(key, "thumb", THUMB_EXTENSION);
-    await uploadObject(thumbKey, thumb.buffer, thumb.mimeType);
-    thumbnail = { r2Key: thumbKey, url: publicUrlFor(thumbKey) };
-    dimensions = { width: thumb.sourceWidth, height: thumb.sourceHeight };
-  } catch (err) {
-    console.error(`[marketing-kit] could not build a thumbnail for ${key}:`, err.message);
-  }
+  const stored = await uploadLibraryImage({
+    tenantId,
+    userId,
+    collection: `marketing-kits/${kitId}`,
+    id,
+    image,
+    logTag: "marketing-kit",
+  });
 
   return {
     _id: id,
     role,
     r2Bucket: config.r2.bucket,
-    r2Key: key,
-    url: publicUrlFor(key),
-    thumbnailKey: thumbnail?.r2Key ?? null,
-    thumbnailUrl: thumbnail?.url ?? null,
+    r2Key: stored.key,
+    url: stored.url,
+    thumbnailKey: stored.thumbnail?.key ?? null,
+    thumbnailUrl: stored.thumbnail?.url ?? null,
     mimeType: image.mimeType,
-    sizeBytes: buffer.length,
-    width: dimensions.width,
-    height: dimensions.height,
+    sizeBytes: stored.sizeBytes,
+    width: stored.thumbnail?.sourceWidth ?? null,
+    height: stored.thumbnail?.sourceHeight ?? null,
     fileName,
     pdfName,
     pdfPage,
@@ -87,6 +67,17 @@ async function storeImage({ tenantId, userId, kitId, role, image, fileName = nul
 /** Uploads a list in parallel — a kit's pages are independent of each other. */
 function storeImages({ tenantId, userId, kitId, role, images = [] }) {
   return Promise.all(images.map((image) => storeImage({ tenantId, userId, kitId, role, image })));
+}
+
+/** Writes a kit under the id the run minted for it, owned by the person who ran it. */
+function createKit(dbUser, kitId, fields) {
+  return MarketingKit.create({
+    _id: kitId,
+    tenantId: dbUser.tenantId,
+    userId: dbUser._id,
+    userName: dbUser.name || dbUser.email,
+    ...fields,
+  });
 }
 
 /**
@@ -104,11 +95,7 @@ async function saveBrandStoryKit({ dbUser, kitId, model, images, sheetImages, an
     storeImages({ ...common, role: "sheet", images: sheetImages }),
   ]);
 
-  const kit = await MarketingKit.create({
-    _id: kitId,
-    tenantId: dbUser.tenantId,
-    userId: dbUser._id,
-    userName: dbUser.name || dbUser.email,
+  const kit = await createKit(dbUser, kitId, {
     kind: "brand_story",
     title: firstLineOf(analysis),
     status: "ready",
@@ -162,11 +149,7 @@ async function saveAffinityKit({
     })
   );
 
-  const kit = await MarketingKit.create({
-    _id: kitId,
-    tenantId: dbUser.tenantId,
-    userId: dbUser._id,
-    userName: dbUser.name || dbUser.email,
+  const kit = await createKit(dbUser, kitId, {
     kind,
     title: collectionName || "Untitled Collection",
     status: "ready",
@@ -216,11 +199,7 @@ async function saveCampaignKit({
     storeImages({ ...common, role: "product", images: sourceImages }),
   ]);
 
-  const kit = await MarketingKit.create({
-    _id: kitId,
-    tenantId: dbUser.tenantId,
-    userId: dbUser._id,
-    userName: dbUser.name || dbUser.email,
+  const kit = await createKit(dbUser, kitId, {
     kind,
     title: (title || options?.description?.trim() || "Campaign Kit").slice(0, 300),
     status: "ready",
@@ -270,11 +249,7 @@ async function saveKitSafely(save, { kind, kitId, dbUser, model, generationId = 
     console.error(`[marketing-kit] could not save the ${kind} kit:`, err.message);
 
     try {
-      await MarketingKit.create({
-        _id: kitId,
-        tenantId: dbUser.tenantId,
-        userId: dbUser._id,
-        userName: dbUser.name || dbUser.email,
+      await createKit(dbUser, kitId, {
         kind,
         title: "Could not be saved",
         status: "failed",
@@ -394,37 +369,6 @@ function toPublicImage(image) {
   };
 }
 
-/**
- * Whose kits are in reach — the same rule History's grid follows, so the
- * Members filter means one thing across both tabs of that page.
- *
- * Own work only, unless the caller both holds `result.read.others` and asks
- * for the team; `dataScope` then decides how far "the team" reaches.
- */
-function buildScopeFilter(dbUser, wantsTeam) {
-  const filter = { tenantId: dbUser.tenantId, deletedAt: null };
-  if (!wantsTeam || !hasPermission(dbUser, "result.read.others")) {
-    filter.userId = dbUser._id;
-    return filter;
-  }
-
-  const scope = dbUser.dataScope || { kind: "own" };
-  if (scope.kind === "selected") {
-    filter.userId = { $in: [dbUser._id, ...(scope.userIds || [])] };
-  } else if (scope.kind === "own") {
-    filter.userId = dbUser._id;
-  }
-  // kind === "organization" adds no userId clause — the whole tenant is in reach.
-  if (scope.notBefore) filter.createdAt = { $gte: scope.notBefore };
-  return filter;
-}
-
-/**
- * The kits in reach, newest first.
- *
- * Cursor-paginated on `_id`, which carries its own creation time, so a kit
- * saved mid-scroll can't shift a later page onto a row already shown.
- */
 /** The heavy parts of a kit no grid tile reads — see `toKitSummary`. */
 const LIST_EXCLUDED_FIELDS = [
   "-affinity.design",
@@ -438,8 +382,16 @@ const LIST_EXCLUDED_FIELDS = [
   "-campaign.options",
 ].join(" ");
 
+/**
+ * The kits in reach, newest first.
+ *
+ * Cursor-paginated on `_id`, which carries its own creation time, so a kit
+ * saved mid-scroll can't shift a later page onto a row already shown.
+ */
 async function listKits({ dbUser, kind, cursor, limit, scope }) {
-  const query = buildScopeFilter(dbUser, scope === "team");
+  // Whose kits are in reach — the same rule History's grid follows, so the
+  // Members filter means one thing across both tabs of that page.
+  const query = reachFilter(dbUser, scope === "team");
   if (kind) query.kind = kind;
   if (cursor && mongoose.Types.ObjectId.isValid(cursor)) query._id = { $lt: new mongoose.Types.ObjectId(cursor) };
 
@@ -471,7 +423,7 @@ async function listKits({ dbUser, kind, cursor, limit, scope }) {
  */
 async function getKit({ dbUser, id }) {
   if (!mongoose.Types.ObjectId.isValid(id)) return null;
-  const kit = await MarketingKit.findOne({ ...buildScopeFilter(dbUser, true), _id: id });
+  const kit = await MarketingKit.findOne({ ...reachFilter(dbUser, true), _id: id });
   return kit ? toPublicKit(kit) : null;
 }
 
@@ -575,6 +527,4 @@ module.exports = {
   getKit,
   updateKit,
   deleteKit,
-  toPublicKit,
-  toKitSummary,
 };

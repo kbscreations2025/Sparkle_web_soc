@@ -12,7 +12,6 @@ import type { AppUser } from "@/lib/api";
  * so nobody can be added who isn't already known to the central login.
  */
 export function AddMemberPanel({
-  orgId,
   orgName,
   appUsers,
   loading,
@@ -20,7 +19,6 @@ export function AddMemberPanel({
   onAdd,
   onClose,
 }: {
-  orgId: string;
   orgName: string;
   appUsers: AppUser[];
   loading: boolean;
@@ -41,7 +39,7 @@ export function AddMemberPanel({
       // nothing useful this row can do; one person belongs to one roster.
       .filter((person) => !person.organization)
       .filter((person) => !needle || person.email.toLowerCase().includes(needle));
-  }, [appUsers, query, orgId]);
+  }, [appUsers, query]);
 
   async function add(person: AppUser) {
     setBusyId(person.user_id);

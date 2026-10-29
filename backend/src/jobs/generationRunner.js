@@ -1,9 +1,9 @@
-const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
+const { resolveProviderModel, routeProviderCall } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
 const { createLivePreview } = require("../storage/thumbnail");
-const User = require("../models/user");
 const { buildReferenceNote } = require("../prompts/shared");
 const { detectIntent, intentForTool, refineCountFor, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
+const { loadJobActor } = require("./actor");
 
 /**
  * The body every image-generating job shares.
@@ -46,6 +46,36 @@ function trendDirection({ label, cue }) {
     `TRENDING DIRECTION FOR THIS IMAGE — ${label}: ${cue}`,
     "Design the piece in this current trend so it looks fresh and of the moment, while keeping every specification above (jewellery type, metal, stones, setting). Where the trend and a specification disagree, the specification wins.",
   ].join("\n");
+}
+
+/**
+ * The prompt recorded in History. With one set of words it is simply them;
+ * with several it is all of them, since no single one explains the run.
+ */
+function historyPrompt(prompts) {
+  return prompts.join("\n\n─────\n\n");
+}
+
+/**
+ * The runner's `buildShots` for a run that asked for design variations on a
+ * reference photo (Text to Image, Text to Sketch): one image per variation,
+ * each from the tool's own `buildVariationPrompt`. Nothing otherwise, so the
+ * tool's `buildPrompt` applies — spread it into the runner's arguments.
+ */
+function designVariationShots(data, buildVariationPrompt) {
+  if (!data?.designVariations || !data.sourceImages?.length) return {};
+  return {
+    buildShots: ({ data: payload, count }) =>
+      Array.from({ length: count }, (_, index) =>
+        buildVariationPrompt({
+          description: payload.prompt,
+          style: payload.style,
+          aspect: payload.aspect,
+          index,
+          total: count,
+        })
+      ),
+  };
 }
 
 /**
@@ -104,14 +134,11 @@ async function runGenerationJob({
    */
   finishRefine,
 }) {
-  const dbUser = await User.findById(job.userId);
-  if (!dbUser) throw new Error("the user who queued this job no longer exists");
-
+  const { dbUser, tenant } = await loadJobActor(job);
   const { provider, model, quality, modelLabel } = resolveProviderModel(
     data.requestedModel,
     data.requestedQuality
   );
-  const tenant = await loadTenantOrThrow(dbUser);
 
   const common = { tenant, user: dbUser, tool, model, modelLabel, quality, provider, params };
 
@@ -168,7 +195,7 @@ async function runGenerationJob({
       ...common,
       conversationId: data.conversationId,
       parentGenerationId: data.parentGenerationId,
-      prompt: prompts.length === 1 ? prompts[0] : prompts.join("\n\n─────\n\n"),
+      prompt: historyPrompt(prompts),
       userPrompt: displayPrompt || instruction,
       inputImages: [
         { image: refineImage, role: "edited" },
@@ -211,10 +238,7 @@ async function runGenerationJob({
       trendCues.length ? { ...shot, prompt: `${shot.prompt}\n\n${trendDirection(trendCues[index % trendCues.length])}` } : shot
     );
   const count = shots.length;
-
-  // The prompt recorded in History. With one set of words it is simply them;
-  // with several it is all of them, since no single one explains the run.
-  const prompt = count === 1 ? shots[0].prompt : shots.map((shot) => shot.prompt).join("\n\n─────\n\n");
+  const prompt = historyPrompt(shots.map((shot) => shot.prompt));
 
   // One slice of the bar per variation, and each one reports the moment it
   // lands: the user sees the first image while the rest are still running,
@@ -312,17 +336,26 @@ async function runGenerationJob({
  * Deliberately small, and deliberately urls rather than the images themselves:
  * this is written to Mongo, carried through Redis and pushed down a socket,
  * none of which should be moving megabytes of base64 around.
+ *
+ * `fields` follow the stored outputs: the model that ran, and anything else a
+ * tool's result carries.
  */
-function toResult(saved, { model, modelLabel, provider }) {
+function toResult(saved, fields) {
   return {
     generationId: saved.generationId,
     conversationId: saved.conversationId,
     outputUrl: saved.outputs[0]?.url || null,
     outputUrls: saved.outputs.map((entry) => entry.url),
-    model,
-    modelLabel,
-    provider,
+    ...fields,
   };
 }
 
-module.exports = { runGenerationJob, clampCount, MAX_IMAGE_COUNT, DEFAULT_IMAGE_COUNT };
+module.exports = {
+  runGenerationJob,
+  clampCount,
+  toResult,
+  historyPrompt,
+  designVariationShots,
+  MAX_IMAGE_COUNT,
+  DEFAULT_IMAGE_COUNT,
+};

@@ -216,7 +216,6 @@ function buildFestivePosterRefinePrompt({ instruction, referenceCount = 0 }) {
 }
 
 module.exports = {
-  FESTIVE_EVENTS,
   FESTIVE_EVENT_IDS,
   FESTIVE_ASPECT_RATIOS,
   POSTER_FONT_IDS,

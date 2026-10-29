@@ -1,7 +1,7 @@
-const { routeTextCall, loadTenantOrThrow } = require("../aiRouting");
+const { routeTextCall } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
 const gemini = require("../providers/gemini");
-const User = require("../models/user");
+const { loadJobActor } = require("./actor");
 
 /**
  * The body every text-out job shares — Image to Text, and the writing halves
@@ -28,6 +28,9 @@ const User = require("../models/user");
  * that way.
  */
 const REFUSAL_PATTERN = /^(i'?m sorry|i cannot|i can'?t|i apologize|as an ai)/i;
+
+/** One parsed image, `{ mimeType, base64 }`, as a part for a `buildParts` list. */
+const inlineData = ({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } });
 
 /**
  * Thrown for a run the model answered, but not usefully.
@@ -87,11 +90,9 @@ async function runTextJob({
   parse,
   persist,
 }) {
-  const dbUser = await User.findById(job.userId);
-  if (!dbUser) throw new Error("the user who queued this job no longer exists");
-
-  const tenant = await loadTenantOrThrow(dbUser);
+  const { dbUser, tenant } = await loadJobActor(job);
   const parts = buildParts({ data });
+  const modelLabel = gemini.labelFor(modelId);
 
   // `provider` is whichever answered — Gemini, or OpenRouter standing in for it.
   const { output, provider, providerId } = await withProgress({ from: 20, to: 85, phase: "generating" }, async ({ stepDone }) => {
@@ -137,7 +138,7 @@ async function runTextJob({
       conversationId: data.conversationId,
       parentGenerationId: data.parentGenerationId || null,
       model: modelId,
-      modelLabel: gemini.labelFor(modelId),
+      modelLabel,
       provider,
       providerId,
       prompt: promptForHistory || textOf(parts),
@@ -165,7 +166,7 @@ async function runTextJob({
     conversationId: saved?.conversationId ?? null,
     generationId: saved?.generationId ?? null,
     model: modelId,
-    modelLabel: gemini.labelFor(modelId),
+    modelLabel,
     provider,
     ...extra,
   };
@@ -213,4 +214,4 @@ function textOf(parts) {
     .join("\n");
 }
 
-module.exports = { runTextJob, ModelRefusedError };
+module.exports = { runTextJob, ModelRefusedError, inlineData };

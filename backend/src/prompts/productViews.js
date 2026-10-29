@@ -99,7 +99,6 @@ const CATEGORIES = {
 
 const CATEGORY_IDS = Object.keys(CATEGORIES);
 const VIEW_BY_ID = new Map(VIEWS.map((view) => [view.id, view]));
-const VIEW_IDS = VIEWS.map((view) => view.id);
 
 /** The view ids that belong to one category. */
 function viewIdsFor(category) {
@@ -125,4 +124,4 @@ function buildViewPrompt({ viewId, photoViews = [], notes, category = "ring" }) 
     .join("\n\n");
 }
 
-module.exports = { VIEWS, VIEW_IDS, VIEW_BY_ID, CATEGORIES, CATEGORY_IDS, viewIdsFor, buildViewPrompt };
+module.exports = { VIEW_BY_ID, CATEGORIES, CATEGORY_IDS, viewIdsFor, buildViewPrompt };

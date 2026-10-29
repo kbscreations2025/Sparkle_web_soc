@@ -1,9 +1,8 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useState } from "react";
 import { CalendarHeart } from "lucide-react";
-import { CampaignKitDeck } from "@/components/studio/CampaignKitDeck";
+import { CampaignKitDeck, useReopenedCampaignKit } from "@/components/studio/CampaignKitDeck";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
@@ -16,12 +15,10 @@ import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImageP
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import {
   festivePoster,
-  fetchMarketingKit,
   refineFestivePoster,
   IMAGE_EDIT_MODELS,
   DEFAULT_IMAGE_EDIT_MODEL,
   toModelOptions,
-  type MarketingKit,
   type ImageEditModelId,
 } from "@/lib/api";
 import { CAMPAIGN_ASPECTS } from "@/lib/campaignOptions";
@@ -58,24 +55,9 @@ export default function FestivePosterPage() {
 
 function FestivePosterWorkspace() {
   const { user } = useAuth();
-  const searchParams = useSearchParams();
-  const openKitId = searchParams.get("kitId");
 
   /** A saved set of posters reopened from the rail or History, rather than a new run. */
-  const [openKit, setOpenKit] = useState<MarketingKit | null>(null);
-
-  useEffect(() => {
-    if (!openKitId) return;
-    let cancelled = false;
-
-    fetchMarketingKit(openKitId).then((res) => {
-      if (!cancelled && res.status === "success" && res.kit?.campaign) setOpenKit(res.kit);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [openKitId]);
+  const openKit = useReopenedCampaignKit();
 
   const [jewelry, setJewelry] = useState<UploadItem[]>([]);
   const [jewelryPreview, setJewelryPreview] = useState<PreviewImage | null>(null);

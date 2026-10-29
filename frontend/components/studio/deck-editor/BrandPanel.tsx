@@ -7,6 +7,7 @@ import {
   FONTS,
   SLIDE_H,
   SLIDE_W,
+  aspectOf,
   fontStack,
   imageElement,
   type DeckBrand,
@@ -27,16 +28,6 @@ const CORNERS: { id: LogoCorner; label: string }[] = [
   { id: "bottom-left", label: "Bottom left" },
   { id: "bottom-right", label: "Bottom right" },
 ];
-
-/** A picture's width ÷ height. */
-function aspectOf(src: string) {
-  return new Promise<number>((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img.naturalWidth / Math.max(1, img.naturalHeight) || 1);
-    img.onerror = () => resolve(1);
-    img.src = src;
-  });
-}
 
 /**
  * The house style: logos, colours and fonts, kept with the deck and

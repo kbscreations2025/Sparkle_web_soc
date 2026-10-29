@@ -47,14 +47,14 @@ const HEADERS = {
   centerWt: ["centerwt", "centerweight"],
   totalDiaWt: ["diawt", "totaldiawt", "totaldiaweight"],
   price: ["sellingprice", "price"],
-} as const;
+};
 
 type Field = keyof typeof HEADERS;
 
 const squash = (value: unknown) => String(value ?? "").toLowerCase().replace(/[^a-z]/g, "");
 
 /** "RE-16300-IS-TT" → "RE-16300": the deck shows the base style only, upper-cased. */
-export function baseStyleNo(raw: string) {
+function baseStyleNo(raw: string) {
   const parts = raw.trim().toUpperCase().split("-").filter(Boolean);
   return parts.slice(0, 2).join("-");
 }
@@ -135,17 +135,17 @@ async function picturesByRow(file: ArrayBuffer): Promise<Map<number, string>> {
   const workbookRels = parseRels(await read("xl/_rels/workbook.xml.rels"));
   const workbook = await read("xl/workbook.xml");
   const firstSheetRid = workbook.match(/<sheet\b[^>]*r:id="([^"]+)"/)?.[1];
-  const sheetPath = firstSheetRid && workbookRels.get(firstSheetRid)
-    ? resolvePath("xl/workbook.xml", workbookRels.get(firstSheetRid)!)
-    : "xl/worksheets/sheet1.xml";
+  const sheetTarget = firstSheetRid && workbookRels.get(firstSheetRid);
+  const sheetPath = sheetTarget ? resolvePath("xl/workbook.xml", sheetTarget) : "xl/worksheets/sheet1.xml";
 
   const sheetRels = parseRels(await read(relsPathFor(sheetPath)));
   const sheet = await read(sheetPath);
   const drawingRid = sheet.match(/<drawing\b[^>]*r:id="([^"]+)"/)?.[1];
+  const drawingTarget = drawingRid && sheetRels.get(drawingRid);
   const result = new Map<number, string>();
-  if (!drawingRid || !sheetRels.get(drawingRid)) return result;
+  if (!drawingTarget) return result;
 
-  const drawingPath = resolvePath(sheetPath, sheetRels.get(drawingRid)!);
+  const drawingPath = resolvePath(sheetPath, drawingTarget);
   const drawingRels = parseRels(await read(relsPathFor(drawingPath)));
   const drawing = await read(drawingPath);
 
@@ -153,11 +153,12 @@ async function picturesByRow(file: ArrayBuffer): Promise<Map<number, string>> {
   for (const anchor of anchors) {
     const row = anchor.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/)?.[1];
     const embed = anchor.match(/<a:blip\b[^>]*r:embed="([^"]+)"/)?.[1];
-    if (row === undefined || !embed || !drawingRels.get(embed)) continue;
+    const mediaTarget = embed && drawingRels.get(embed);
+    if (row === undefined || !mediaTarget) continue;
     const rowIndex = Number(row);
     // A row with two pictures keeps the first, as it reads on screen.
     if (result.has(rowIndex)) continue;
-    const mediaPath = resolvePath(drawingPath, drawingRels.get(embed)!);
+    const mediaPath = resolvePath(drawingPath, mediaTarget);
     const mime = MIME_BY_EXT[mediaPath.split(".").pop()?.toLowerCase() ?? ""];
     const media = zip.file(mediaPath);
     if (!mime || !media) continue;
@@ -182,14 +183,14 @@ export async function parseLineSheet(file: File): Promise<ParsedLineSheet> {
   const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", blankrows: true, raw: true });
   const offset = range.s.r;
 
-  const headerIndex = grid.findIndex((cells) => cells.some((cell) => HEADERS.styleNo.includes(squash(cell) as never)));
+  const headerIndex = grid.findIndex((cells) => cells.some((cell) => HEADERS.styleNo.includes(squash(cell))));
   if (headerIndex < 0) throw new Error("Couldn't find the header row — the sheet needs a “STYLE NO.” column.");
 
   const columns: Partial<Record<Field, number>> = {};
   grid[headerIndex].forEach((cell, index) => {
     const name = squash(cell);
     for (const field of Object.keys(HEADERS) as Field[]) {
-      if (columns[field] === undefined && (HEADERS[field] as readonly string[]).includes(name)) columns[field] = index;
+      if (columns[field] === undefined && HEADERS[field].includes(name)) columns[field] = index;
     }
   });
   const missing = (["styleNo", "diaCombination", "price"] as Field[]).filter((field) => columns[field] === undefined);
@@ -232,7 +233,6 @@ export async function parseLineSheet(file: File): Promise<ParsedLineSheet> {
   if (rows.length === 0) throw new Error("No products found under the header row.");
   return { rows, missingImages };
 }
-
 
 // ── Layout, in the editor's 1280×720 slide px ──────────────────────────────
 //

@@ -8,7 +8,7 @@ import { ChatMessages } from "@/components/studio/ChatMessages";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
 import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
-import { LibraryPicker } from "@/components/studio/LibraryPicker";
+import { usePhotoPicker } from "@/components/studio/SinglePhotoUpload";
 import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
 import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
@@ -24,7 +24,6 @@ import {
   type ImageEditModelId,
 } from "@/lib/api";
 import { compressImage, urlToDataUrl } from "@/lib/image";
-import { useLibraryPicker } from "@/lib/library";
 import { useAttachments } from "@/lib/useAttachments";
 import { useAuth } from "@/lib/auth-context";
 import { useCreditGuard } from "@/lib/credit-guard";
@@ -77,9 +76,18 @@ export default function ChatToEditPage() {
 
   const conversationId = useRef<string | null>(null);
   const parentGenerationId = useRef<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function stageStartImage(file: File) {
+    setError("");
+    try {
+      setPendingImage(await compressImage(file));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read that file");
+    }
+  }
+
   // The photo to start from can be an earlier upload or result — see UploadZone.
-  const library = useLibraryPicker(fileInputRef);
+  const startPicker = usePhotoPicker((file) => file && stageStartImage(file));
 
   const searchParams = useSearchParams();
 
@@ -150,15 +158,6 @@ export default function ChatToEditPage() {
     setReadOnly(null);
     conversationId.current = null;
     parentGenerationId.current = null;
-  }
-
-  async function stageStartImage(file: File) {
-    setError("");
-    try {
-      setPendingImage(await compressImage(file));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read that file");
-    }
   }
 
   /**
@@ -282,7 +281,7 @@ export default function ChatToEditPage() {
             <ChatMessages
               history={history}
               busy={busy}
-              onSelectResult={(src) => setSelectedView(src)}
+              onSelectResult={setSelectedView}
               onRetry={readOnly ? undefined : retry}
               hints={
                 !readOnly && history.length === 0 ? (currentImage || pendingImage ? EDIT_HINTS : START_HINTS) : undefined
@@ -344,23 +343,12 @@ export default function ChatToEditPage() {
                     describe your first edit.
                   </p>
                 </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) stageStartImage(file);
-                    event.target.value = "";
-                  }}
-                />
                 <button
                   type="button"
-                  onClick={library.show}
+                  onClick={startPicker.show}
                   className="mt-1 flex items-center gap-2 rounded-xl border border-gold/25 bg-gold/10 px-4 py-2 text-xs font-medium text-gold transition-colors hover:border-gold/35 hover:bg-gold/15"
                 >
-                  <Upload size={13} /> {library.available ? "Choose image" : "Upload image"}
+                  <Upload size={13} /> {startPicker.available ? "Choose image" : "Upload image"}
                 </button>
               </div>
             )}
@@ -377,12 +365,7 @@ export default function ChatToEditPage() {
       />
 
       <AnnotationLayer attachments={attach} lightboxSrc={lightboxSrc} onCloseLightbox={() => setLightboxSrc(null)} />
-      <LibraryPicker
-        open={library.open}
-        onClose={library.close}
-        onFiles={(files) => files[0] && stageStartImage(files[0])}
-        room={1}
-      />
+      {startPicker.inputs}
     </div>
   );
 }

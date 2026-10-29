@@ -10,7 +10,6 @@ import {
   DEFAULT_SPARKLE_MODEL,
   LIFESTYLE_PRESETS,
   type LifestyleModel,
-  type SparkleModelId,
 } from "@/lib/api";
 import { compressImage } from "@/lib/image";
 import { useJobs } from "@/lib/jobs-context";
@@ -31,6 +30,9 @@ export type ModelChoice =
   | { kind: "saved"; id: string; src: string }
   | { kind: "upload"; dataUrl: string; src: string };
 
+/** What a page starts on, and falls back to when the picked model is deleted. */
+const FIRST_PRESET: ModelChoice = { kind: "preset", number: LIFESTYLE_PRESETS[0].number, src: LIFESTYLE_PRESETS[0].src };
+
 /**
  * A chosen model as the request fields that name it.
  *
@@ -46,13 +48,8 @@ export function modelRequestFields(choice: ModelChoice) {
 
 export function useModelLibrary() {
   const [models, setModels] = useState<LifestyleModel[]>([]);
-  const [choice, setChoice] = useState<ModelChoice | null>({
-    kind: "preset",
-    number: LIFESTYLE_PRESETS[0].number,
-    src: LIFESTYLE_PRESETS[0].src,
-  });
+  const [choice, setChoice] = useState<ModelChoice | null>(FIRST_PRESET);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
 
   const { jobs, track } = useJobs();
@@ -62,19 +59,11 @@ export function useModelLibrary() {
    */
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    const res = await listLifestyleModels();
-    if (res.status === "success") setModels(res.models ?? []);
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
 
     listLifestyleModels().then((res) => {
-      if (cancelled) return;
-      if (res.status === "success") setModels(res.models ?? []);
-      setLoading(false);
+      if (!cancelled && res.status === "success") setModels(res.models ?? []);
     });
 
     // A page unmounted mid-request must not write into state that no longer
@@ -109,11 +98,11 @@ export function useModelLibrary() {
 
   /** Queues a new model from the builder's attributes. */
   const generate = useCallback(
-    async (attrs: Record<string, string>, notes: string, name: string, model: SparkleModelId = DEFAULT_SPARKLE_MODEL) => {
+    async (attrs: Record<string, string>, notes: string, name: string) => {
       setError("");
       setGenerating(true);
 
-      const res = await generateLifestyleModel({ attrs, notes, name, model });
+      const res = await generateLifestyleModel({ attrs, notes, name, model: DEFAULT_SPARKLE_MODEL });
       if (res.status === "queued" && res.job) {
         setPendingJobId(res.job.id);
         track(res.job);
@@ -137,13 +126,13 @@ export function useModelLibrary() {
    * slow upload never stands between picking a photo and using it — and a
    * save that fails costs a library entry, not the run.
    */
-  const upload = useCallback(async (file: File, name?: string) => {
+  const upload = useCallback(async (file: File) => {
     setError("");
     try {
       const dataUrl = await compressImage(file);
       setChoice({ kind: "upload", dataUrl, src: dataUrl });
 
-      const res = await saveLifestyleModel({ name, imageDataUri: dataUrl });
+      const res = await saveLifestyleModel({ imageDataUri: dataUrl });
       if (res.status === "success" && res.model) {
         const saved = res.model;
         setModels((current) => [saved, ...current]);
@@ -186,11 +175,7 @@ export function useModelLibrary() {
         setModels((current) => current.filter((entry) => entry.id !== id));
         // Fall back to the first preset rather than leaving the page with a
         // selection that no longer exists.
-        setChoice((current) =>
-          current?.kind === "saved" && current.id === id
-            ? { kind: "preset", number: LIFESTYLE_PRESETS[0].number, src: LIFESTYLE_PRESETS[0].src }
-            : current
-        );
+        setChoice((current) => (current?.kind === "saved" && current.id === id ? FIRST_PRESET : current));
       } else {
         setError(res.message || "Could not delete that model");
       }
@@ -200,11 +185,9 @@ export function useModelLibrary() {
 
   return {
     models,
-    loading,
     choice,
     setChoice,
     error,
-    setError,
     generating,
     pendingJob,
     generate,
@@ -212,7 +195,6 @@ export function useModelLibrary() {
     rename,
     setPublic,
     remove,
-    refresh,
   };
 }
 

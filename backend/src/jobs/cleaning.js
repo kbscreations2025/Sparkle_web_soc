@@ -9,11 +9,11 @@ const {
   COLOR_NOTE,
   buildReferenceNote,
 } = require("../prompts");
-const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
+const { resolveProviderModel, routeProviderCall } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
 const { createLivePreview } = require("../storage/thumbnail");
 const { registerJobHandler } = require("./registry");
-const User = require("../models/user");
+const { loadJobActor } = require("./actor");
 const { detectIntent, intentForTool, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
 
 const CLEANING_JOB = "cleaning.generate";
@@ -121,18 +121,13 @@ function buildPrompt({ isRefinement, instruction, customPrompt, variant, extraNo
 async function runCleaningJob({ job, data, setProgress, withProgress }) {
   const { image, references = [], requestedModel, isRefinement, instruction, customPrompt, variant, extraNotes } = data;
 
-  // The worker has no request context, so the actor is re-loaded from the job.
-  // `.lean()` is deliberately NOT used: recordGeneration reads `user.name`/
-  // `user.email` and passes `user._id` straight into other documents.
-  const dbUser = await User.findById(job.userId);
-  if (!dbUser) throw new Error("the user who queued this job no longer exists");
+  const { dbUser, tenant } = await loadJobActor(job);
 
   // Deliberately no requested quality: cleaning is the one tool with no size
   // picker. A retouched photograph is the deliverable here, not a preview, so
   // it always runs at the model's best — 4K on the models that offer it —
   // whatever a client might try to send.
   const { provider, model, quality, modelLabel } = resolveProviderModel(requestedModel);
-  const tenant = await loadTenantOrThrow(dbUser);
 
   const swatch = usesGoldSwatch({ isRefinement, customPrompt, variant });
   const basePrompt = buildPrompt({
@@ -227,4 +222,4 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
 
 registerJobHandler(CLEANING_JOB, runCleaningJob);
 
-module.exports = { CLEANING_JOB, buildPrompt };
+module.exports = { CLEANING_JOB };

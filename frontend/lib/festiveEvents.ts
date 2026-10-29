@@ -32,8 +32,8 @@ export const FESTIVE_COUNT_OPTIONS = [1, 2, 3, 4];
 
 /**
  * Title fonts for a poster's text. The ids match POSTER_FONTS in the backend's
- * prompts/festivePoster.js, which describes each to the model; `preview` is the
- * Google font the picker draws its sample in (loaded on the festive page).
+ * prompts/festivePoster.js, which describes each to the model; PosterTextCard
+ * previews each one in its matching Google font.
  */
 export const POSTER_FONTS = [
   { id: "classic_serif", label: "Classic serif" },

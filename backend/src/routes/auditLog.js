@@ -57,6 +57,13 @@ function readDate(raw) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** A repeatable id param as ObjectIds, dropping anything that isn't one. */
+function readIds(raw) {
+  return (Array.isArray(raw) ? raw : [raw])
+    .filter((value) => mongoose.Types.ObjectId.isValid(value))
+    .map((value) => new mongoose.Types.ObjectId(value));
+}
+
 /** Escapes a user's search text so a stray `(` or `*` can't break the regex. */
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -99,10 +106,7 @@ function tenantScope(req) {
   if (!tenantId) return {};
 
   // Repeatable, like the other filters: one organization or several.
-  const ids = (Array.isArray(tenantId) ? tenantId : [tenantId])
-    .filter((value) => mongoose.Types.ObjectId.isValid(value))
-    .map((value) => new mongoose.Types.ObjectId(value));
-
+  const ids = readIds(tenantId);
   return ids.length ? { tenantId: { $in: ids } } : {};
 }
 
@@ -135,9 +139,7 @@ function buildFilter(req) {
   // Repeatable like `action`, for the same reason: "what did these two do"
   // is one question, and asking it twice and merging by hand is not an answer.
   if (actorUserId) {
-    const ids = (Array.isArray(actorUserId) ? actorUserId : [actorUserId])
-      .filter((value) => mongoose.Types.ObjectId.isValid(value))
-      .map((value) => new mongoose.Types.ObjectId(value));
+    const ids = readIds(actorUserId);
     if (ids.length) filter.actorUserId = { $in: ids };
   }
 

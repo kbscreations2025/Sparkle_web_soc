@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
+import { Fragment, useState, type FormEvent } from "react";
 import { Activity, ChevronDown, ChevronRight, Loader2, Plus, Trash2, UserPlus } from "lucide-react";
 import {
   listOrganizations,
@@ -27,6 +27,9 @@ import { FilterChecklist, TableFilterBar } from "@/components/admin/TableFilterB
 import { useMemberFilter } from "@/components/admin/MemberFilterBar";
 import { GrantHistory } from "@/components/admin/GrantHistory";
 import { CELL, HEAD_ROW, TABLE_FRAME } from "@/components/admin/table";
+import { CreditAmountPicker } from "@/components/admin/CreditAmountDialog";
+import { ErrorBanner } from "@/components/admin/ErrorBanner";
+import { useConsoleLoad } from "@/components/admin/useConsoleLoad";
 import { cn } from "@/lib/utils";
 
 const ORG_STATUS_OPTIONS = [
@@ -68,17 +71,16 @@ function timezoneOptions(current: string) {
   return !current || all.some((option) => option.value === current) ? all : [{ value: current, label: current }, ...all];
 }
 
+const loadOrgsAndCatalogue = () => Promise.all([listOrganizations(), getGrantCatalogue()]);
+
 export default function ConsolePage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [groups, setGroups] = useState<GrantGroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
   // Which organization is expanded, and its roster once fetched.
   const [openId, setOpenId] = useState<string | null>(null);
   const [members, setMembers] = useState<Record<string, Member[]>>({});
   const [loadingMembers, setLoadingMembers] = useState(false);
-  // Bumped after a grant, so the expanded org's logs re-read with the balances.
 
   // The central pool, fetched once and reused by every add panel.
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
@@ -111,40 +113,23 @@ export default function ConsolePage() {
   const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  // Folds responses into state. Only ever called from a promise callback or an
-  // event handler — never synchronously inside an effect, which would cascade.
-  const apply = useCallback(
-    (
-      orgs: Awaited<ReturnType<typeof listOrganizations>>,
-      catalogue?: Awaited<ReturnType<typeof getGrantCatalogue>>
-    ) => {
-      if (orgs.status === "success") setOrganizations(orgs.organizations ?? []);
-      else setError(orgs.message || "Could not load organizations");
-      if (catalogue?.status === "success") setGroups(catalogue.groups ?? []);
-      setLoading(false);
-    },
-    []
-  );
+  // Folds an organization list into state, returning the error to show if it
+  // failed. Only ever called from a promise callback or an event handler —
+  // never synchronously inside an effect, which would cascade.
+  function applyOrgs(orgs: Awaited<ReturnType<typeof listOrganizations>>) {
+    if (orgs.status === "success") setOrganizations(orgs.organizations ?? []);
+    else return orgs.message || "Could not load organizations";
+  }
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([listOrganizations(), getGrantCatalogue()])
-      .then(([orgs, catalogue]) => {
-        if (!cancelled) apply(orgs, catalogue);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setError("Could not reach the server");
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [apply]);
+  const { loading, error, setError } = useConsoleLoad(loadOrgsAndCatalogue, ([orgs, catalogue]) => {
+    if (catalogue.status === "success") setGroups(catalogue.groups ?? []);
+    return applyOrgs(orgs);
+  });
 
   async function reloadOrgs() {
     try {
-      apply(await listOrganizations());
+      const message = applyOrgs(await listOrganizations());
+      if (message) setError(message);
     } catch {
       setError("Could not reach the server");
     }
@@ -368,11 +353,7 @@ export default function ConsolePage() {
           </form>
         )}
 
-        {error && (
-          <p className="rounded-lg border border-error/20 bg-error/[0.08] px-3 py-2 text-xs text-error">
-            {error}
-          </p>
-        )}
+        <ErrorBanner message={error} />
 
         {loading ? (
           <p className="flex items-center gap-2 text-sm text-faint">
@@ -623,7 +604,6 @@ export default function ConsolePage() {
         return (
           <Modal onClose={() => setAddingTo(null)}>
             <AddMemberPanel
-              orgId={org.id}
               orgName={org.name}
               appUsers={appUsers}
               loading={centralLoading}
@@ -660,13 +640,7 @@ export default function ConsolePage() {
   );
 }
 
-/**
- * The grant box.
- *
- * Presets rather than a bare number field: the amounts an admin actually
- * reaches for are round, and 1,000 credits is $10 of provider spend — a
- * figure that means nothing at a glance, so each preset says what it buys.
- */
+/** The grant box — presets over a digits-only field (see `CreditAmountPicker`). */
 function GrantPanel({
   holder,
   toPool,
@@ -681,12 +655,6 @@ function GrantPanel({
   onClose: () => void;
 }) {
   const [amount, setAmount] = useState(5000);
-
-  const PRESETS = [
-    { value: 1000, hint: "~40 flash images" },
-    { value: 5000, hint: "~200 flash images" },
-    { value: 20000, hint: "~25 Veo clips" },
-  ];
 
   return (
     <form
@@ -706,43 +674,7 @@ function GrantPanel({
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {PRESETS.map((preset) => (
-          <button
-            key={preset.value}
-            type="button"
-            onClick={() => setAmount(preset.value)}
-            title={preset.hint}
-            className={cn(
-              "rounded-lg border px-2.5 py-1.5 text-[11px] font-medium tabular-nums transition-colors",
-              amount === preset.value
-                ? "border-gold/30 bg-gold/10 text-gold"
-                : "border-white/10 bg-white/[0.03] text-muted hover:border-white/20 hover:text-cream"
-            )}
-          >
-            {preset.value.toLocaleString()}
-          </button>
-        ))}
-      </div>
-
-      <label className="block space-y-1">
-        <span className="text-[10px] font-medium uppercase tracking-widest text-faint">Credits</span>
-        <input
-          // Text, not type="number": no spinner arrows, no "e"/"-"/"." slipping
-          // through. Anything that isn't a digit is dropped as it's typed.
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          autoComplete="off"
-          value={amount > 0 ? String(amount) : ""}
-          autoFocus
-          onChange={(event) => {
-            const digits = event.target.value.replace(/\D/g, "").slice(0, 9);
-            setAmount(digits ? Number(digits) : 0);
-          }}
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-right text-sm tabular-nums text-cream focus:border-gold/30 focus:outline-none"
-        />
-      </label>
+      <CreditAmountPicker amount={amount} onChange={setAmount} />
 
       <div className="flex justify-end gap-2 pt-1">
         <button

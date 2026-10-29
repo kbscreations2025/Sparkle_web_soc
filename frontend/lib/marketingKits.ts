@@ -7,7 +7,7 @@ import type { MarketingKitKind, MarketingKitSummary } from "./api";
  * each had its own copy of these maps — which is how a fourth kind would
  * have ended up reachable from one list and not the other.
  */
-export const KIT_SURFACE: Record<MarketingKitKind, string> = {
+const KIT_SURFACE: Record<MarketingKitKind, string> = {
   brand_story: "/marketing-kit/brand-story",
   // Retired: Affinity kits were moved to Collection Story, which holds the
   // same deck. Anything still tagged Affinity opens there too.
@@ -31,12 +31,6 @@ export function kitHref(kit: Pick<MarketingKitSummary, "id" | "kind">) {
 }
 
 /**
- * The line under a kit's title — what kind it is, and how much is in it.
- *
- * Brand Story deliberately carries no count: it is one narrative about one
- * piece, so "1 photo" would be noise rather than information.
- */
-/**
  * One fixed hue per kind of kit, so Brand Story, Affinity, Campaign Kit and
  * the rest read apart at a glance in the Kits grid — the same idea, and the
  * same badge shape, as the results grid's per-tool colours.
@@ -54,6 +48,12 @@ export function kitBadgeStyle(kind: string) {
   return { color: `hsl(${hsl})`, background: `hsl(${hsl} / 0.14)`, border: `1px solid hsl(${hsl} / 0.28)` };
 }
 
+/**
+ * The line under a kit's title — what kind it is, and how much is in it.
+ *
+ * Brand Story deliberately carries no count: it is one narrative about one
+ * piece, so "1 photo" would be noise rather than information.
+ */
 export function describeKit(kit: Pick<MarketingKitSummary, "kind" | "pieceCount">) {
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 

@@ -1,19 +1,8 @@
 "use client";
 
-import type { AffinityItem } from "./api";
-import { hasProductionSheet, splitCategoryEntries, splitEntries, type AffinityPiece, type DeckCategory } from "./affinity";
-import { backgroundBox, backgroundSource, imageSource, type DeckDesign } from "./deckDesign";
+import type { AffinityPiece } from "./affinity";
+import { aspectOf, backgroundBox, backgroundSource, imageSource, type DeckDesign } from "./deckDesign";
 import { urlToDataUrl } from "./image";
-
-/** A picture's own width ÷ height, so PowerPoint can fit or crop it without stretching. */
-function aspectOf(data: string): Promise<number> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img.naturalWidth / Math.max(1, img.naturalHeight) || 1);
-    img.onerror = () => resolve(1);
-    img.src = data;
-  });
-}
 
 /**
  * Exporting the catalog.
@@ -25,23 +14,8 @@ function aspectOf(data: string): Promise<number> {
  *    deck is already laid out at the real 16:9 slide ratio, so what prints
  *    is what is on screen.
  *  · **PPTX** is rebuilt from the data rather than screenshotted, so the
- *    text in the deck stays selectable and editable in PowerPoint. That
- *    means the slide geometry here has to mirror `AffinityDeck` by hand —
- *    the two are kept in step through the shared palette and the shared
- *    `splitEntries`.
+ *    text in the deck stays selectable and editable in PowerPoint.
  */
-
-/** Hex without the `#`, which is what pptxgenjs wants. */
-const PPT = {
-  cream: "F7F2EC",
-  borderGold: "B4A794",
-  titleGold: "6B5D42",
-  ink: "46423C",
-  labelGray: "646464",
-} as const;
-
-/** How many grid columns a card spans, from its on-screen size. */
-const SIZE_COLS = { sm: 1, md: 1, lg: 2 } as const;
 
 /**
  * pptxgenjs embeds images as base64. A freshly uploaded piece is already a
@@ -80,224 +54,6 @@ function fileName(collectionName: string, extension: string) {
   return `${stem || "affinity-collection"}.${extension}`;
 }
 
-export async function exportAffinityPptx({
-  collectionName,
-  tagline,
-  items,
-  pieces,
-  categories = [],
-}: {
-  collectionName: string;
-  tagline: string;
-  items: AffinityItem[];
-  pieces: AffinityPiece[];
-  /** Collection Story's groups — one cover and its own sections each. */
-  categories?: DeckCategory[];
-}) {
-  // Imported on demand: the library is large, and a page that never exports
-  // should never download it.
-  const PptxGenJS = (await import("pptxgenjs")).default;
-  const deck = new PptxGenJS();
-  deck.layout = "LAYOUT_WIDE";
-
-  // Resolved once per piece rather than per slide — the same photo appears
-  // on the cover and in the grid.
-  const imageByPieceId = new Map<string, string>();
-  await Promise.all(
-    pieces.map(async (piece) => {
-      const data = await toBase64(piece.image);
-      if (data) imageByPieceId.set(piece.id, data);
-    })
-  );
-
-  /*
-   * One chapter for a plain deck — its cover and its two sections — or one
-   * per Collection Story category, each with its own name, tagline, chosen
-   * cover photo and only its own pieces, exactly as the deck lays them out.
-   */
-  const chapters =
-    categories.length > 0
-      ? categories.map((category) => ({
-          name: category.name,
-          tagline: category.tagline,
-          label: category.name,
-          hero: pieces[category.coverIndex] ?? pieces[category.pieceIndexes[0]],
-          ...splitCategoryEntries(items, pieces, category),
-        }))
-      : [
-          {
-            name: collectionName,
-            tagline,
-            label: "",
-            hero: pieces.find((piece) => imageByPieceId.has(piece.id)),
-            ...splitEntries(items, pieces),
-          },
-        ];
-
-  for (const chapter of chapters) {
-    /* ── Cover ─────────────────────────────────────────────────────────── */
-    const cover = deck.addSlide();
-    cover.background = { color: PPT.cream };
-    cover.addShape("rect", {
-      x: 0.05,
-      y: 0.05,
-      w: 13.23,
-      h: 7.4,
-      fill: { type: "none" },
-      line: { color: PPT.borderGold, width: 1 },
-    });
-
-    const heroImage = chapter.hero ? imageByPieceId.get(chapter.hero.id) : undefined;
-    if (heroImage) {
-      cover.addImage({ data: heroImage, x: 7.6, y: 0.05, w: 5.65, h: 7.4, sizing: { type: "cover", w: 5.65, h: 7.4 } });
-    }
-
-    cover.addText(chapter.name, { x: 0.8, y: 2.5, w: 6.3, h: 1.1, fontSize: 40, color: PPT.titleGold, fontFace: "Cambria" });
-    cover.addShape("line", { x: 0.8, y: 3.75, w: 0.7, h: 0, line: { color: PPT.borderGold, width: 1 } });
-    cover.addText("◆", { x: 1.55, y: 3.6, w: 0.3, h: 0.3, fontSize: 10, color: PPT.borderGold, align: "center" });
-    cover.addShape("line", { x: 1.9, y: 3.75, w: 0.7, h: 0, line: { color: PPT.borderGold, width: 1 } });
-    cover.addText(chapter.tagline, { x: 0.8, y: 4.0, w: 5.5, h: 0.5, fontSize: 12, color: PPT.ink, charSpacing: 2 });
-
-    const { existing, ideation } = chapter;
-
-    /** The gold frame and section title every grid slide carries. */
-    const gridSlide = (label: string) => {
-      const slide = deck.addSlide();
-      slide.background = { color: "FFFFFF" };
-      slide.addShape("rect", {
-        x: 0.05,
-        y: 0.05,
-        w: 13.23,
-        h: 7.4,
-        fill: { type: "none" },
-        line: { color: PPT.borderGold, width: 1 },
-      });
-      slide.addText(label, {
-        x: 9.5,
-        y: 0.4,
-        w: 3.3,
-        h: 0.4,
-        fontSize: 16,
-        italic: true,
-        color: PPT.ink,
-        fontFace: "Cambria",
-        align: "right",
-      });
-      // Which category these slides belong to, where the deck has categories.
-      if (chapter.label) {
-        slide.addText(chapter.label.toUpperCase(), { x: 0.6, y: 0.4, w: 6, h: 0.4, fontSize: 11, color: PPT.titleGold, charSpacing: 3 });
-      }
-      return slide;
-    };
-
-    /* ── Existing style — 4 per slide, real spec captions only ─────────── */
-    const EXISTING_PER_SLIDE = 4;
-    for (let start = 0; start < existing.length; start += EXISTING_PER_SLIDE) {
-      const chunk = existing.slice(start, start + EXISTING_PER_SLIDE);
-      const slide = gridSlide("Existing style");
-
-      const cols = 2;
-      const cardW = 5.8;
-      const cardH = 2.9;
-
-      chunk.forEach(({ item, piece }, position) => {
-        const x = 0.8 + (position % cols) * (cardW + 0.6);
-        const y = 1.1 + Math.floor(position / cols) * (cardH + 0.5);
-
-        const image = piece ? imageByPieceId.get(piece.id) : undefined;
-        if (image) slide.addImage({ data: image, x, y, w: cardW, h: cardH, sizing: { type: "contain", w: cardW, h: cardH } });
-
-        slide.addText(item.sourceCode || "Existing piece", {
-          x,
-          y: y + cardH + 0.05,
-          w: cardW,
-          h: 0.3,
-          fontSize: 13,
-          color: PPT.ink,
-          align: "center",
-        });
-        // Guarded: an empty string still adds a stray text frame to the slide.
-        if (item.caption) {
-          slide.addText(item.caption, {
-            x,
-            y: y + cardH + 0.35,
-            w: cardW,
-            h: 0.25,
-            fontSize: 10,
-            color: PPT.labelGray,
-            align: "center",
-          });
-        }
-      });
-    }
-
-    /* ── New Ideation — 6 per slide, each card spanning its chosen size ── */
-    const IDEATION_PER_SLIDE = 6;
-    for (let start = 0; start < ideation.length; start += IDEATION_PER_SLIDE) {
-      const chunk = ideation.slice(start, start + IDEATION_PER_SLIDE);
-      const slide = gridSlide("New Ideation");
-
-      const cols = 3;
-      const unitW = 3.9;
-      const cardH = 2.8;
-      let col = 0;
-      let row = 0;
-
-      chunk.forEach(({ item, index, piece }) => {
-        const span = Math.min(SIZE_COLS[item.size ?? "md"], cols);
-        if (col + span > cols) {
-          col = 0;
-          row += 1;
-        }
-
-        const x = 0.55 + col * (unitW + 0.35);
-        const y = 1.15 + row * (cardH + 0.75 + 0.35);
-        const cardW = unitW * span + 0.35 * (span - 1);
-
-        slide.addText(item.category, { x, y, w: cardW, h: 0.3, fontSize: 12, color: PPT.labelGray, align: "center" });
-
-        const image = piece ? imageByPieceId.get(piece.id) : undefined;
-        if (image) {
-          slide.addImage({ data: image, x, y: y + 0.35, w: cardW, h: cardH, sizing: { type: "contain", w: cardW, h: cardH } });
-        }
-
-        slide.addText(item.sourceCode || `${piece?.designerInitial || "R"}-${index + 1}`, {
-          x,
-          y: y + 0.35 + cardH + 0.05,
-          w: cardW * 0.5,
-          h: 0.25,
-          fontSize: 11,
-          bold: true,
-          color: PPT.ink,
-        });
-        // A New Ideation piece ships with no title or caption by design.
-        if (item.title) {
-          slide.addText(item.title, {
-            x: x + cardW * 0.5,
-            y: y + 0.35 + cardH + 0.05,
-            w: cardW * 0.5,
-            h: 0.25,
-            fontSize: 10,
-            color: PPT.labelGray,
-            align: "right",
-          });
-        }
-        if (item.caption) {
-          slide.addText(item.caption, { x, y: y + 0.35 + cardH + 0.3, w: cardW, h: 0.25, fontSize: 9, color: PPT.labelGray });
-        }
-
-        col += span;
-        if (col >= cols) {
-          col = 0;
-          row += 1;
-        }
-      });
-    }
-  }
-
-  await deck.writeFile({ fileName: fileName(collectionName, "pptx") });
-}
-
 /**
  * The edited design as PowerPoint — every element where it was placed, as a
  * native text box, picture or shape, so the file stays editable in PowerPoint.
@@ -314,6 +70,8 @@ export async function exportDesignPptx({
   pieces: AffinityPiece[];
   collectionName: string;
 }) {
+  // Imported on demand: the library is large, and a page that never exports
+  // should never download it.
   const PptxGenJS = (await import("pptxgenjs")).default;
   const deck = new PptxGenJS();
   deck.layout = "LAYOUT_WIDE";
@@ -438,16 +196,3 @@ export async function exportDesignPptx({
 
   await deck.writeFile({ fileName: fileName(collectionName, "pptx") });
 }
-
-/**
- * The PDF, via the browser's print dialog.
- *
- * Deliberately not a canvas screenshot: the deck is already at slide ratio
- * and the print stylesheet hides everything around it, so printing gives
- * real vector text at whatever resolution the user chooses.
- */
-export function exportAffinityPdf() {
-  window.print();
-}
-
-export { hasProductionSheet };

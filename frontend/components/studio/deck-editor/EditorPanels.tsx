@@ -642,8 +642,8 @@ const filled = (shape: ShapeKind, w: number, h: number, extra: Partial<ShapeElem
 const outlined = (shape: ShapeKind, w: number, h: number, extra: Partial<ShapeElement> = {}) => () => [
   shapeElement({ ...at(w, h), shape, fill: "transparent", stroke: GOLD, strokeWidth: 2, ...extra }),
 ];
-const line = (extra: Partial<ShapeElement> = {}, w = 320) => () => [
-  shapeElement({ ...at(w, 6), shape: "line", fill: "transparent", stroke: GOLD, strokeWidth: 2, ...extra }),
+const line = (extra: Partial<ShapeElement> = {}) => () => [
+  shapeElement({ ...at(320, 6), shape: "line", fill: "transparent", stroke: GOLD, strokeWidth: 2, ...extra }),
 ];
 
 /** Shapes and text that belong together, placed as one group. */
@@ -697,10 +697,7 @@ const SECTIONS: { title: string; presets: Preset[] }[] = [
       { label: "Thick", make: line({ strokeWidth: 6 }) },
       { label: "Dashed", make: line({ dash: "dash" }) },
       { label: "Dotted", make: line({ dash: "dot", strokeWidth: 3 }) },
-      {
-        label: "Vertical",
-        make: () => [shapeElement({ ...at(320, 6), shape: "line", fill: "transparent", stroke: GOLD, strokeWidth: 2, rotation: 90 })],
-      },
+      { label: "Vertical", make: line({ rotation: 90 }) },
       {
         label: "Double",
         make: grouped(

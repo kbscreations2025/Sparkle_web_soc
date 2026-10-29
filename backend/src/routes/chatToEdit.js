@@ -4,7 +4,7 @@ const { buildChatEditPrompt, buildReferenceNote, SCALE_NOTE, ANATOMY_NOTE } = re
 const { resolveIntent, intentForTool, refineCountFor, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
 const { recordGeneration, parseDataUri, isOwnConversation } = require("../generationService");
-const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const { logRequestAudit } = require("../auditLog");
 const credit = require("../services/credits");
 
 const router = express.Router();
@@ -212,9 +212,7 @@ router.post("/", async (req, res) => {
       intentLabel,
     });
   } catch (err) {
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: req.dbUser?.tenantId || null,
       action: "generation.failed",
       status: "failure",

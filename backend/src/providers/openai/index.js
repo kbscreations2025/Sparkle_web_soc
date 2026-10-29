@@ -1,5 +1,6 @@
 const OpenAI = require("openai");
 const { toFile } = require("openai/uploads");
+const { withRetry, classifyApiError } = require("../shared");
 
 /**
  * OpenAI's current image-generation/editing model. There is no "gpt-img-2" —
@@ -9,7 +10,6 @@ const { toFile } = require("openai/uploads");
  * addition here, matching how gemini.js lists its models.
  */
 const OPENAI_MODELS = ["gpt-image-1"];
-const DEFAULT_OPENAI_MODEL = OPENAI_MODELS[0];
 
 /** The "Sparkle" label the frontend shows — see frontend/lib/api.ts's GPT_CLEANING_MODELS. */
 const OPENAI_MODEL_LABELS = {
@@ -41,82 +41,9 @@ function isKnownModel(modelId) {
   return OPENAI_MODELS.includes(modelId);
 }
 
-/** Falls back to the default model whenever the requested one isn't offered. */
-function resolveModel(requestedModel) {
-  return OPENAI_MODELS.includes(requestedModel) ? requestedModel : DEFAULT_OPENAI_MODEL;
-}
-
-/**
- * Turns a raw OpenAI SDK error into `{ message, code, retryable }` — the same
- * shape gemini.js's `classifyError` produces, so `aiRouting.js` can treat
- * either provider's failure identically. See that function's own comment for
- * what `retryable` controls.
- */
+/** A raw OpenAI SDK error as `{ message, code, retryable }` — see `classifyApiError`. */
 function classifyError(err) {
-  const code = typeof err?.status === "number" ? err.status : undefined;
-  const raw = err?.error?.message || err?.message || String(err);
-  const text = `${raw} ${code ?? ""}`.toLowerCase();
-
-  if (code === 429 || code === 500 || code === 503 || text.includes("overloaded") || text.includes("rate limit") || text.includes("quota")) {
-    return { message: "This model is under heavy load right now. Please try again shortly.", code, retryable: true };
-  }
-
-  if (text.includes("timeout") || text.includes("timed out") || text.includes("econnreset") || text.includes("aborted") || text.includes("network")) {
-    return { message: "The request timed out. Please try again.", code, retryable: true };
-  }
-
-  if (text.includes("safety") || text.includes("content_policy") || text.includes("content policy") || text.includes("blocked") || text.includes("moderation")) {
-    return {
-      message: "That request was blocked by the content safety filter. Try adjusting the image or instructions.",
-      code,
-      retryable: false,
-    };
-  }
-
-  if (code === 401 || code === 403 || text.includes("api key") || text.includes("incorrect api key") || text.includes("permission")) {
-    return { message: "One of this organization's OpenAI keys was rejected.", code, retryable: false };
-  }
-
-  if (code === 400 || text.includes("invalid")) {
-    return { message: "The request could not be processed. Please adjust the input and try again.", code, retryable: false };
-  }
-
-  return { message: "Something went wrong talking to the model.", code, retryable: false };
-}
-
-function isWorthTryingNextKey(err) {
-  const { code, retryable } = classifyError(err);
-  return retryable || code === 401 || code === 403;
-}
-
-async function withRetry(fn, { retries = 1, delayMs = 2000 } = {}) {
-  let lastErr;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (attempt === retries || !classifyError(err).retryable) throw err;
-      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
-    }
-  }
-  throw lastErr;
-}
-
-/** Same shape/contract as gemini.js's `withKeyFailover` — see there for the full rationale. */
-async function withKeyFailover(entries, attempt) {
-  let lastErr;
-  for (let i = 0; i < entries.length; i++) {
-    try {
-      return await attempt(entries[i], i);
-    } catch (err) {
-      lastErr = err;
-      const isLastKey = i === entries.length - 1;
-      if (isLastKey || !isWorthTryingNextKey(err)) throw err;
-      console.warn(`[openai] key ${i + 1}/${entries.length} failed (${classifyError(err).message}) — trying the next one`);
-    }
-  }
-  throw lastErr;
+  return classifyApiError(err, "OpenAI");
 }
 
 /** `mimeType` → a filename extension the Images API's multipart upload will accept. */
@@ -145,13 +72,15 @@ async function generateImage({ apiKey, modelId, prompt, images, quality }) {
     )
   );
 
-  const response = await withRetry(() =>
-    client.images.edit({
-      model: modelId,
-      image: files.length === 1 ? files[0] : files,
-      prompt,
-      quality: qualityFor(modelId, quality),
-    })
+  const response = await withRetry(
+    () =>
+      client.images.edit({
+        model: modelId,
+        image: files.length === 1 ? files[0] : files,
+        prompt,
+        quality: qualityFor(modelId, quality),
+      }),
+    classifyError
   );
 
   const imageData = response.data?.[0];
@@ -166,13 +95,10 @@ async function generateImage({ apiKey, modelId, prompt, images, quality }) {
 
 module.exports = {
   OPENAI_MODELS,
-  DEFAULT_OPENAI_MODEL,
   qualityFor,
   qualitiesFor,
-  resolveModel,
   isKnownModel,
   labelFor,
   classifyError,
-  withKeyFailover,
   generateImage,
 };

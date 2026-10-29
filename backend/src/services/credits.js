@@ -1,6 +1,7 @@
 const CreditAccount = require("../models/creditAccount");
 const CreditLedger = require("../models/creditLedger");
 const CreditPricingRule = require("../models/creditPricingRule");
+const Tenant = require("../models/tenant");
 
 /**
  * The credit system: what a run costs, freezing it while the run happens,
@@ -186,7 +187,7 @@ async function holdForRun({ tenantId, userId, userName, tool, priced, jobHint })
   let account = await CreditAccount.ensure(tenantId, userId);
   // A member on a daily allowance gets today's top-up before the first run
   // of the day is priced, even if the scheduled pass hasn't reached them yet.
-  if (account.dailyAllowance !== null && account.dailyAllowance !== undefined) {
+  if (account.dailyAllowance != null) {
     account = (await applyDailyReset(tenantId, userId)) || account;
   }
   if (priced.cost <= 0) return { accountId: account._id, ...priced, held: 0 };
@@ -299,6 +300,15 @@ async function refundRun({ credits, jobId, reason }) {
   return CreditAccount.release(credits.accountId, credits.held);
 }
 
+/**
+ * The tail of an idempotency key for a movement a person makes on purpose —
+ * a grant, a revoke, a transfer — which is never retried, so every call is
+ * its own entry.
+ */
+function uniqueStamp() {
+  return `${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /** A super admin putting credits into an organization pool or a person's account. */
 async function grant({ tenantId, userId = null, amount, actorUserId, actorName, reason }) {
   const account = await CreditAccount.ensure(tenantId, userId);
@@ -314,7 +324,7 @@ async function grant({ tenantId, userId = null, amount, actorUserId, actorName, 
     actorUserId,
     actorName,
     reason: reason || null,
-    idempotencyKey: `grant:${account._id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    idempotencyKey: `grant:${account._id}:${uniqueStamp()}`,
   });
 
   return updated;
@@ -341,7 +351,7 @@ async function revoke({ tenantId, userId = null, amount, actorUserId, actorName,
     actorUserId,
     actorName,
     reason: reason || null,
-    idempotencyKey: `revoke:${account._id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    idempotencyKey: `revoke:${account._id}:${uniqueStamp()}`,
   });
 
   return updated;
@@ -373,7 +383,7 @@ async function transfer({ tenantId, fromUserId, toUserId, amount, actorUserId, a
   const debited = await CreditAccount.debit(source._id, amount);
   if (!debited) throw new InsufficientCreditsError(amount, source.available);
 
-  const stamp = `${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  const stamp = uniqueStamp();
   const common = { tenantId, actorUserId, actorName, reason: reason || null };
 
   await record({
@@ -407,15 +417,15 @@ const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
 /** Today's date in `timeZone` as "YYYY-MM-DD" — en-CA formats that way natively. */
 function dayKey(timeZone = DEFAULT_TIMEZONE, at = new Date()) {
+  const format = (zone) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
   try {
-    return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+    return format(timeZone);
   } catch {
-    return new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+    return format(DEFAULT_TIMEZONE);
   }
 }
 
 async function timezoneFor(tenantId) {
-  const Tenant = require("../models/tenant");
   const tenant = await Tenant.findById(tenantId).select("timezone").lean();
   return tenant?.timezone || DEFAULT_TIMEZONE;
 }
@@ -444,14 +454,13 @@ async function applyDailyReset(tenantId, userId, timeZone, { force = false } = {
   // "before", so the key below can name the day being left as well as the
   // day being entered — each transition is then its own ledger entry, even
   // if `lastResetOn` is ever rewound and the same date comes round twice.
-  const prior = await CreditAccount.findOneAndUpdate(
+  const claimed = await CreditAccount.findOneAndUpdate(
     { tenantId, userId, dailyAllowance: { $ne: null }, ...(force ? {} : { lastResetOn: { $ne: today } }) },
     { $set: { lastResetOn: today } },
     { returnDocument: "before" }
   );
-  if (!prior) return null;
-  const claimed = prior;
-  const keyDay = force ? `${today}:${Date.now()}` : `${prior.lastResetOn || "start"}>${today}`;
+  if (!claimed) return null;
+  const keyDay = force ? `${today}:${Date.now()}` : `${claimed.lastResetOn || "start"}>${today}`;
 
   const pool = await CreditAccount.ensure(tenantId, null);
   const actorName = "Daily allowance";
@@ -542,7 +551,6 @@ async function setDailyAllowance({ tenantId, userId, amount, actorUserId }) {
 
 /** The nightly pass: every account on an allowance, in its own organization's day. */
 async function runDailyResets() {
-  const Tenant = require("../models/tenant");
   const accounts = await CreditAccount.find({ dailyAllowance: { $ne: null }, userId: { $ne: null } })
     .select("tenantId userId lastResetOn")
     .lean();
@@ -578,10 +586,8 @@ function startDailyResetScheduler(intervalMs = 5 * 60 * 1000) {
 }
 
 module.exports = {
-  InsufficientCreditsError,
   applyDailyReset,
   setDailyAllowance,
-  runDailyResets,
   startDailyResetScheduler,
   totalsByTenant,
   givenByTenant,

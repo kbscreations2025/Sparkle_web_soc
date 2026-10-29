@@ -18,25 +18,9 @@ const { STUDIO_CLEANING_PROMPT, GOLD_SWATCH_NOTE } = require("../prompts/studioC
 const SWATCH = process.env.SWATCH ? fs.readFileSync(process.env.SWATCH).toString("base64") : null;
 const PROMPT = SWATCH ? `${STUDIO_CLEANING_PROMPT}\n${GOLD_SWATCH_NOTE}` : STUDIO_CLEANING_PROMPT;
 
-const MODELS = [
-  "google/gemini-nano-banana-2.1",
-  "openai/gpt-image-2.5-sunburst",
-  "openai/gpt-image-2.5-flare",
-  "black-forest-labs/flux-3-image",
-  "black-forest-labs/flux.2-max",
-  "bytedance-seed/seedream-5-0-pro",
-  "qwen/qwen-image-3-pro",
-  "krea/k3-edit",
-  "microsoft/mai-image-2.6",
-  "x-ai/grok-imagine-image-2.0",
-  "sourceful/riverflow-v2.5-pro",
-  "tencent/hy-image-v3.5-preview",
-  "meta/muse-image",
-];
-
 async function main() {
   const [inputDir, outDir, only] = process.argv.slice(2);
-  const models = only ? only.split(",") : MODELS;
+  const models = only ? only.split(",") : openrouter.TRIAL_MODELS;
   await connectDb();
 
   const tenant = (await Tenant.find()).find((t) => t.routableProviders().some((p) => p.provider === "openrouter"));
@@ -66,11 +50,13 @@ async function main() {
           const ext = out.mimeType?.includes("png") ? "png" : "jpg";
           const name = `${modelId.replace(/[\/.]/g, "_")}__${path.parse(file).name}.${ext}`;
           fs.writeFileSync(path.join(outDir, name), Buffer.from(out.base64, "base64"));
-          report.push({ modelId, file, ok: true, ms: Date.now() - started, out: name });
-          console.log("ok  ", modelId, file, Date.now() - started, "ms");
+          const ms = Date.now() - started;
+          report.push({ modelId, file, ok: true, ms, out: name });
+          console.log("ok  ", modelId, file, ms, "ms");
         } catch (err) {
-          report.push({ modelId, file, ok: false, error: openrouter.classifyError(err).message, raw: String(err?.error?.message || err?.message || err).slice(0, 300) });
-          console.log("FAIL", modelId, file, String(err?.error?.message || err?.message || err).slice(0, 400));
+          const raw = String(err?.error?.message || err?.message || err);
+          report.push({ modelId, file, ok: false, error: openrouter.classifyError(err).message, raw: raw.slice(0, 300) });
+          console.log("FAIL", modelId, file, raw.slice(0, 400));
         }
       })
     );

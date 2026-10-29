@@ -1,24 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import Image from "next/image";
-import { Check, Copy, Loader2, ScanText, Upload, X } from "lucide-react";
+import { Check, Copy, Loader2, ScanText, X } from "lucide-react";
 import { JobProgressBar } from "@/components/studio/JobProgressBar";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
-import { LibraryPicker } from "@/components/studio/LibraryPicker";
+import { SinglePhotoUpload } from "@/components/studio/SinglePhotoUpload";
 import { fetchConversationForTool, imageToText } from "@/lib/api";
 import { compressImage, makeThumbnail } from "@/lib/image";
-import { useLibraryPicker } from "@/lib/library";
 import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
 import { failureMessage, useSettledJob } from "@/lib/useSettledJob";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
-import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.image_to_text.run";
 
@@ -41,13 +39,9 @@ export default function ImageToTextPage() {
   const [status, setStatus] = useState<"idle" | "reading" | "done" | "failed">("idle");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [dragging, setDragging] = useState(false);
   /** A colleague's read (or the viewer's own, reopened) opened to look back at — no composer, no re-run. */
   const [readOnly, setReadOnly] = useState<{ ownerName: string | null } | null>(null);
 
-  const fileInput = useRef<HTMLInputElement>(null);
-  // Earlier uploads and results as well as the disk — see UploadZone.
-  const library = useLibraryPicker(fileInput);
   const searchParams = useSearchParams();
 
   // Arriving from History with ?conversationId=... reopens that reading
@@ -170,18 +164,6 @@ export default function ImageToTextPage() {
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
         <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-2">
           <div className="space-y-4">
-            <input
-              ref={fileInput}
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={(event) => {
-                accept(event.target.files?.[0]);
-                event.target.value = "";
-              }}
-            />
-            <LibraryPicker open={library.open} onClose={library.close} onFiles={(files) => accept(files[0])} room={1} />
-
             {photo ? (
               <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
                 <div className="relative aspect-[4/3] w-full">
@@ -199,32 +181,10 @@ export default function ImageToTextPage() {
                 )}
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={library.show}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragging(true);
-                }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragging(false);
-                  accept(event.dataTransfer.files?.[0]);
-                }}
-                className={cn(
-                  "flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-12 transition-colors",
-                  dragging ? "border-gold/40 bg-gold/[0.06]" : "border-white/[0.12] bg-white/[0.02] hover:border-white/25"
-                )}
-              >
-                <Upload size={20} className="text-faint" />
-                <p className="text-sm font-medium text-cream">
-                  {library.available ? "Drop a photo here, or click to upload or pick from your library" : "Drop a photo here, or click to choose"}
-                </p>
-                <p className="text-[11px] text-faint">
-                  It is read as a gemologist would — stone counts, settings, metal, lighting.
-                </p>
-              </button>
+              <SinglePhotoUpload
+                hint="It is read as a gemologist would — stone counts, settings, metal, lighting."
+                onFile={accept}
+              />
             )}
 
             {!readOnly && (

@@ -330,6 +330,27 @@ Messages may be in English, Hindi or Hinglish. Message:
 `;
 
 /**
+ * One quick, deterministic classifier call: the model's answer parsed, or null
+ * when it withheld or returned nothing. A provider failure throws, and each
+ * caller falls back to its keywords.
+ */
+async function classify(tenant, prompt, responseSchema, maxOutputTokens) {
+  // Required lazily: this module is also loaded by prompt builders that
+  // must not pull the provider stack in with them.
+  const { routeTextCall } = require("../aiRouting");
+  const { output } = await routeTextCall({
+    tenant,
+    modelId: CLASSIFIER_MODEL,
+    prompt,
+    responseSchema,
+    temperature: 0,
+    thinkingBudget: 0,
+    maxOutputTokens,
+  });
+  return output.blocked || !output.text ? null : JSON.parse(output.text);
+}
+
+/**
  * Keyword pass, then — only when it found nothing to go on — one quick,
  * cheap model call. Most follow-ups ("add a halo", "thinner band") are plain
  * edits and stay plain; the model is there for the phrasings no list covers
@@ -341,21 +362,9 @@ async function resolveIntent(text, { tenant } = {}) {
   if (keyword.kinds.length > 0 || !tenant || words < 3) return keyword;
 
   try {
-    // Required lazily: this module is also loaded by prompt builders that
-    // must not pull the provider stack in with them.
-    const { routeTextCall } = require("../aiRouting");
-    const { output } = await routeTextCall({
-      tenant,
-      modelId: CLASSIFIER_MODEL,
-      prompt: CLASSIFIER_PROMPT + JSON.stringify(String(text)),
-      responseSchema: CLASSIFIER_SCHEMA,
-      temperature: 0,
-      thinkingBudget: 0,
-      maxOutputTokens: 300,
-    });
-    if (output.blocked || !output.text) return keyword;
+    const answer = await classify(tenant, CLASSIFIER_PROMPT + JSON.stringify(String(text)), CLASSIFIER_SCHEMA, 300);
+    if (!answer) return keyword;
 
-    const answer = JSON.parse(output.text);
     const intent = emptyIntent();
     intent.source = "model";
     if (answer.explore) intent.kinds.push("explore");
@@ -451,20 +460,8 @@ async function resolveSketchMode(text, { tenant } = {}) {
   if (!tenant) return byKeywords;
 
   try {
-    // Lazily, as in resolveIntent: prompt builders load this module too.
-    const { routeTextCall } = require("../aiRouting");
-    const { output } = await routeTextCall({
-      tenant,
-      modelId: CLASSIFIER_MODEL,
-      prompt: SKETCH_MODE_PROMPT + JSON.stringify(String(text)),
-      responseSchema: SKETCH_MODE_SCHEMA,
-      temperature: 0,
-      thinkingBudget: 0,
-      maxOutputTokens: 100,
-    });
-    if (output.blocked || !output.text) return byKeywords;
-
-    const answer = JSON.parse(output.text);
+    const answer = await classify(tenant, SKETCH_MODE_PROMPT + JSON.stringify(String(text)), SKETCH_MODE_SCHEMA, 100);
+    if (!answer) return byKeywords;
     if (answer.mode !== "variations") return render;
     const named = Math.round(Number(answer.count));
     return { mode: "variations", count: named > 0 ? named : askedExploreCount(t) };
@@ -698,49 +695,39 @@ function applyIntentToPrompt({ basePrompt, instruction, intent, tool, referenceN
     variationTotal > 1
       ? ` This is option ${variationIndex + 1} of ${variationTotal}; it must be clearly different from the other options. ${directions[variationIndex % directions.length]}`
       : "";
+  /** A prompt that replaces the tool's own: these lines, then what the result must stay. */
+  const replacing = (...lines) => [...lines, mediumKeep(medium), referenceNote].filter(Boolean).join("\n\n");
 
   if (designTool && kinds.has("type_change")) {
     const type = scoped.targetType;
-    return [
+    return replacing(
       `REDESIGN AS A ${TYPE_NAMES[type].toUpperCase()}: turn the jewellery in the first image into ${TYPE_TRAITS[type]}.`,
       "Carry the design language over faithfully so it reads as the matching piece from the same collection: the same motif and shapes, the same stone types, cuts and colours, the same setting style, metal colour and finish. Adapt the proportions and construction to what this type of jewellery needs — do not just paste the old piece onto a new fitting.",
       `The user asked: "${request}".`,
       ...blocks,
-      kinds.has("explore") ? "Give a distinct take on this conversion." + variationNote : "",
-      mediumKeep(medium),
-      referenceNote,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+      kinds.has("explore") ? "Give a distinct take on this conversion." + variationNote : ""
+    );
   }
 
   if (designTool && kinds.has("explore") && relatedExplore) {
-    return [
+    return replacing(
       "DESIGN VARIATION: the first image is the user's own design. Create a NEW piece that grows out of it — a variation a designer would place beside it in the same collection.",
       "Keep: the type of jewellery, the core motif (the shapes that make this design recognisable), its design language, and the metal colour and stone types unless the user asked otherwise.",
       "Change: enough of the design — the stone layout, the metalwork, the proportions or the arrangement — that it is clearly a different piece. A copy, a recolour or the same piece from another angle is a FAILURE; so is a design that no longer looks related.",
       `The user asked: "${request}".` + variationNote,
-      ...blocks,
-      mediumKeep(medium),
-      referenceNote,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+      ...blocks
+    );
   }
 
   if (designTool && kinds.has("explore")) {
-    return [
+    return replacing(
       "NEW DESIGN OPTION: use the jewellery in the first image as design INSPIRATION and create a NEW design — not a copy, and not the same piece in another colour.",
       "Keep: the same type of jewellery, the same overall style family and mood, and the same metal colour and stone types unless the user asked otherwise.",
       "Change: the actual design — the motif, the silhouette, the stone layout and the metalwork — so it is a genuinely different piece a customer would see as another option from the same collection.",
       "A result that differs only in colour, lighting or angle is a FAILURE.",
       `The user asked: "${request}".` + variationNote,
-      ...blocks,
-      mediumKeep(medium),
-      referenceNote,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+      ...blocks
+    );
   }
 
   // Product tools: "more options" means more takes on the same shot.

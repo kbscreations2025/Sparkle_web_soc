@@ -38,4 +38,12 @@ function actorFrom(req) {
   };
 }
 
-module.exports = { logAudit, requestMeta, actorFrom };
+/**
+ * `logAudit` for a route behind `requireAuth`: the actor and the request facts
+ * every such row carries, then the entry itself.
+ */
+function logRequestAudit(req, entry) {
+  return logAudit({ ...actorFrom(req), ...requestMeta(req), ...entry });
+}
+
+module.exports = { logAudit, logRequestAudit, requestMeta, actorFrom };

@@ -4,7 +4,7 @@ const { resolveProviderModel, loadTenantOrThrow } = require("../aiRouting");
 const { clampCount } = require("../jobs/generationRunner");
 const { TEXT_TO_SKETCH_JOB, SKETCH_TO_IMAGE_JOB, IMAGE_TO_SKETCH_JOB } = require("../jobs/sketchTools");
 const { resolveSketchMode, variationCountFor, describeSketchMode } = require("../prompts/intent");
-const { queueGeneration, parseImages, MAX_REFERENCE_PHOTOS } = require("./queueGeneration");
+const { queueGeneration, parseImages, readRefinement, MAX_REFERENCE_PHOTOS } = require("./queueGeneration");
 const { readTrendCues } = require("../services/trends");
 
 /**
@@ -19,25 +19,6 @@ const { readTrendCues } = require("../services/trends");
 /** Photo-driven tools default to a single result; text-driven ones to four. */
 const PHOTO_DEFAULT_COUNT = 1;
 const TEXT_DEFAULT_COUNT = 2;
-
-/** Pulls the refinement half out of a body, since all three share its shape. */
-function readRefinement(body) {
-  const { refineImage, referenceImages, instruction, displayPrompt, conversationId, parentGenerationId } = body;
-  if (!refineImage || !instruction) return null;
-
-  const [parsed] = parseImages(refineImage);
-  if (!parsed) return null;
-
-  return {
-    isRefinement: true,
-    refineImage: parsed,
-    references: parseImages(referenceImages),
-    instruction,
-    displayPrompt,
-    conversationId,
-    parentGenerationId,
-  };
-}
 
 const router = express.Router();
 router.use(requireAuth);
@@ -64,7 +45,7 @@ router.post("/text-to-sketch", requirePermission("tool.text_to_sketch.run"), asy
       ? { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length }
       : { ...shared, isRefinement: false, prompt: body.prompt?.trim() || null, style: body.style ?? null, aspect: body.aspect ?? null, count },
     payload: refinement
-      ? { ...refinement, requestedModel: body.model, requestedQuality: body.quality }
+      ? refinement
       : {
           isRefinement: false,
           requestedModel: body.model,
@@ -110,7 +91,7 @@ router.post("/sketch-to-image", requirePermission("tool.sketch_to_image.run"), a
       tool: "sketch_to_image",
       preview: body.preview,
       request: { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length },
-      payload: { ...refinement, requestedModel: body.model, requestedQuality: body.quality },
+      payload: refinement,
       message: `queued a sketch-to-image refinement on ${modelLabel}`,
     });
   }
@@ -185,7 +166,7 @@ router.post("/image-to-sketch", requirePermission("tool.image_to_sketch.run"), a
       ? { ...shared, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length }
       : { ...shared, isRefinement: false, style: body.style ?? null, count },
     payload: refinement
-      ? { ...refinement, requestedModel: body.model, requestedQuality: body.quality }
+      ? refinement
       : {
           isRefinement: false,
           requestedModel: body.model,

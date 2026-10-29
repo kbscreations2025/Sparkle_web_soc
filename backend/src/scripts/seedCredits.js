@@ -80,9 +80,10 @@ async function main() {
 
   const names = new Map(tenants.map((t) => [String(t._id), t.name]));
   for (const user of targets) {
+    const current = balances.get(String(user._id)) ?? 0;
     console.log(
       `  ${(names.get(String(user.tenantId)) || "—").padEnd(28)} ${(user.name || user.email).padEnd(34)} ` +
-        `${String(balances.get(String(user._id)) ?? 0).padStart(8)} → ${amount + (balances.get(String(user._id)) ?? 0)}`
+        `${String(current).padStart(8)} → ${amount + current}`
     );
   }
   console.log("");

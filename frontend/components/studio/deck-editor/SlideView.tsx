@@ -158,7 +158,7 @@ export function ElementBody({ element, pieces, showPlaceholder }: { element: Des
 }
 
 /** The four-point mark from the customer's own cover artwork, in a 24×24 box. */
-export const SPARKLE_PATH =
+const SPARKLE_PATH =
   "M12 0 C12 6 14 10 12 12 C10 10 12 6 12 0 Z M12 24 C12 18 10 14 12 12 C14 14 12 18 12 24 Z M0 12 C6 12 10 14 12 12 C10 10 6 12 0 12 Z M24 12 C18 12 14 10 12 12 C14 14 18 12 24 12 Z";
 
 /** Polygon corners for the straight-sided shapes, in the element's own w×h box. */

@@ -179,9 +179,7 @@ function SelectBase({
           <div
             ref={panelRef}
             style={{ left: pos.left, top: pos.top, bottom: pos.bottom, minWidth: pos.width }}
-            className={cn(
-              "fixed z-[100] flex max-h-[300px] max-w-[320px] flex-col overflow-hidden rounded-lg border border-white/10 bg-surface-raised text-cream shadow-lg"
-            )}
+            className="fixed z-[100] flex max-h-[300px] max-w-[320px] flex-col overflow-hidden rounded-lg border border-white/10 bg-surface-raised text-cream shadow-lg"
           >
             {withSearch && (
               <div className="flex items-center gap-1.5 border-b border-white/[0.06] px-2.5 py-1.5">

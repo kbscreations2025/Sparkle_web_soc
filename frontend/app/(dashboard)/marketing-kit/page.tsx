@@ -67,29 +67,29 @@ export default function MarketingKitPage() {
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-4xl space-y-8">
         {GROUPS.map((group) => (
-        <section key={group.title} className="space-y-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">{group.title}</h2>
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {SURFACES.filter((surface) => group.ids.includes(surface.id)).map(({ id, label, tagline, href, Icon }) => (
-            <li key={id}>
-              <Link
-                href={href}
-                className="group flex h-full flex-col gap-3 rounded-xl border border-gold/[0.15] bg-surface-raised p-5 transition-colors hover:border-gold/[0.30]"
-              >
-                <Icon size={18} className="text-gold/70" />
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-cream">{label}</p>
-                  <p className="text-[11px] leading-relaxed text-faint">{tagline}</p>
-                </div>
-                <ArrowRight
-                  size={14}
-                  className="mt-auto text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-gold/70"
-                />
-              </Link>
-            </li>
-          ))}
-        </ul>
-        </section>
+          <section key={group.title} className="space-y-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">{group.title}</h2>
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {SURFACES.filter((surface) => group.ids.includes(surface.id)).map(({ id, label, tagline, href, Icon }) => (
+                <li key={id}>
+                  <Link
+                    href={href}
+                    className="group flex h-full flex-col gap-3 rounded-xl border border-gold/[0.15] bg-surface-raised p-5 transition-colors hover:border-gold/[0.30]"
+                  >
+                    <Icon size={18} className="text-gold/70" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-cream">{label}</p>
+                      <p className="text-[11px] leading-relaxed text-faint">{tagline}</p>
+                    </div>
+                    <ArrowRight
+                      size={14}
+                      className="mt-auto text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-gold/70"
+                    />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
         ))}
       </div>
     </div>

@@ -5,7 +5,7 @@ const { clampCount } = require("../jobs/generationRunner");
 const { PRODUCT_BACKGROUND_JOB } = require("../jobs/productBackground");
 const { THEMES, THEME_BY_ID } = require("../prompts/productBackground");
 const { analyse, nearestAspectRatio } = require("../services/cutout");
-const { queueGeneration, parseImages } = require("./queueGeneration");
+const { queueGeneration, parseImages, readRefinement } = require("./queueGeneration");
 
 const TOOL = "product_background";
 
@@ -49,23 +49,6 @@ function readBackground(value) {
   return null;
 }
 
-/** The follow-up half of a request — the same shape every refine-capable tool sends. */
-function readRefinement(body) {
-  const { refineImage, referenceImages, instruction, displayPrompt, conversationId, parentGenerationId } = body;
-  if (!refineImage || !instruction) return null;
-  const [parsed] = parseImages(refineImage);
-  if (!parsed) return null;
-  return {
-    isRefinement: true,
-    refineImage: parsed,
-    references: parseImages(referenceImages),
-    instruction,
-    displayPrompt,
-    conversationId,
-    parentGenerationId,
-  };
-}
-
 router.post("/", async (req, res) => {
   const body = req.body || {};
 
@@ -77,7 +60,7 @@ router.post("/", async (req, res) => {
       tool: TOOL,
       preview: body.preview,
       request: { provider, model, modelLabel, quality, isRefinement: true, instruction: body.instruction, referenceCount: refinement.references.length },
-      payload: { ...refinement, requestedModel: body.model, requestedQuality: body.quality },
+      payload: refinement,
       message: `queued a product-background refinement on ${modelLabel}`,
     });
   }

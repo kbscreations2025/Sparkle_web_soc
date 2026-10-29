@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import { Check, Download, Loader2, Maximize2, Save } from "lucide-react";
 import { Lightbox } from "./Lightbox";
-import { updateMarketingKit, type CampaignShot, type MarketingKit } from "@/lib/api";
+import { fetchMarketingKit, updateMarketingKit, type CampaignShot, type MarketingKit } from "@/lib/api";
 import { downloadImage } from "@/lib/image";
 
 /**
@@ -129,4 +130,31 @@ export function CampaignKitDeck({
       <Lightbox src={preview?.url ?? null} onClose={() => setPreview(null)} downloadName={preview ? `${preview.id}.jpg` : undefined} />
     </div>
   );
+}
+
+/**
+ * The saved kit a `?kitId=` link reopens — null for a new run, and until it
+ * has loaded. Campaign Kit and Festive Poster both reopen theirs into
+ * `CampaignKitDeck`, so only a kit with a `campaign` section counts.
+ *
+ * Callers sit inside `<Suspense>`: `useSearchParams` suspends.
+ */
+export function useReopenedCampaignKit() {
+  const openKitId = useSearchParams().get("kitId");
+  const [openKit, setOpenKit] = useState<MarketingKit | null>(null);
+
+  useEffect(() => {
+    if (!openKitId) return;
+    let cancelled = false;
+
+    fetchMarketingKit(openKitId).then((res) => {
+      if (!cancelled && res.status === "success" && res.kit?.campaign) setOpenKit(res.kit);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [openKitId]);
+
+  return openKit;
 }

@@ -13,7 +13,7 @@
  */
 
 /** The sections the prompt asks for, in the order it asks for them. */
-export const STORY_SECTIONS = [
+const STORY_SECTIONS = [
   "Collection Name",
   "Design Inspiration",
   "Design Philosophy",

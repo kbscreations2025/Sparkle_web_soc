@@ -477,12 +477,8 @@ function buildLifestyleModelPrompt(attrs = {}, notes) {
 module.exports = {
   ANATOMY_NOTE,
   MODESTY_NOTE,
-  REALISM_NOTE,
-  FOCUS_NOTE,
-  FIDELITY_REMINDER,
   buildLifestylePrompt,
   buildLifestyleSetPrompt,
   buildLifestyleRefinePrompt,
   buildLifestyleModelPrompt,
-  OUTFIT_SHOWCASE,
 };

@@ -125,34 +125,24 @@ const TEXT_RULES = [
   { model: "gemini-2.5-flash", rate: 0.0031, label: "Gemini 2.5 Flash — text, per request" },
 ];
 
+/** One table's entries as rules billed per `unit`, with `extra` (notes) on each. */
+function priced(entries, unit, extra = {}) {
+  return entries.map((entry) => ({
+    label: entry.label,
+    modelId: entry.model,
+    quality: entry.quality ?? null,
+    unit,
+    providerRate: entry.rate,
+    creditsPerUnit: credits(entry.rate),
+    ...extra,
+  }));
+}
+
 function buildRules() {
   return [
-    ...IMAGE_RULES.map((entry) => ({
-      label: entry.label,
-      modelId: entry.model,
-      quality: entry.quality,
-      unit: "per_image",
-      providerRate: entry.rate,
-      creditsPerUnit: credits(entry.rate),
-    })),
-    ...VIDEO_RULES.map((entry) => ({
-      label: entry.label,
-      modelId: entry.model,
-      quality: entry.quality,
-      unit: "per_second",
-      providerRate: entry.rate,
-      creditsPerUnit: credits(entry.rate),
-      notes: "Per second of clip — an 8s render costs eight times this.",
-    })),
-    ...TEXT_RULES.map((entry) => ({
-      label: entry.label,
-      modelId: entry.model,
-      quality: null,
-      unit: "per_request",
-      providerRate: entry.rate,
-      creditsPerUnit: credits(entry.rate),
-      notes: "Estimated from a typical call (~2k tokens in, ~1k out).",
-    })),
+    ...priced(IMAGE_RULES, "per_image"),
+    ...priced(VIDEO_RULES, "per_second", { notes: "Per second of clip — an 8s render costs eight times this." }),
+    ...priced(TEXT_RULES, "per_request", { notes: "Estimated from a typical call (~2k tokens in, ~1k out)." }),
     {
       /*
        * The floor. It exists so an unpriced model — one released after this

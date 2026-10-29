@@ -1,8 +1,8 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const config = require("../config");
 const { requireAuth, requireSuperAdmin } = require("../middleware/auth");
-const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const { logRequestAudit } = require("../auditLog");
+const { bad, isId } = require("./_shared");
 const { GENERATION_TOOLS } = require("../generations");
 const gemini = require("../providers/gemini");
 const openai = require("../providers/openai");
@@ -29,9 +29,6 @@ const handle = (fn) => (req, res, next) => {
     res.status(500).json({ status: "error", message: "something went wrong" });
   });
 };
-
-const bad = (res, message) => res.status(400).json({ status: "error", message, code: "invalid" });
-const isId = (value) => mongoose.Types.ObjectId.isValid(value);
 
 /**
  * Every model that can be priced, grouped for the console's dropdown.
@@ -246,9 +243,7 @@ router.post(
       createdByUserId: req.dbUser?._id ?? null,
     });
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: rule.tenantId,
       action: "pricing_rule.created",
       status: "success",
@@ -285,9 +280,7 @@ router.patch(
     rule.set(values);
     await rule.save();
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: rule.tenantId,
       action: "pricing_rule.updated",
       status: "success",
@@ -326,9 +319,7 @@ router.delete(
       await rule.save();
     }
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: rule.tenantId,
       action: purge ? "pricing_rule.deleted" : "pricing_rule.retired",
       status: "success",

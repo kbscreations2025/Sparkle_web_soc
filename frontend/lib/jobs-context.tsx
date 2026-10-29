@@ -164,11 +164,12 @@ export function JobsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const upsert = useCallback((incoming: QueuedJob | QueuedJob[]) => {
-    recordSettled(Array.isArray(incoming) ? incoming : [incoming]);
+    const list = Array.isArray(incoming) ? incoming : [incoming];
+    recordSettled(list);
 
     setJobsById((current) => {
       const next = { ...current };
-      for (const job of Array.isArray(incoming) ? incoming : [incoming]) next[job.id] = merge(current[job.id], job);
+      for (const job of list) next[job.id] = merge(current[job.id], job);
 
       // Trim settled jobs once there are too many to be worth remembering.
       // Active ones are never dropped: something on screen is waiting for them.
@@ -294,12 +295,6 @@ export function JobsProvider({ children }: { children: ReactNode }) {
 
 export function useJobs() {
   return useContext(JobsContext);
-}
-
-/** Follows one job by id — what a tool page uses to wait for its own run. */
-export function useJob(jobId: string | null) {
-  const { jobs } = useJobs();
-  return useMemo(() => (jobId ? jobs.find((job) => job.id === jobId) ?? null : null), [jobs, jobId]);
 }
 
 /**

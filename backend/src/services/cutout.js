@@ -812,4 +812,4 @@ async function composite(cut, { background, shadow = "none", framing = "original
     : { buffer: await out.png({ compressionLevel: 8 }).toBuffer(), mimeType: "image/png" };
 }
 
-module.exports = { analyse, cutOut, composite, parseHex, nearestAspectRatio };
+module.exports = { analyse, cutOut, composite, nearestAspectRatio };

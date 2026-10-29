@@ -1,20 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Check,
-  ChevronDown,
-  Eye,
-  FileSpreadsheet,
-  FileText,
-  FolderUp,
-  Loader2,
-  Plus,
-  Star,
-  Trash2,
-  Upload,
-  X,
-} from "lucide-react";
+import { Check, ChevronDown, Eye, FileSpreadsheet, FileText, FolderUp, Loader2, Plus, Star, Trash2, Upload, X } from "lucide-react";
 import { Lightbox } from "@/components/studio/Lightbox";
 import { newPiece, type AffinityPiece } from "@/lib/affinity";
 import { fetchSettingCodes } from "@/lib/api";
@@ -26,6 +13,7 @@ import {
   type UploadedFile,
 } from "@/lib/pieceMatching";
 import {
+  isWorkbook,
   readSheetFields,
   styleCodeFromName,
   type DetailGroup,
@@ -43,8 +31,6 @@ function loadSettingCodes() {
     .catch(() => ({}));
   return settingCodesRequest;
 }
-
-const isWorkbook = (name: string) => /\.(xlsx|xlsm|xls|csv)$/i.test(name);
 
 /**
  * Many pieces at once: a whole folder, or a handful of photos and sheets
@@ -217,9 +203,9 @@ export function BulkPieceUpload({
   /** The category open in its pop-up. */
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   /** Which category (or "all") the pop-up is listing pieces to add from; null lists none. */
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   /** Starting letter for every piece's code (R-1) unless a piece has its own. */
   const [designerLetter, setDesignerLetter] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   /** Where the selection bar's Move sends the selected pieces. */
   const [moveTargetChoice, setMoveTarget] = useState<string>(NEW_CATEGORY);
   /** Each file as the request will carry it — photos compressed, PDFs rendered, workbooks flattened. */
@@ -237,9 +223,9 @@ export function BulkPieceUpload({
         roleOf(file.name, file.type) === "photo"
           ? compressImage(file).then((image): Converted => ({ image }))
           : readSheetFiles([file]).then((sheet): Converted => ({
-              sheetImages: sheet.images,
-              sheetExcelText: sheet.excelText,
-            }));
+            sheetImages: sheet.images,
+            sheetExcelText: sheet.excelText,
+          }));
       read
         .catch((err): Converted => {
           console.error(`[bulk] could not read ${file.name}:`, err);
@@ -441,8 +427,8 @@ export function BulkPieceUpload({
     setCategories((current) =>
       current.map((category) =>
         category.id !== categoryId &&
-        category.coverId &&
-        selected.has(category.coverId)
+          category.coverId &&
+          selected.has(category.coverId)
           ? { ...category, coverId: null }
           : category,
       ),
@@ -451,10 +437,10 @@ export function BulkPieceUpload({
       (current ?? []).map((row) =>
         selected.has(row.photo.id)
           ? {
-              ...row,
-              categoryId,
-              alsoIn: row.alsoIn.filter((id) => id !== categoryId),
-            }
+            ...row,
+            categoryId,
+            alsoIn: row.alsoIn.filter((id) => id !== categoryId),
+          }
           : row,
       ),
     );
@@ -514,9 +500,9 @@ export function BulkPieceUpload({
         sheets:
           row.photo.id === toPhotoId
             ? [
-                ...row.sheets.filter((entry) => entry.file.id !== sheet.id),
-                { file: sheet, reason: "manual" },
-              ]
+              ...row.sheets.filter((entry) => entry.file.id !== sheet.id),
+              { file: sheet, reason: "manual" },
+            ]
             : row.sheets.filter((entry) => entry.file.id !== sheet.id),
       })),
     );
@@ -1745,7 +1731,7 @@ function SheetDetailsView({ details }: { details: SheetDetails }) {
 }
 
 function SheetIcon({ name, size = 11 }: { name: string; size?: number }) {
-  return /\.(xlsx|xlsm|xls|csv)$/i.test(name) ? (
+  return isWorkbook(name) ? (
     <FileSpreadsheet size={size} className="shrink-0" />
   ) : (
     <FileText size={size} className="shrink-0" />
@@ -1779,7 +1765,7 @@ async function droppedFiles(
     }
     const reader = (entry as FileSystemDirectoryEntry).createReader();
     // readEntries hands back at most ~100 at a time; keep asking until it's empty.
-    for (;;) {
+    for (; ;) {
       const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
         reader.readEntries(resolve, reject),
       );

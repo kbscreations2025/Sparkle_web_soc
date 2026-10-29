@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEventHandler, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { Loader2 } from "lucide-react";
 import { useEscapeKey } from "@/lib/useEscapeKey";
@@ -22,6 +22,75 @@ const PRESETS = [
   { value: 5000, hint: "~200 flash images" },
   { value: 20000, hint: "~25 Veo clips" },
 ];
+
+/**
+ * The amount itself, as both credit dialogs ask for it — this one and the
+ * console's grant panel.
+ *
+ * Presets rather than a bare number field: the amounts an admin actually
+ * reaches for are round, and 1,000 credits is $10 of provider spend — a
+ * figure that means nothing at a glance, so each preset says what it buys.
+ * With a `max`, presets above it are disabled.
+ */
+export function CreditAmountPicker({
+  amount,
+  onChange,
+  max,
+  inputRef,
+  onKeyDown,
+}: {
+  amount: number;
+  onChange: (amount: number) => void;
+  max?: number;
+  inputRef?: Ref<HTMLInputElement>;
+  onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
+}) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        {PRESETS.map((preset) => (
+          <button
+            key={preset.value}
+            type="button"
+            onClick={() => onChange(preset.value)}
+            disabled={max !== undefined && preset.value > max}
+            title={preset.hint}
+            className={cn(
+              "rounded-lg border px-2.5 py-1.5 text-[11px] font-medium tabular-nums transition-colors",
+              max !== undefined && "disabled:cursor-not-allowed disabled:opacity-40",
+              amount === preset.value
+                ? "border-gold/30 bg-gold/10 text-gold"
+                : "border-white/10 bg-white/[0.03] text-muted hover:border-white/20 hover:text-cream"
+            )}
+          >
+            {preset.value.toLocaleString()}
+          </button>
+        ))}
+      </div>
+
+      <label className="block space-y-1">
+        <span className="text-[10px] font-medium uppercase tracking-widest text-faint">Credits</span>
+        <input
+          ref={inputRef}
+          // Text, not type="number": no spinner arrows, no "e"/"-"/"." slipping
+          // through. Anything that isn't a digit is dropped as it's typed.
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          autoComplete="off"
+          value={amount > 0 ? String(amount) : ""}
+          autoFocus
+          onChange={(event) => {
+            const digits = event.target.value.replace(/\D/g, "").slice(0, 9);
+            onChange(digits ? Number(digits) : 0);
+          }}
+          onKeyDown={onKeyDown}
+          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-right text-sm tabular-nums text-cream focus:border-gold/30 focus:outline-none"
+        />
+      </label>
+    </>
+  );
+}
 
 /**
  * Pick an amount of credits, see what it does, confirm.
@@ -113,51 +182,18 @@ export function CreditAmountDialog({
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {PRESETS.map((preset) => (
-              <button
-                key={preset.value}
-                type="button"
-                onClick={() => setAmount(preset.value)}
-                disabled={max !== undefined && preset.value > max}
-                title={preset.hint}
-                className={cn(
-                  "rounded-lg border px-2.5 py-1.5 text-[11px] font-medium tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                  amount === preset.value
-                    ? "border-gold/30 bg-gold/10 text-gold"
-                    : "border-white/10 bg-white/[0.03] text-muted hover:border-white/20 hover:text-cream"
-                )}
-              >
-                {preset.value.toLocaleString()}
-              </button>
-            ))}
-          </div>
-
-          <label className="block space-y-1">
-            <span className="text-[10px] font-medium uppercase tracking-widest text-faint">Credits</span>
-            <input
-              ref={inputRef}
-              // Text, not type="number": no spinner arrows, no "e"/"-"/"." slipping
-              // through. Anything that isn't a digit is dropped as it's typed.
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              autoComplete="off"
-              value={amount > 0 ? String(amount) : ""}
-              autoFocus
-              onChange={(event) => {
-                const digits = event.target.value.replace(/\D/g, "").slice(0, 9);
-                setAmount(digits ? Number(digits) : 0);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !invalid && !busy) {
-                  event.preventDefault();
-                  onConfirm(amount);
-                }
-              }}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-right text-sm tabular-nums text-cream focus:border-gold/30 focus:outline-none"
-            />
-          </label>
+          <CreditAmountPicker
+            amount={amount}
+            onChange={setAmount}
+            max={max}
+            inputRef={inputRef}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !invalid && !busy) {
+                event.preventDefault();
+                onConfirm(amount);
+              }
+            }}
+          />
 
           {/* The arithmetic, not a description of it. */}
           {after !== null && !invalid && (

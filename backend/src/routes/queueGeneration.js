@@ -1,6 +1,6 @@
 const { enqueueJob, toPublicJob } = require("../queue");
 const { parseDataUri, isOwnConversation } = require("../generationService");
-const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const { logRequestAudit } = require("../auditLog");
 const credit = require("../services/credits");
 const { loadTenantOrThrow } = require("../aiRouting");
 const { resolveIntent, intentForTool, refineCountFor, describeIntent } = require("../prompts/intent");
@@ -32,6 +32,35 @@ function safePreview(preview) {
 function parseImages(value) {
   const list = Array.isArray(value) ? value : value ? [value] : [];
   return list.map(parseDataUri).filter(Boolean);
+}
+
+/**
+ * The follow-up half of a request — the same shape every refine-capable tool
+ * sends — as its worker takes it, given the already-parsed image to edit.
+ */
+function refinementPayload(body, refineImage) {
+  return {
+    isRefinement: true,
+    refineImage,
+    references: parseImages(body.referenceImages),
+    instruction: body.instruction,
+    displayPrompt: body.displayPrompt,
+    requestedModel: body.model,
+    requestedQuality: body.quality,
+    conversationId: body.conversationId,
+    parentGenerationId: body.parentGenerationId,
+  };
+}
+
+/**
+ * Pulls that half out of a body. Null when the body isn't a follow-up or its
+ * image doesn't parse — Product Background and the sketch tools then treat
+ * it as a first run.
+ */
+function readRefinement(body) {
+  if (!body.refineImage || !body.instruction) return null;
+  const [parsed] = parseImages(body.refineImage);
+  return parsed ? refinementPayload(body, parsed) : null;
 }
 
 /**
@@ -154,9 +183,7 @@ async function queueGeneration(req, res, { type, tool, request, payload, preview
     // settlement and the reaper look it up by.
     if (credits?.held) await credit.attachJob(credits.jobHint, credits.accountId, job._id);
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: dbUser.tenantId,
       action: "job.queued",
       status: "success",
@@ -200,4 +227,4 @@ async function queueGeneration(req, res, { type, tool, request, payload, preview
 /** Reference photos a text-to-image or text-to-sketch run takes — the pages offer the same. */
 const MAX_REFERENCE_PHOTOS = 4;
 
-module.exports = { queueGeneration, parseImages, MAX_REFERENCE_PHOTOS };
+module.exports = { queueGeneration, parseImages, refinementPayload, readRefinement, MAX_REFERENCE_PHOTOS };

@@ -90,6 +90,9 @@ export function HistoryLightbox({
   const timeLabel = timeAgo(item.createdAt);
   const fullSizeShown = Boolean(active && loadedAssetId === active.assetId);
 
+  const save = (output: HistoryOutput, index: number) =>
+    downloadImage(output.url, downloadName(output.url, `${item.tool}-${item.id}-${index + 1}`, output.type));
+
   /**
    * One at a time, in order. Firing them together would open as many parallel
    * proxy streams of several megabytes each, and browsers throttle or drop
@@ -98,9 +101,7 @@ export function HistoryLightbox({
    * abandon the rest of the set.
    */
   async function downloadAll() {
-    for (const [i, output] of item!.outputs.entries()) {
-      await downloadImage(output.url, downloadName(output.url, `${item!.tool}-${item!.id}-${i + 1}`, output.type));
-    }
+    for (const [i, output] of item!.outputs.entries()) await save(output, i);
   }
 
   return (
@@ -194,12 +195,7 @@ export function HistoryLightbox({
               {active && (
                 <button
                   type="button"
-                  onClick={() =>
-                    downloadImage(
-                      active.url,
-                      downloadName(active.url, `${item.tool}-${item.id}-${activeIndex + 1}`, active.type)
-                    )
-                  }
+                  onClick={() => save(active, activeIndex)}
                   aria-label="Download this one"
                   title={item.outputs.length > 1 ? "Download this one" : "Download"}
                   className={LIGHTBOX_ACTION}

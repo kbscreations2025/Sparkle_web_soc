@@ -1,4 +1,5 @@
 const { GoogleGenAI } = require("@google/genai");
+const { withRetry, promptParts, BLOCKED_FINISH_REASONS, pollVideo } = require("../shared");
 
 /**
  * The models this app offers. Every id here is both what the frontend shows
@@ -60,15 +61,6 @@ function videoLabelFor(modelId) {
   return GEMINI_VIDEO_MODEL_LABELS[modelId] || modelId;
 }
 
-/**
- * `finishReason` values that mean the model was stopped by a safety or policy
- * filter rather than finishing its answer. Checked on text responses, where —
- * unlike an image response — a stopped run still returns a well-formed
- * candidate with no usable content, and would otherwise read as "the model
- * returned nothing" with no explanation.
- */
-const BLOCKED_FINISH_REASONS = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"]);
-
 /** The "Sparkle" label the frontend shows for each model id — see frontend/lib/api.ts's CLEANING_MODELS. Kept in step by hand since one lives in each language. */
 const GEMINI_MODEL_LABELS = {
   "gemini-3-pro-image": "Sparkle 3 Pro Image",
@@ -128,8 +120,8 @@ function resolveModel(requestedModel) {
  * Turns a raw Gemini/network error into `{ message, code, retryable }`.
  *
  * `retryable` drives two decisions: whether `withRetry` tries the same key
- * again, and — one level up — whether `withKeyFailover` moves on to the
- * tenant's next configured key. Content-safety blocks and bad requests are
+ * again, and — one level up — whether aiRouting.js moves on to the tenant's
+ * next configured key. Content-safety blocks and bad requests are
  * deliberately excluded from both: every key would fail a blocked prompt the
  * same way, so retrying only delays the real error reaching the user.
  */
@@ -199,61 +191,9 @@ function classifyError(err) {
 }
 
 /**
- * Worth trying the tenant's next key over this error? Adds 401/403 on top of
- * `retryable`: those aren't worth retrying on the *same* key (the key itself
- * is bad), but a different key on the same tenant may not be revoked or
- * rate-limited at all.
- */
-function isWorthTryingNextKey(err) {
-  const { code, retryable } = classifyError(err);
-  return retryable || code === 401 || code === 403;
-}
-
-async function withRetry(fn, { retries = 1, delayMs = 2000 } = {}) {
-  let lastErr;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (attempt === retries || !classifyError(err).retryable) throw err;
-      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
-    }
-  }
-  throw lastErr;
-}
-
-/**
- * Tries `attempt` once per key, in priority order, stopping at the first
- * success. Each key already gets its own transient-error retry inside
- * `attempt` (see `withRetry`) — this is the layer above that: once a key's
- * own retries are exhausted, move on to the tenant's next one rather than
- * failing the whole request over one bad or rate-limited key.
- *
- * `attempt(entry)` is called with the routable `aiProviders` subdocument, not
- * a raw string, so the caller can record success/failure against it.
- *
- * @throws The last key's error, once every key has been tried and none worked.
- */
-async function withKeyFailover(entries, attempt) {
-  let lastErr;
-  for (let i = 0; i < entries.length; i++) {
-    try {
-      return await attempt(entries[i], i);
-    } catch (err) {
-      lastErr = err;
-      const isLastKey = i === entries.length - 1;
-      if (isLastKey || !isWorthTryingNextKey(err)) throw err;
-      console.warn(`[gemini] key ${i + 1}/${entries.length} failed (${classifyError(err).message}) — trying the next one`);
-    }
-  }
-  throw lastErr; // unreachable when entries is non-empty; keeps the type honest for an empty array
-}
-
-/**
  * One call to Gemini's image generation. `images` is an array of
- * `{ mimeType, base64 }`, sent first, in order, with the prompt last — the
- * order Gemini documents as most reliable for image-conditioned generation.
+ * `{ mimeType, base64 }`, sent first, in order, with the prompt last (see
+ * `promptParts`).
  *
  * Resolves with the first image part in the response; throws if none came
  * back (a text-only response, most often a declined or unsupported request).
@@ -261,10 +201,7 @@ async function withKeyFailover(entries, attempt) {
 async function generateImage({ apiKey, modelId, prompt, images, quality, aspectRatio }) {
   const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 150_000 } });
 
-  const parts = [
-    ...images.map(({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } })),
-    { text: prompt },
-  ];
+  const parts = promptParts(images, prompt);
 
   // Only the models with `imageConfig` accept either knob — 2.5-flash-image
   // predates it and would ignore both, same reasoning as `supportsImageSize`
@@ -274,15 +211,17 @@ async function generateImage({ apiKey, modelId, prompt, images, quality, aspectR
     ? { imageSize: qualityFor(modelId, quality), ...(aspectRatio ? { aspectRatio } : {}) }
     : null;
 
-  const response = await withRetry(() =>
-    ai.models.generateContent({
-      model: modelId,
-      contents: [{ role: "user", parts }],
-      config: {
-        responseModalities: ["IMAGE", "TEXT"],
-        ...(imageConfig ? { imageConfig } : {}),
-      },
-    })
+  const response = await withRetry(
+    () =>
+      ai.models.generateContent({
+        model: modelId,
+        contents: [{ role: "user", parts }],
+        config: {
+          responseModalities: ["IMAGE", "TEXT"],
+          ...(imageConfig ? { imageConfig } : {}),
+        },
+      }),
+    classifyError
   );
 
   const responseParts = response.candidates?.[0]?.content?.parts ?? [];
@@ -344,24 +283,23 @@ async function generateText({
   // `parts` lets a caller interleave its own labelled text and images —
   // Affinity sends "ITEM 1 PHOTO:", the photo, "ITEM 1 SHEET:", the sheet,
   // and the labelling is what keeps eight pieces from blurring together.
-  const parts = extraParts ?? [
-    ...images.map(({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } })),
-    { text: prompt },
-  ];
+  const parts = extraParts ?? promptParts(images, prompt);
 
-  const response = await withRetry(() =>
-    ai.models.generateContent({
-      model: modelId,
-      contents: [{ role: "user", parts }],
-      config: {
-        ...(systemInstruction ? { systemInstruction } : {}),
-        ...(responseSchema ? { responseMimeType: "application/json", responseSchema } : {}),
-        ...(temperature !== undefined ? { temperature } : {}),
-        ...(webSearch ? { tools: [{ googleSearch: {} }] } : {}),
-        thinkingConfig: { thinkingBudget },
-        maxOutputTokens,
-      },
-    })
+  const response = await withRetry(
+    () =>
+      ai.models.generateContent({
+        model: modelId,
+        contents: [{ role: "user", parts }],
+        config: {
+          ...(systemInstruction ? { systemInstruction } : {}),
+          ...(responseSchema ? { responseMimeType: "application/json", responseSchema } : {}),
+          ...(temperature !== undefined ? { temperature } : {}),
+          ...(webSearch ? { tools: [{ googleSearch: {} }] } : {}),
+          thinkingConfig: { thinkingBudget },
+          maxOutputTokens,
+        },
+      }),
+    classifyError
   );
 
   const candidate = response.candidates?.[0];
@@ -378,64 +316,31 @@ async function generateText({
   return { text, finishReason, blocked, truncated: finishReason === "MAX_TOKENS" };
 }
 
-/** How often a video operation is polled, and for how long before giving up. */
-const VIDEO_POLL_INTERVAL_MS = 5000;
-/**
- * ~10 minutes. The Next route this replaces capped out at ~290s because a
- * serverless function had to answer within 300s; a queue worker has no such
- * ceiling, so the limit here is "when is it fair to call this hung" rather
- * than "when does the platform kill us".
- */
-const VIDEO_MAX_POLLS = 120;
-
-class VideoTimeoutError extends Error {
-  constructor(message) {
-    super(message);
-    this.code = "video_timeout";
-    // Written for the user, and not worth retrying: another attempt is
-    // another ten minutes of waiting for the same verdict, on the most
-    // expensive call this app makes.
-    this.expose = true;
-    this.noRetry = true;
-  }
-}
-
 /**
  * Kicks off a Veo generation and polls the long-running operation to
- * completion.
+ * completion (see `pollVideo`, which reports each poll through `onPoll`).
  *
  * Returns the same `{ base64, mimeType }` shape as `generateImage`, so
  * everything downstream — the router, the asset writer, the job result —
  * handles a video exactly as it handles an image.
- *
- * `onPoll` reports each completed poll, which is the only signal this call
- * produces: a Veo run is several minutes of silence otherwise, and the
- * progress bar would have nothing but the clock to go on.
  */
 async function generateVideo({ apiKey, modelId, prompt, image, config, onPoll }) {
   // No client timeout: the submit call returns an operation handle in
   // seconds, and every long wait after it is our own polling loop, which
-  // has its own deadline below.
+  // has its own deadline.
   const ai = new GoogleGenAI({ apiKey });
 
-  let operation = await withRetry(() =>
-    ai.models.generateVideos({ model: modelId, prompt, ...(image ? { image } : {}), config })
+  const submitted = await withRetry(
+    () => ai.models.generateVideos({ model: modelId, prompt, ...(image ? { image } : {}), config }),
+    classifyError
   );
+  const operation = await pollVideo(submitted, {
+    poll: (current) => ai.operations.getVideosOperation({ operation: current }),
+    isDone: (current) => current.done,
+    onPoll,
+    provider: "gemini",
+  });
 
-  for (let poll = 0; !operation.done && poll < VIDEO_MAX_POLLS; poll++) {
-    await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_INTERVAL_MS));
-    operation = await ai.operations.getVideosOperation({ operation });
-    // Best-effort: a progress push that throws must not lose the video.
-    try {
-      await onPoll?.(poll + 1, VIDEO_MAX_POLLS);
-    } catch (err) {
-      console.error("[gemini] video poll progress failed:", err.message);
-    }
-  }
-
-  if (!operation.done) {
-    throw new VideoTimeoutError("The video is taking longer than expected. Try a shorter duration or a faster model.");
-  }
   if (operation.error) {
     throw new Error(operation.error.message || "Video generation failed");
   }
@@ -465,7 +370,7 @@ async function generateVideo({ apiKey, modelId, prompt, image, config, onPoll })
       ? video.uri
       : `${video.uri}${video.uri.includes("?") ? "&" : "?"}alt=media`;
 
-    const response = await withRetry(() => fetch(url, { headers: { "x-goog-api-key": apiKey } }));
+    const response = await withRetry(() => fetch(url, { headers: { "x-goog-api-key": apiKey } }), classifyError);
     if (!response.ok) {
       throw new Error(`Could not download the generated video (${response.status} ${response.statusText})`);
     }
@@ -481,11 +386,9 @@ async function generateVideo({ apiKey, modelId, prompt, image, config, onPoll })
 
 module.exports = {
   GEMINI_MODELS,
-  DEFAULT_GEMINI_MODEL,
   GEMINI_TEXT_MODELS,
   DEFAULT_TEXT_MODEL,
   GEMINI_VIDEO_MODELS,
-  DEFAULT_VIDEO_MODEL,
   qualityFor,
   qualitiesFor,
   resolveModel,
@@ -494,9 +397,7 @@ module.exports = {
   labelFor,
   videoLabelFor,
   classifyError,
-  withKeyFailover,
   generateImage,
   generateText,
   generateVideo,
-  VideoTimeoutError,
 };

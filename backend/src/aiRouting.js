@@ -5,7 +5,7 @@ const openai = require("./providers/openai");
 const openrouter = require("./providers/openrouter");
 const { openrouterEquivalentFor } = require("./providers/modelEquivalents");
 
-/** One entry per provider this router knows how to call — see `routeProviderCall`. */
+/** One entry per provider this router knows how to call — see `candidatesFor`. */
 const PROVIDER_MODULES = { gemini, openai, openrouter };
 const PROVIDER_LABELS = { gemini: "Gemini", openai: "OpenAI", openrouter: "OpenRouter" };
 
@@ -106,62 +106,7 @@ function sendGenerationError(res, err, routeName, provider = "gemini") {
 }
 
 /**
- * The part every image-generating route needs, regardless of which tool or
- * provider: pick the tenant's keys for that provider in priority order, fail
- * over between them on a transient error, and record which one actually
- * worked. Built once here so `cleaning` and `chatToEdit` (and every tool
- * after them) share one failover policy instead of each reimplementing it
- * slightly differently — and so a second provider is a new `provider` value,
- * not a second copy of this function.
- *
- * `images` is `[{ mimeType, base64 }]`, sent in that order with the prompt
- * last — see `generateImage` in gemini.js/openai.js.
- *
- * @throws {NoProviderError} if the tenant has no enabled key for `provider`.
- * @returns {{ output: { base64, mimeType, text }, providerId: ObjectId }}
- */
-async function routeProviderOperation({ tenant, provider, call }) {
-  const mod = PROVIDER_MODULES[provider];
-  const candidates = tenant.routableProviders(provider);
-  if (candidates.length === 0) {
-    throw new NoProviderError(`This organization has no ${PROVIDER_LABELS[provider]} key configured. Ask a super admin to add one.`);
-  }
-
-  let usedEntry;
-  let output;
-  try {
-    output = await mod.withKeyFailover(candidates, async (entry) => {
-      // Loaded fresh per attempt: `candidates` came off a query without
-      // `+aiProviders.credential`, so the secret has to be fetched by id.
-      const withCredential = await Tenant.loadProvider(tenant._id, entry._id);
-      const apiKey = decryptSecret(withCredential.credential, { provider });
-
-      try {
-        const result = await call({ apiKey, mod });
-        tenant.recordProviderSuccess(entry._id);
-        usedEntry = entry;
-        return result;
-      } catch (err) {
-        tenant.recordProviderFailure(entry._id, mod.classifyError(err).code);
-        throw err;
-      }
-    });
-  } finally {
-    // Health bookkeeping is best-effort: a write error here is logged and
-    // swallowed rather than turned into a failure the user sees, since it
-    // changes nothing about whether their image was produced.
-    try {
-      await tenant.save();
-    } catch (err) {
-      console.error("could not record provider health:", err.message);
-    }
-  }
-
-  return { output, providerId: usedEntry._id };
-}
-
-/**
- * The candidates for one image call: the requested provider's own enabled
+ * The candidates for one model call: the requested provider's own enabled
  * keys, plus — when the requested model has an OpenRouter equivalent (see
  * `providers/modelEquivalents.js`) — this tenant's enabled OpenRouter keys,
  * merged into one list and sorted by the same `priority` number a super
@@ -174,7 +119,7 @@ async function routeProviderOperation({ tenant, provider, call }) {
  * known OpenRouter id — trying it would only ever fail, so it's dropped
  * instead of attempted.
  */
-function imageCandidatesFor(tenant, provider, modelId) {
+function candidatesFor(tenant, provider, modelId) {
   const equivalent = provider === "openrouter" ? modelId : openrouterEquivalentFor(provider, modelId);
 
   return tenant
@@ -189,13 +134,19 @@ function imageCandidatesFor(tenant, provider, modelId) {
 }
 
 /**
- * Tries each image candidate in order, moving to the next on a transient or
- * key-specific error — same policy every provider module's own
- * `withKeyFailover` already applies, generalized here because candidates can
- * now span more than one module (a Gemini row and an OpenRouter row are not
- * the same module's problem to classify).
+ * Tries each candidate in order, stopping at the first success. Each key
+ * already gets its own transient-error retry inside the provider call (see
+ * `withRetry` in providers/shared.js) — this is the layer above that: once a
+ * key's own retries are exhausted, move on to the tenant's next one rather
+ * than failing the whole request over one bad or rate-limited key.
+ *
+ * 401/403 count on top of `retryable`: those aren't worth retrying on the
+ * *same* key (the key itself is bad), but a different key on the same tenant
+ * may not be revoked or rate-limited at all. Each error is read by the module
+ * that produced it, since candidates can span modules (a Gemini row and an
+ * OpenRouter row are not the same module's problem to classify).
  */
-async function tryImageCandidates(candidates, attempt) {
+async function tryCandidates(candidates, attempt) {
   let lastErr;
   for (let i = 0; i < candidates.length; i++) {
     try {
@@ -214,183 +165,136 @@ async function tryImageCandidates(candidates, attempt) {
 }
 
 /**
- * An image out. Unlike `routeProviderOperation` (still used by text/video,
- * neither of which OpenRouter serves), this builds its own candidate list so
- * it can mix providers — see `imageCandidatesFor`.
+ * The part every model call needs, whatever comes out of it: refuse with
+ * `missingMessage` when the tenant has no usable key, otherwise try the
+ * candidates in turn (see `tryCandidates`) with each one's secret loaded for
+ * its attempt, and record on the tenant which keys worked and which failed.
+ * Built once so images, text and video share one failover policy — and so
+ * another provider is a new candidate, not another copy of this loop.
+ *
+ * `call({ entry, mod, modelId, apiKey })` makes the request itself.
+ *
+ * @throws {NoProviderError} if `candidates` is empty.
+ * @returns {{ output, providerId, provider, modelId }} — which provider and
+ *   model id actually answered, for the history record.
  */
-async function routeProviderCall({ tenant, provider, modelId, prompt, images, quality, aspectRatio }) {
-  const candidates = imageCandidatesFor(tenant, provider, modelId);
-  if (candidates.length === 0) {
-    throw new NoProviderError(`This organization has no ${PROVIDER_LABELS[provider]} key configured. Ask a super admin to add one.`);
-  }
+async function runOnCandidates(tenant, candidates, missingMessage, call) {
+  if (candidates.length === 0) throw new NoProviderError(missingMessage);
 
-  let usedEntry;
-  let output;
+  let used;
   try {
-    output = await tryImageCandidates(candidates, async ({ entry, mod, modelId: resolvedModelId }) => {
+    const output = await tryCandidates(candidates, async (candidate) => {
+      const { entry, mod } = candidate;
+      // Loaded fresh per attempt: `candidates` came off a query without
+      // `+aiProviders.credential`, so the secret has to be fetched by id.
       const withCredential = await Tenant.loadProvider(tenant._id, entry._id);
       const apiKey = decryptSecret(withCredential.credential, { provider: entry.provider });
 
       try {
-        const result = await mod.generateImage({
-          apiKey,
-          modelId: resolvedModelId,
-          prompt,
-          images,
-          quality: mod.qualityFor(resolvedModelId, quality),
-          aspectRatio,
-        });
+        const result = await call({ ...candidate, apiKey });
         tenant.recordProviderSuccess(entry._id);
-        usedEntry = entry;
+        used = candidate;
         return result;
       } catch (err) {
         tenant.recordProviderFailure(entry._id, mod.classifyError(err).code);
         throw err;
       }
     });
+    return { output, providerId: used.entry._id, provider: used.entry.provider, modelId: used.modelId };
   } finally {
+    // Health bookkeeping is best-effort: a write error here is logged and
+    // swallowed rather than turned into a failure the user sees, since it
+    // changes nothing about whether their output was produced.
     try {
       await tenant.save();
     } catch (err) {
       console.error("could not record provider health:", err.message);
     }
   }
+}
 
-  return { output, providerId: usedEntry._id };
+function noKeyMessage(provider) {
+  return `This organization has no ${PROVIDER_LABELS[provider]} key configured. Ask a super admin to add one.`;
+}
+
+/**
+ * An image out. `images` is `[{ mimeType, base64 }]`, sent in that order with
+ * the prompt last — see `generateImage` in each provider module.
+ */
+async function routeProviderCall({ tenant, provider, modelId, prompt, images, quality, aspectRatio }) {
+  return runOnCandidates(tenant, candidatesFor(tenant, provider, modelId), noKeyMessage(provider), ({ mod, apiKey, modelId: resolvedModelId }) =>
+    mod.generateImage({
+      apiKey,
+      modelId: resolvedModelId,
+      prompt,
+      images,
+      quality: mod.qualityFor(resolvedModelId, quality),
+      aspectRatio,
+    })
+  );
 }
 
 /**
  * Text out — Image to Text, the writing halves of Marketing Kit, and the
  * analysis steps of Sketch to Image, Image to Video and the follow-up reader.
  *
- * Same candidate list as images (see `imageCandidatesFor`): the tenant's
- * Gemini keys and — since the text models have OpenRouter equivalents — its
- * OpenRouter keys, interleaved by the priority a super admin sets, moving to
- * the next on a transient or key-specific error. OpenRouter's
- * `generateText` takes the same arguments and returns the same shape as
- * Gemini's, so callers don't change.
+ * Same candidate list as images (see `candidatesFor`): the tenant's Gemini
+ * keys and — since the text models have OpenRouter equivalents — its
+ * OpenRouter keys, interleaved by the priority a super admin sets.
+ * OpenRouter's `generateText` takes the same arguments and returns the same
+ * shape as Gemini's, so callers don't change.
  *
  * `output` is `{ text, finishReason, blocked, truncated }` rather than image
  * bytes — see `gemini.generateText`.
- *
- * @returns {{ output, providerId, provider, modelId }} — which provider and
- *   model id actually answered, for the history record.
  */
 async function routeTextCall({ tenant, modelId, prompt, images, parts, ...options }) {
-  const candidates = imageCandidatesFor(tenant, "gemini", modelId);
-  if (candidates.length === 0) {
-    throw new NoProviderError("This organization has no Gemini or OpenRouter key configured. Ask a super admin to add one.");
-  }
-
-  let used;
-  let output;
-  try {
-    output = await tryImageCandidates(candidates, async (candidate) => {
-      const { entry, mod, modelId: resolvedModelId } = candidate;
-      const withCredential = await Tenant.loadProvider(tenant._id, entry._id);
-      const apiKey = decryptSecret(withCredential.credential, { provider: entry.provider });
-
-      try {
-        const result = await mod.generateText({ apiKey, modelId: resolvedModelId, prompt, images, parts, ...options });
-        tenant.recordProviderSuccess(entry._id);
-        used = candidate;
-        return result;
-      } catch (err) {
-        tenant.recordProviderFailure(entry._id, mod.classifyError(err).code);
-        throw err;
-      }
-    });
-  } finally {
-    try {
-      await tenant.save();
-    } catch (err) {
-      console.error("could not record provider health:", err.message);
-    }
-  }
-
-  return { output, providerId: used.entry._id, provider: used.entry.provider, modelId: used.modelId };
+  return runOnCandidates(
+    tenant,
+    candidatesFor(tenant, "gemini", modelId),
+    "This organization has no Gemini or OpenRouter key configured. Ask a super admin to add one.",
+    ({ mod, apiKey, modelId: resolvedModelId }) => mod.generateText({ apiKey, modelId: resolvedModelId, prompt, images, parts, ...options })
+  );
 }
 
 /**
  * A video out, across providers in the tenant's key priority order — same
- * candidate list as images (see `imageCandidatesFor`): a Veo model tries
- * the Gemini keys and, when it has an OpenRouter equivalent, the OpenRouter
- * keys, interleaved by priority. An OpenRouter-only model (Kling, Wan…)
- * uses only OpenRouter keys. Failover matters more here than anywhere: a
- * run is minutes long, so a rate-limited key should cost a retry on the
- * next key rather than the whole job.
+ * candidate list as images (see `candidatesFor`): a Veo model tries the
+ * Gemini keys and, when it has an OpenRouter equivalent, the OpenRouter keys,
+ * interleaved by priority. An OpenRouter-only model (Kling, Wan…) uses only
+ * OpenRouter keys. Failover matters more here than anywhere: a run is
+ * minutes long, so a rate-limited key should cost a retry on the next key
+ * rather than the whole job.
  *
  * The two providers take differently shaped inputs: Gemini gets its SDK
  * `image`/`config`, OpenRouter gets the raw `views` and plain settings.
- *
- * @returns {{ output, providerId, provider, modelId }} — which provider and
- *   model id actually served it, for the history record.
  */
 async function routeVideoCall({ tenant, provider = "gemini", modelId, prompt, image, config, views, frames, generateAudio, onPoll }) {
-  const candidates = imageCandidatesFor(tenant, provider, modelId);
-  if (candidates.length === 0) {
-    throw new NoProviderError(`This organization has no ${PROVIDER_LABELS[provider]} key configured. Ask a super admin to add one.`);
-  }
-
-  let used;
-  let output;
-  try {
-    output = await tryImageCandidates(candidates, async (candidate) => {
-      const { entry, mod, modelId: resolvedModelId } = candidate;
-      const withCredential = await Tenant.loadProvider(tenant._id, entry._id);
-      const apiKey = decryptSecret(withCredential.credential, { provider: entry.provider });
-
-      try {
-        const result =
-          entry.provider === "openrouter"
-            ? await mod.generateVideo({
-                apiKey,
-                modelId: resolvedModelId,
-                prompt,
-                views,
-                // Both ends pinned, and silence — the turntable's quarter-turns
-                // (see video/turntable.js). OpenRouter only.
-                frames,
-                generateAudio,
-                aspectRatio: config.aspectRatio,
-                resolution: config.resolution,
-                durationSeconds: config.durationSeconds,
-                onPoll,
-              })
-            : await mod.generateVideo({ apiKey, modelId: resolvedModelId, prompt, image, config, onPoll });
-        tenant.recordProviderSuccess(entry._id);
-        used = candidate;
-        return result;
-      } catch (err) {
-        tenant.recordProviderFailure(entry._id, mod.classifyError(err).code);
-        throw err;
-      }
-    });
-  } finally {
-    try {
-      await tenant.save();
-    } catch (err) {
-      console.error("could not record provider health:", err.message);
-    }
-  }
-
-  return { output, providerId: used.entry._id, provider: used.entry.provider, modelId: used.modelId };
-}
-
-/** Back-compat shorthand for the pre-multi-provider call sites. */
-async function routeGeminiCall({ tenant, modelId, prompt, images, quality }) {
-  return routeProviderCall({ tenant, provider: "gemini", modelId, prompt, images, quality });
+  return runOnCandidates(tenant, candidatesFor(tenant, provider, modelId), noKeyMessage(provider), ({ entry, mod, apiKey, modelId: resolvedModelId }) =>
+    entry.provider === "openrouter"
+      ? mod.generateVideo({
+          apiKey,
+          modelId: resolvedModelId,
+          prompt,
+          views,
+          // Both ends pinned, and silence — the turntable's quarter-turns
+          // (see video/turntable.js). OpenRouter only.
+          frames,
+          generateAudio,
+          aspectRatio: config.aspectRatio,
+          resolution: config.resolution,
+          durationSeconds: config.durationSeconds,
+          onPoll,
+        })
+      : mod.generateVideo({ apiKey, modelId: resolvedModelId, prompt, image, config, onPoll })
+  );
 }
 
 module.exports = {
-  routeGeminiCall,
   routeProviderCall,
-  routeProviderOperation,
   routeTextCall,
   routeVideoCall,
   resolveProviderModel,
   loadTenantOrThrow,
   sendGenerationError,
   classifyProviderError,
-  NoProviderError,
 };

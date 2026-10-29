@@ -32,10 +32,10 @@ export const MODEL_ATTRS: { key: string; label: string; options: string[]; note?
 ]
 
 /** `MODEL_ATTRS`'s own "outfit" list — worn when Gender is "Female" or unset. */
-export const OUTFITS_FEMALE = MODEL_ATTRS.find((attr) => attr.key === 'outfit')!.options
+const OUTFITS_FEMALE =MODEL_ATTRS.find((attr) => attr.key === 'outfit')!.options
 
 /** Shown instead once "Male" is picked. */
-export const OUTFITS_MALE = [
+const OUTFITS_MALE = [
   'Tailored Suit',
   'Blazer & Trousers',
   'Dress Shirt (open collar)',
@@ -61,7 +61,7 @@ export type PlacementOption = { id: string; label: string; value: string };
  * the backend reads the kind out of this text to pick its rules, so a word
  * like "earrings" here would have it prompt for one specific piece.
  */
-export const AUTO_PLACEMENT: PlacementOption = {
+const AUTO_PLACEMENT: PlacementOption = {
   id: 'auto',
   label: 'From the photo',
   value:

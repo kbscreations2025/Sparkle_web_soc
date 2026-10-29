@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Image from "next/image";
-import { Eraser, ImagePlus, Maximize2, Palette, Sparkles, Upload, X } from "lucide-react";
+import { Eraser, ImagePlus, Maximize2, Palette, Sparkles, X } from "lucide-react";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
-import { LibraryPicker } from "@/components/studio/LibraryPicker";
+import { SinglePhotoUpload, usePhotoPicker } from "@/components/studio/SinglePhotoUpload";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import {
   CLEANING_MODELS,
@@ -23,7 +23,6 @@ import {
   type ProductShadow,
 } from "@/lib/api";
 import { compressGraphic, compressImage, makeThumbnail } from "@/lib/image";
-import { useLibraryPicker } from "@/lib/library";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -113,16 +112,9 @@ export default function ProductBackgroundPage() {
   const [model, setModel] = useState<string>(DEFAULT_CLEANING_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [count, setCount] = useState(1);
-  const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   /** Whether the run on screen asked for transparency — its result is shown over a checkerboard. */
   const [showChecker, setShowChecker] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const backdropInput = useRef<HTMLInputElement>(null);
-  // Earlier uploads and results as well as the disk — a cleaned photo goes
-  // straight on a new background. One per box, since each fills its own slot.
-  const library = useLibraryPicker(fileInput);
-  const backdropLibrary = useLibraryPicker(backdropInput);
 
   const workspace = useGenerationWorkspace({
     tool: "product_background",
@@ -130,6 +122,19 @@ export default function ProductBackgroundPage() {
     onRefine: (body) => refineProductBackground({ ...body, model, quality }),
   });
   const { setError } = workspace;
+
+  async function acceptBackdrop(file: File | undefined) {
+    if (!file) return;
+    try {
+      setBackdrop(await compressImage(file));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read that file");
+    }
+  }
+
+  // Earlier uploads and results as well as the disk — a cleaned photo goes
+  // straight on a new background. One per box, since each fills its own slot.
+  const backdropPicker = usePhotoPicker(acceptBackdrop);
 
   useEffect(() => {
     let cancelled = false;
@@ -150,15 +155,6 @@ export default function ProductBackgroundPage() {
     try {
       // Keeps a PNG's transparency, so an existing cutout can be recoloured.
       setPhoto(await compressGraphic(file, 2048));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not read that file");
-    }
-  }
-
-  async function acceptBackdrop(file: File | undefined) {
-    if (!file) return;
-    try {
-      setBackdrop(await compressImage(file));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read that file");
     }
@@ -251,33 +247,7 @@ export default function ProductBackgroundPage() {
 
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
         <div className="mx-auto max-w-3xl space-y-6">
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(event) => {
-              accept(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <input
-            ref={backdropInput}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(event) => {
-              acceptBackdrop(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <LibraryPicker open={library.open} onClose={library.close} onFiles={(files) => accept(files[0])} room={1} />
-          <LibraryPicker
-            open={backdropLibrary.open}
-            onClose={backdropLibrary.close}
-            onFiles={(files) => acceptBackdrop(files[0])}
-            room={1}
-          />
+          {backdropPicker.inputs}
 
           {/* The photo */}
           {photo ? (
@@ -303,32 +273,11 @@ export default function ProductBackgroundPage() {
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={library.show}
-              onDragOver={(event) => {
-                event.preventDefault();
-                setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragging(false);
-                accept(event.dataTransfer.files?.[0]);
-              }}
-              className={cn(
-                "flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-12 transition-colors",
-                dragging ? "border-gold/40 bg-gold/[0.06]" : "border-white/[0.12] bg-white/[0.02] hover:border-white/25"
-              )}
-            >
-              <Upload size={20} className="text-faint" />
-              <p className="text-sm font-medium text-cream">
-                {library.available
-                  ? "Drop a product photo here, or click to upload or pick from your library"
-                  : "Drop a product photo here, or click to choose"}
-              </p>
-              <p className="text-[11px] text-faint">Works best on a plain backdrop — busy photos are cleaned up first.</p>
-            </button>
+            <SinglePhotoUpload
+              subject="a product photo"
+              hint="Works best on a plain backdrop — busy photos are cleaned up first."
+              onFile={accept}
+            />
           )}
 
           {/* The background */}
@@ -468,7 +417,7 @@ export default function ProductBackgroundPage() {
                 ) : (
                   <button
                     type="button"
-                    onClick={backdropLibrary.show}
+                    onClick={backdropPicker.show}
                     className="flex w-full items-center gap-2 rounded-xl border border-dashed border-white/[0.12] px-3 py-2.5 text-[12px] text-faint transition-colors hover:border-white/25 hover:text-cream"
                   >
                     <ImagePlus size={15} /> Add a photo of a setting — a shelf, a tray, a shop window…

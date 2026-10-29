@@ -1,78 +1,49 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { io } from "socket.io-client";
-import { CalendarRange, ChevronDown, Film, Gauge, Copy, Download, History, Loader2, type LucideIcon, MessageCircle, MoreHorizontal, Eye, ArrowUp, Newspaper, Search, SlidersHorizontal, Trash2, Users } from "lucide-react";
-import Link from "next/link";
+import { ArrowUp, History, Newspaper } from "lucide-react";
 import {
   BACKEND_URL,
   deleteHistoryItem,
   deleteMarketingKit,
   fetchHistory,
+  fetchHistoryFacets,
   fetchHistoryItem,
   listMarketingKits,
   MODEL_LABELS,
   type HistoryItem,
   type MarketingKitSummary,
 } from "@/lib/api";
-import { downloadImage, downloadName } from "@/lib/image";
-import { conversationHref, toolBadgeStyle, TOOL_LABELS, TOOLS, workspacePathFor } from "@/lib/nav";
-import { describeKit, kitBadgeStyle, kitHref, KIT_LABEL } from "@/lib/marketingKits";
+import { conversationHref, TOOL_LABELS, workspacePathFor } from "@/lib/nav";
 import { usePageToolbar } from "@/lib/page-toolbar-context";
-import { fetchHistoryFacets } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { getPageCache, pageCacheKey, setPageCache } from "@/lib/pageCache";
-import { useDismissable } from "@/lib/useEscapeKey";
-import { cn } from "@/lib/utils";
 import { HistoryLightbox } from "@/components/studio/HistoryLightbox";
-import { AssetThumb } from "@/components/studio/AssetThumb";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 import { ScrollEnds } from "@/components/admin/ScrollEnds";
+import {
+  DateFilter,
+  KindFilter,
+  MemberFilter,
+  MoreFilters,
+  QualityFilter,
+  ToolFilter,
+  TypeFilter,
+  ViewTab,
+  withinRange,
+  type DateRange,
+} from "./HistoryFilters";
+import { GRID_GAP, HistoryTile, KitsGrid, OPENS_AS_RESULT, SkeletonGrid } from "./HistoryTiles";
 
 const HISTORY_PERMISSION = "result.read.own";
 /** Opening a colleague's chat, read-only — see grants.js. */
 const VIEW_CHATS_PERMISSION = "org.conversations.read";
 /** Deleting a colleague's result — see grants.js. */
 const DELETE_OTHERS_PERMISSION = "org.results.delete";
-
-const TOOL_OPTIONS = TOOLS.map((t) => ({ id: t.id, label: t.label }));
-
-/**
- * The tile's actions sit in one pill rather than as separate circles.
- *
- * Three buttons each carrying their own border, background and blur cost
- * three times the chrome and two gaps between them, over a picture that is
- * only ~160px wide. Pooling them into a single container pays for that once
- * — the same grouping the lightbox toolbar uses.
- */
-const TILE_ACTION_GROUP =
-  "flex h-4 shrink-0 items-center rounded-full border border-white/20 bg-black/55 px-0.5 backdrop-blur-sm md:h-5";
-
-/**
- * One action inside that pill.
- *
- * Larger on a phone than on a desktop, which is the opposite of how these
- * usually scale — and deliberate. A finger needs the target; a cursor does
- * not, and at `md` the grid has more columns of the same-sized tile, so
- * every pixel the buttons take is covering the picture.
- *
- * Still short of the 32px the chips aim for: three of these plus the tool
- * and quality badges have to fit across a ~170px tile, and the tile itself
- * is the primary target — tapping it opens the lightbox, where the same
- * three actions are full size.
- *
- * No `lg` step: tiles do not get bigger at wide viewports, the grid just
- * adds a column.
- */
-const TILE_ACTION_BUTTON =
-  "flex h-3.5 w-4 items-center justify-center rounded-full transition-colors hover:bg-white/25 md:h-4 md:w-5";
-const TILE_ACTION_ICON = "h-2.5 w-2.5 text-white/85 md:h-3 md:w-3";
-
-/** Row gap between tiles, kept as one constant since both the CSS grid and the row-height estimate must agree. */
-const GRID_GAP = 10;
 
 /**
  * When the browser last went Back or Forward.
@@ -170,6 +141,12 @@ type HistorySnapshot = {
   canReadTeam: boolean;
 };
 
+/** A comma-separated filter from the query string — empty when it is absent. */
+function listParam(params: { get(name: string): string | null }, name: string) {
+  const raw = params.get(name);
+  return raw ? raw.split(",").filter(Boolean) : [];
+}
+
 /** 2 columns on mobile, 4 on tablet, 6 on desktop. */
 function useResponsiveColumns() {
   const tablet = useMinWidth(640);
@@ -187,39 +164,24 @@ export default function HistoryPage() {
   // once from whatever query string this page was opened with. Both are
   // client-side filters over one fetched dataset (see below): empty means no
   // filter, checking one or more narrows the grid down to just those.
-  const [selectedTools, setSelectedTools] = useState<string[]>(() => {
-    const raw = searchParams.get("tools");
-    return raw ? raw.split(",").filter(Boolean) : [];
-  });
-  const [selectedMembers, setSelectedMembers] = useState<string[]>(() => {
-    const raw = searchParams.get("members");
-    return raw ? raw.split(",").filter(Boolean) : [];
-  });
+  const [selectedTools, setSelectedTools] = useState<string[]>(() => listParam(searchParams, "tools"));
+  const [selectedMembers, setSelectedMembers] = useState<string[]>(() => listParam(searchParams, "members"));
 
   /**
    * Which kit kinds to show. The Kits tab's answer to the Tools filter:
    * every kit is the same tool, so filtering by tool there would do
    * nothing — what distinguishes one kit from another is its kind.
    */
-  const [selectedKinds, setSelectedKinds] = useState<string[]>(() => {
-    const raw = searchParams.get("kinds");
-    return raw ? raw.split(",").filter(Boolean) : [];
-  });
+  const [selectedKinds, setSelectedKinds] = useState<string[]>(() => listParam(searchParams, "kinds"));
 
   /** Which resolutions to show — the badge on every tile. Empty means all. */
-  const [selectedQualities, setSelectedQualities] = useState<string[]>(() => {
-    const raw = searchParams.get("quality");
-    return raw ? raw.split(",").filter(Boolean) : [];
-  });
+  const [selectedQualities, setSelectedQualities] = useState<string[]>(() => listParam(searchParams, "quality"));
 
   /**
    * What the run produced, which is a different question from which tool made
    * it: "find that video" is one filter, not a guess at which tool it was.
    */
-  const [selectedTypes, setSelectedTypes] = useState<string[]>(() => {
-    const raw = searchParams.get("types");
-    return raw ? raw.split(",").filter(Boolean) : [];
-  });
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(() => listParam(searchParams, "types"));
 
   /** When to show results from. Empty strings mean open-ended. */
   const [dateRange, setDateRange] = useState<DateRange>(() => ({
@@ -311,27 +273,18 @@ export default function HistoryPage() {
       types?: string[];
     }) => {
       const params = new URLSearchParams(searchParams.toString());
+      // Untouched when not passed; an empty list drops the key.
+      const setList = (name: string, values?: string[]) => {
+        if (!values) return;
+        if (values.length === 0) params.delete(name);
+        else params.set(name, values.join(","));
+      };
 
-      if (next.tools) {
-        if (next.tools.length === 0) params.delete("tools");
-        else params.set("tools", next.tools.join(","));
-      }
-      if (next.qualities) {
-        if (next.qualities.length === 0) params.delete("quality");
-        else params.set("quality", next.qualities.join(","));
-      }
-      if (next.types) {
-        if (next.types.length === 0) params.delete("types");
-        else params.set("types", next.types.join(","));
-      }
-      if (next.members) {
-        if (next.members.length === 0) params.delete("members");
-        else params.set("members", next.members.join(","));
-      }
-      if (next.kinds) {
-        if (next.kinds.length === 0) params.delete("kinds");
-        else params.set("kinds", next.kinds.join(","));
-      }
+      setList("tools", next.tools);
+      setList("quality", next.qualities);
+      setList("types", next.types);
+      setList("members", next.members);
+      setList("kinds", next.kinds);
       if (next.range) {
         for (const key of ["from", "to"] as const) {
           if (next.range[key]) params.set(key, next.range[key]);
@@ -711,13 +664,6 @@ export default function HistoryPage() {
   const badgeCount = view === "kits" ? (visibleKits?.length ?? 0) : totalImages;
 
   /*
-   * The `finally` is the point. Without it a request that rejects — the
-   * network dropping, a reply that isn't JSON — left `deletingId` set, and
-   * a tile whose Delete button is permanently disabled and spinning is a
-   * button that can never be pressed again. A failure has to hand the
-   * button back.
-   */
-  /*
    * The tile's Delete button only *asks*. Nothing is removed until the
    * dialog is confirmed — a grid of near-identical thumbnails, with the
    * delete control a few pixels from the one that opens the result, is
@@ -728,6 +674,13 @@ export default function HistoryPage() {
     setPendingDelete(item);
   }, []);
 
+  /*
+   * The `finally` is the point. Without it a request that rejects — the
+   * network dropping, a reply that isn't JSON — left `deletingId` set, and
+   * a tile whose Delete button is permanently disabled and spinning is a
+   * button that can never be pressed again. A failure has to hand the
+   * button back.
+   */
   const handleDelete = useCallback(async (item: HistoryItem) => {
     setDeletingId(item.id);
     setDeleteError("");
@@ -766,7 +719,6 @@ export default function HistoryPage() {
   // skip a manual refresh also lets History prepend a brand-new result the
   // instant it's ready, with no poll and no page reload.
   useEffect(() => {
-    const userId = user?.user_id;
     if (!userId) return;
 
     const socket = io(BACKEND_URL, { withCredentials: true });
@@ -803,7 +755,7 @@ export default function HistoryPage() {
       if (timer) clearTimeout(timer);
       socket.disconnect();
     };
-  }, [user?.user_id]);
+  }, [userId]);
 
   // Current values for the live refresh, which runs from a long-lived socket
   // handler. Written after each render, the only point that is safe to.
@@ -860,7 +812,7 @@ export default function HistoryPage() {
    * the grid's own filters — the server applies scope and filters, so what
    * comes back is exactly what a reload would have added.
    */
-  const fetchNewerRef = useRef<() => void>(() => { });
+  const fetchNewerRef = useRef<() => void>(() => {});
   useEffect(() => {
     fetchNewerRef.current = async () => {
       const id = requestId.current;
@@ -963,6 +915,8 @@ export default function HistoryPage() {
   }, []);
 
   const hasAccess = can(user, HISTORY_PERMISSION);
+  /** Their own result, in a tool that can resume its thread. */
+  const continuable = (item: HistoryItem) => item.isOwn && Boolean(workspacePathFor(item.tool, item.model));
   /** May open a colleague's chat to read. The server also checks the data scope. */
   const canViewChats = can(user, VIEW_CHATS_PERMISSION);
   const viewable = (item: HistoryItem) =>
@@ -1136,7 +1090,6 @@ export default function HistoryPage() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-
       {/* A delete that fails has to say so. Silence here was the whole
           problem: the tile stayed, and nothing explained why. */}
       {deleteError && (
@@ -1166,7 +1119,7 @@ export default function HistoryPage() {
               columns={columns}
               onDelete={setPendingKitDelete}
               items={kitItems}
-              canContinue={(item) => item.isOwn && Boolean(workspacePathFor(item.tool, item.model))}
+              canContinue={continuable}
               canView={viewable}
               onOpen={openItem}
               onContinue={handleContinue}
@@ -1193,7 +1146,7 @@ export default function HistoryPage() {
                         key={item.id}
                         item={item}
                         toolLabel={TOOL_LABELS[item.tool] || item.tool}
-                        canContinue={item.isOwn && Boolean(workspacePathFor(item.tool, item.model))}
+                        canContinue={continuable(item)}
                         canView={viewable(item)}
                         canDelete={deletable(item)}
                         deleting={deletingId === item.id}
@@ -1221,7 +1174,7 @@ export default function HistoryPage() {
         item={selected}
         toolLabel={selected ? TOOL_LABELS[selected.tool] || selected.tool : ""}
         modelLabel={modelLabelFor(selected?.model)}
-        canContinue={Boolean(selected?.isOwn && workspacePathFor(selected.tool, selected.model))}
+        canContinue={Boolean(selected && continuable(selected))}
         canView={Boolean(selected && viewable(selected))}
         canDelete={Boolean(selected && deletable(selected) && !kitGenerationIds.has(selected.id))}
         deleting={Boolean(selected && deletingId === selected.id)}
@@ -1279,1026 +1232,3 @@ export default function HistoryPage() {
     </div>
   );
 }
-
-/**
- * What a tile shows when the run produced words instead of pictures.
- *
- * An excerpt rather than an icon: these results are told apart by what they
- * say, and a grid of identical document glyphs would make a page of them
- * unreadable.
- *
- * Clipped by `line-clamp` alone. A fade at the bottom would read better,
- * but it has to be painted in the tile's own background colour — and that
- * colour comes from a `bg-white/*` tint that the light theme flips to a
- * black one, so a single hardcoded gradient is a smudge in one theme or
- * the other. The ellipsis says the same thing and cannot be wrong.
- *
- * `text-muted` rather than an explicit tint, unlike the lightbox: this tile
- * sits on the page, whose ground flips with the theme, so the token that
- * flips with it is the right one.
- */
-function TextResultCover({ text }: { text?: string | null }) {
-  return (
-    <div className="h-full w-full bg-white/[0.04] p-2.5 pt-7 md:p-3 md:pt-8">
-      <p className="line-clamp-6 text-[9px] leading-relaxed text-muted md:text-[10px]">
-        {text?.trim() || "No text was recorded for this run."}
-      </p>
-    </div>
-  );
-}
-
-/**
- * One half of the segmented History / Marketing Kits toggle.
- *
- * The count rides on the tab it belongs to rather than on the group, so it
- * is never ambiguous which of the two it is counting. That puts it outside
- * the group's own bounds, which is why the rounded ends are on the buttons
- * here instead of an `overflow-hidden` on the container that would clip it.
- */
-function ViewTab({
-  icon: Icon,
-  label,
-  active,
-  onClick,
-  side,
-  badge,
-  badgeLabel,
-  compact = false,
-}: {
-  icon: LucideIcon;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  side: "left" | "right";
-  badge?: number;
-  badgeLabel?: string;
-  /** Icon only — the phone's form. */
-  compact?: boolean;
-}) {
-  return (
-    <span className="relative">
-      <button
-        type="button"
-        onClick={onClick}
-        aria-pressed={active}
-        aria-label={label}
-        title={label}
-        className={cn(
-          "flex items-center justify-center text-xs font-medium transition-colors",
-          compact ? "h-7 w-8 md:h-8 md:w-8" : "gap-1.5 px-3 py-1.5",
-          // The divider belongs to the left half, so the group reads as one
-          // control however many tabs it grows to.
-          side === "left" ? "rounded-l-[5px] border-r border-white/10" : "rounded-r-[5px]",
-          active ? "bg-gold/[0.08] text-gold" : "text-faint hover:bg-white/[0.04] hover:text-cream"
-        )}
-      >
-        <Icon size={compact ? 14 : 12} />
-        {!compact && label}
-      </button>
-      <CountBadge count={badge ?? 0} label={badgeLabel} />
-    </span>
-  );
-}
-
-/**
- * The saved Marketing Kits, as a list rather than the image grid beside it.
- *
- * A kit is a document — it is found by its name and its date, and a row
- * carries both plus one thumbnail. The grid next door is the right shape
- * for pictures and the wrong one for these.
- */
-/**
- * The saved kits, as the same tiles the results grid uses.
- *
- * Same square geometry, same column count, same chrome — badge top-left,
- * actions top-right, caption along the bottom. Switching tabs changes what
- * is in the grid, not what a grid looks like, and a second card style would
- * make the two halves read as two different pages.
- */
-/**
- * Kits that are a set of pictures rather than a deck: their tiles open the
- * results viewer and the chat, like an image tile, instead of an editor.
- */
-const OPENS_AS_RESULT = new Set(["campaign", "festive"]);
-
-type KitResultActions = {
-  /** The run behind a Campaign Kit or Festive Poster tile, by kit id, once loaded. */
-  items: Record<string, HistoryItem>;
-  canContinue: (item: HistoryItem) => boolean;
-  canView: (item: HistoryItem) => boolean;
-  onOpen: (item: HistoryItem) => void;
-  onContinue: (item: HistoryItem) => void;
-};
-
-function KitsGrid({
-  kits,
-  loading,
-  columns,
-  onDelete,
-  ...actions
-}: {
-  kits: MarketingKitSummary[] | null;
-  loading: boolean;
-  columns: number;
-  onDelete: (kit: MarketingKitSummary) => void;
-} & KitResultActions) {
-  if (loading || kits === null) return <SkeletonGrid rows={2} />;
-
-  if (kits.length === 0) {
-    return (
-      <p className="px-2 py-10 text-center text-sm text-faint">
-        No kits yet — a Brand Story, Affinity deck, Collection Story, Campaign Kit or Poster is saved here to
-        reopen and edit.
-      </p>
-    );
-  }
-
-  return (
-    <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP }}>
-      {kits.map((kit) => (
-        <KitTile key={kit.id} kit={kit} onDelete={onDelete} {...actions} />
-      ))}
-    </div>
-  );
-}
-
-function KitTile({
-  kit,
-  onDelete,
-  items,
-  canContinue,
-  canView,
-  onOpen,
-  onContinue,
-}: { kit: MarketingKitSummary; onDelete: (kit: MarketingKitSummary) => void } & KitResultActions) {
-  // Campaign Kit and Festive Poster open the results viewer once their run
-  // has loaded; until then (and for every other kind) the tile opens the kit.
-  const item = OPENS_AS_RESULT.has(kit.kind) ? items[kit.id] : undefined;
-  const cover = item?.outputs[0];
-  const picture = (
-    <>
-        {kit.previewUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element -- small grid tile, lazy-loaded natively; next/image adds no value at this size */
-          <img
-            src={kit.previewUrl}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
-          />
-        ) : (
-          /* A kit whose save failed has no picture to show. */
-          <span className="flex h-full w-full items-center justify-center bg-white/[0.04]">
-            <Newspaper size={22} className="text-faint" />
-          </span>
-        )}
-    </>
-  );
-
-  return (
-    <div
-      title={kit.title || "Untitled kit"}
-      className="group relative aspect-square overflow-hidden rounded-lg border border-white/[0.06] transition-colors hover:border-white/20 md:rounded-xl"
-    >
-      {item ? (
-        <button
-          type="button"
-          onClick={() => onOpen(item)}
-          className="absolute inset-0 block cursor-pointer"
-          aria-label={`Preview ${kit.title || "this kit"}`}
-        >
-          {picture}
-        </button>
-      ) : (
-        <Link href={kitHref(kit)} className="absolute inset-0" aria-label={kit.title || "Untitled kit"}>
-          {picture}
-        </Link>
-      )}
-
-      <div className="pointer-events-none absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2">
-        {/* The same badge the results tiles carry, in Marketing Kit's own
-            colour, so a kit is recognisable at a glance in either tab. */}
-        <span
-          className="max-w-[60%] truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
-          style={kitBadgeStyle(kit.kind)}
-        >
-          {describeKit(kit)}
-        </span>
-
-        {/* A teammate's kit is readable but not theirs to remove — the
-            server refuses it, so the tile doesn't offer it. */}
-        {(item || kit.isOwn !== false) && (
-          <div className={cn(TILE_ACTION_GROUP, "pointer-events-auto")}>
-            {/* The same chat and download buttons an image tile has. */}
-            {item && canContinue(item) && (
-              <button
-                type="button"
-                title="Continue this conversation"
-                onClick={() => onContinue(item)}
-                className={TILE_ACTION_BUTTON}
-              >
-                <MessageCircle size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-            {item && canView(item) && (
-              <button
-                type="button"
-                title={`View ${item.userName}'s chat (read-only)`}
-                onClick={() => onContinue(item)}
-                className={TILE_ACTION_BUTTON}
-              >
-                <Eye size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-            {item && cover && (
-              <button
-                type="button"
-                title="Download"
-                onClick={() => downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type))}
-                className={TILE_ACTION_BUTTON}
-              >
-                <Download size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-            {kit.isOwn !== false && (
-            <button
-              type="button"
-              onClick={() => onDelete(kit)}
-              title="Delete"
-              aria-label={`Delete ${kit.title || "this kit"}`}
-              className={cn(TILE_ACTION_BUTTON, "hover:bg-error/75")}
-            >
-              <Trash2 size={10} className={TILE_ACTION_ICON} />
-            </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
-        {/* Who made it, in the same corner and the same chip the results
-            tiles use for it — the kit's own name is the badge above and the
-            tooltip on the tile, so this corner stays the one place you look
-            to see whose work a tile is. */}
-        <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]">
-          {kit.userName}
-        </span>
-        <span className="shrink-0 rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:px-2 md:text-[10px]">
-          {timeAgoShort(kit.updatedAt)}
-        </span>
-      </div>
-
-      {/* A kit whose save failed is shown rather than hidden — the run
-          happened, and the reason is the only thing that explains why there
-          is nothing to open. */}
-      {kit.status === "failed" && (
-        <p className="pointer-events-none absolute inset-x-1.5 bottom-8 truncate rounded bg-error/80 px-1.5 py-0.5 text-[8px] font-medium text-white md:inset-x-2 md:bottom-10 md:text-[10px]">
-          {kit.error || "Could not be saved"}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/** A short relative date for a kit row — the grid's tiles use their own. */
-function timeAgoShort(iso: string) {
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-type FilterOption = { id: string; label: string };
-
-/**
- * Shared shape for both filters here: an icon+label trigger carrying a
- * selection-count badge, and a panel with one checkbox per option. Nothing
- * checked means no filter — everything — so there is no "All" to tick: "Clear"
- * empties the selection and that is all. Checking one or more narrows the grid
- * down to just those.
- */
-function CheckboxFilter({
-  icon: Icon,
-  label,
-  emptyLabel,
-  options,
-  selected,
-  onChange,
-  compact = false,
-  searchable = false,
-  pinned,
-}: {
-  icon: LucideIcon;
-  label: string;
-  emptyLabel: string;
-  options: FilterOption[];
-  selected: string[];
-  onChange: (next: string[]) => void;
-  /** Icon only — the phone's form, where the labels cost a row each. */
-  compact?: boolean;
-  /** A search box over the list — for a list long enough to need one. */
-  searchable?: boolean;
-  /** An option kept first and apart from the rest — the viewer's own "Myself". */
-  pinned?: FilterOption;
-}) {
-  const { open, side, toggle: togglePanel, containerRef } = usePopover();
-  const [query, setQuery] = useState("");
-
-  function toggle(id: string) {
-    onChange(selected.includes(id) ? selected.filter((v) => v !== id) : [...selected, id]);
-  }
-
-  const needle = query.trim().toLowerCase();
-  const listed = options.filter((option) => option.id !== pinned?.id && (!needle || option.label.toLowerCase().includes(needle)));
-  const showPinned = pinned && (!needle || pinned.label.toLowerCase().includes(needle) || "myself".includes(needle));
-
-  return (
-    <div className="relative" ref={containerRef}>
-      <button
-        type="button"
-        onClick={togglePanel}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-label={label}
-        title={label}
-        className={cn(
-          "flex items-center rounded-full border border-white/10 bg-surface-raised font-medium text-cream transition-colors hover:border-white/20",
-          compact ? "h-7 w-7 justify-center md:h-8 md:w-8" : "gap-1.5 py-1.5 pl-3 pr-2.5 text-xs"
-        )}
-      >
-        <Icon size={compact ? 14 : 12} className="text-faint" />
-        {!compact && (
-          <>
-            <span>{label}</span>
-            <ChevronDown size={13} className="text-faint" />
-          </>
-        )}
-      </button>
-
-      {/* What's checked, not what they are — the list itself already shows
-          every option. */}
-      <CountBadge count={selected.length} />
-
-      {open && (
-        <div
-          role="listbox"
-          aria-multiselectable="true"
-          className={cn("absolute top-full z-50 mt-2 w-48 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg", side)}
-        >
-          {options.length === 0 && !pinned ? (
-            <p className="px-3 py-2.5 text-[11px] text-faint">{emptyLabel}</p>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
-                {searchable ? (
-                  <>
-                    <Search size={12} className="shrink-0 text-faint" />
-                    <input
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={`Search ${label.toLowerCase()}…`}
-                      aria-label={`Search ${label.toLowerCase()}`}
-                      className="min-w-0 flex-1 bg-transparent text-xs text-cream outline-none placeholder:text-faint"
-                    />
-                  </>
-                ) : (
-                  <span className="flex-1 text-[10px] text-faint">{selected.length ? `${selected.length} selected` : `All ${label.toLowerCase()}`}</span>
-                )}
-                {selected.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onChange([])}
-                    className="shrink-0 text-[11px] font-medium text-gold transition-colors hover:text-cream"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            <div className="thin-scrollbar max-h-64 overflow-y-auto py-1">
-              {showPinned && (
-                <label className="flex cursor-pointer items-center gap-2 border-b border-white/5 px-3 py-1.5 text-xs font-medium text-cream hover:bg-white/[0.05]">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(pinned.id)}
-                    onChange={() => toggle(pinned.id)}
-                    style={{ accentColor: "var(--color-gold)" }}
-                  />
-                  <span className="truncate">Myself</span>
-                  <span className="truncate text-[10px] font-normal text-faint">{pinned.label}</span>
-                </label>
-              )}
-              {listed.length === 0 && !showPinned && <p className="px-3 py-1.5 text-[11px] text-faint">No matches</p>}
-              {listed.map((option) => (
-                <label
-                  key={option.id}
-                  className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(option.id)}
-                    onChange={() => toggle(option.id)}
-                    style={{ accentColor: "var(--color-gold)" }}
-                  />
-                  <span className="truncate">{option.label}</span>
-                </label>
-              ))}
-            </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** A `from`/`to` pair, each an ISO date (`YYYY-MM-DD`) or empty for open-ended. */
-export type DateRange = { from: string; to: string };
-
-export const EMPTY_RANGE: DateRange = { from: "", to: "" };
-
-/** Local `YYYY-MM-DD`, which is what a `<input type="date">` speaks. */
-function isoDay(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function daysAgo(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return isoDay(date);
-}
-
-/**
- * The shortcuts, resolved to real dates the moment they are picked.
- *
- * Storing the resolved dates rather than "last 7 days" is what makes a
- * filtered view shareable and stable: a link sent to a colleague shows the
- * same rows tomorrow as it did today.
- */
-const DATE_PRESETS: { id: string; label: string; resolve: () => DateRange }[] = [
-  { id: "today", label: "Today", resolve: () => ({ from: isoDay(new Date()), to: isoDay(new Date()) }) },
-  { id: "7d", label: "Last 7 days", resolve: () => ({ from: daysAgo(6), to: isoDay(new Date()) }) },
-  { id: "30d", label: "Last 30 days", resolve: () => ({ from: daysAgo(29), to: isoDay(new Date()) }) },
-  {
-    id: "month",
-    label: "This month",
-    resolve: () => {
-      const now = new Date();
-      return { from: isoDay(new Date(now.getFullYear(), now.getMonth(), 1)), to: isoDay(now) };
-    },
-  },
-];
-
-/**
- * Whether a timestamp falls inside the range.
- *
- * `to` is inclusive of the whole day. Someone picking "1st to 5th" means
- * through the end of the 5th, not up to midnight at its start — the other
- * reading silently drops everything made on the last day they chose.
- */
-export function withinRange(iso: string, range: DateRange) {
-  if (!range.from && !range.to) return true;
-  const at = new Date(iso).getTime();
-
-  if (range.from && at < new Date(`${range.from}T00:00:00`).getTime()) return false;
-  if (range.to && at > new Date(`${range.to}T23:59:59.999`).getTime()) return false;
-  return true;
-}
-
-/** A short label for the trigger, so the active range reads without opening it. */
-function describeRange(range: DateRange) {
-  const preset = DATE_PRESETS.find((entry) => {
-    const resolved = entry.resolve();
-    return resolved.from === range.from && resolved.to === range.to;
-  });
-  if (preset) return preset.label;
-  if (range.from && range.to) return `${range.from} → ${range.to}`;
-  if (range.from) return `From ${range.from}`;
-  if (range.to) return `Until ${range.to}`;
-  return "Date";
-}
-
-/**
- * The phone header's "more" button: Date, Members, Quality and Type folded
- * behind one icon so the header keeps room for the view toggle and Tools.
- * The badge counts how many of the hidden filters are set, so a narrowed
- * grid never looks unfiltered.
- */
-function MoreFilters({ activeCount, children }: { activeCount: number; children: React.ReactNode }) {
-  const { open, side, toggle, containerRef } = usePopover();
-
-  return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-label="More filters"
-        title="More filters"
-        className={cn(
-          "relative flex h-7 w-7 items-center justify-center rounded-full border bg-surface-raised transition-colors",
-          open || activeCount > 0 ? "border-gold/30 text-gold" : "border-white/10 text-cream hover:border-white/20"
-        )}
-      >
-        <MoreHorizontal size={15} />
-      </button>
-      <CountBadge count={activeCount} />
-
-      {open && (
-        <div
-          className={cn(
-            "absolute top-full z-50 mt-2 flex w-max flex-col items-stretch gap-2 rounded-xl border border-white/10 bg-surface-raised p-2 shadow-lg [&>*]:w-full",
-            side
-          )}
-        >
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Which edge a filter's panel hangs from. Right-aligned panels opened
- * leftward, which for the icons near the left of the header put them under
- * the sidebar; a button in the left half of the screen opens rightward.
- */
-function panelSide(anchor: HTMLElement | null) {
-  if (!anchor) return "right-0";
-  const rect = anchor.getBoundingClientRect();
-  return rect.left + rect.width / 2 < window.innerWidth / 2 ? "left-0" : "right-0";
-}
-
-/**
- * The open/close plumbing every filter popover here shares: its state, the
- * container that counts as "inside", dismissal on Escape or an outside
- * click, and which side the panel opens to — measured once when it opens,
- * not on every render.
- */
-function usePopover() {
-  const [open, setOpen] = useState(false);
-  const [side, setSide] = useState("right-0");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismissable(containerRef, open, close);
-
-  const toggle = useCallback(() => {
-    setSide(panelSide(containerRef.current));
-    setOpen((wasOpen) => !wasOpen);
-  }, []);
-
-  return { open, side, toggle, close, containerRef };
-}
-
-/** The gold count on a filter's corner — how many of its values are set. Renders nothing at zero. */
-function CountBadge({ count, label }: { count: number; label?: string }) {
-  if (count <= 0) return null;
-  return (
-    <span
-      aria-label={label}
-      className="pointer-events-none absolute -right-1.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-gold px-1 text-[9px] font-bold text-[#4A3410] shadow-sm"
-    >
-      {count}
-    </span>
-  );
-}
-
-/** When to show results from — presets, or an exact pair of dates. */
-function DateFilter({
-  range,
-  onChange,
-  compact = false,
-}: {
-  range: DateRange;
-  onChange: (next: DateRange) => void;
-  compact?: boolean;
-}) {
-  const { open, side, toggle, containerRef } = usePopover();
-  const active = Boolean(range.from || range.to);
-
-  return (
-    <div className="relative" ref={containerRef}>
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-label={active ? `Date range: ${describeRange(range)}` : "Date range"}
-        title={active ? describeRange(range) : "Date range"}
-        className={cn(
-          "flex items-center rounded-full border border-white/10 bg-surface-raised text-xs font-medium text-cream transition-colors hover:border-white/20",
-          compact ? "h-7 w-7 justify-center md:h-8 md:w-8" : "gap-1.5 py-1.5 pl-3 pr-2.5"
-        )}
-      >
-        <CalendarRange size={compact ? 14 : 12} className="text-faint" />
-        {!compact && (
-          <>
-            <span className="max-w-40 truncate">{describeRange(range)}</span>
-            <ChevronDown size={13} className="text-faint" />
-          </>
-        )}
-      </button>
-
-      <CountBadge count={active ? 1 : 0} />
-
-      {open && (
-        <div className={cn("absolute top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg", side)}>
-          <div className="py-1">
-            <button
-              type="button"
-              onClick={() => onChange(EMPTY_RANGE)}
-              className="flex w-full items-center border-b border-white/5 px-3 py-1.5 text-left text-xs font-medium text-cream hover:bg-white/[0.05]"
-            >
-              Any time
-            </button>
-            {DATE_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => onChange(preset.resolve())}
-                className="flex w-full items-center px-3 py-1.5 text-left text-xs text-cream hover:bg-white/[0.05]"
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-2 border-t border-white/5 px-3 py-2.5">
-            <p className="text-[10px] font-medium uppercase tracking-widest text-faint">Custom</p>
-            <label className="flex items-center justify-between gap-2 text-[11px] text-muted">
-              From
-              <input
-                type="date"
-                value={range.from}
-                max={range.to || undefined}
-                onChange={(event) => onChange({ ...range, from: event.target.value })}
-                className="min-h-8 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-[11px] text-cream focus:border-gold/30 focus:outline-none"
-              />
-            </label>
-            <label className="flex items-center justify-between gap-2 text-[11px] text-muted">
-              To
-              <input
-                type="date"
-                value={range.to}
-                min={range.from || undefined}
-                onChange={(event) => onChange({ ...range, to: event.target.value })}
-                className="min-h-8 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-[11px] text-cream focus:border-gold/30 focus:outline-none"
-              />
-            </label>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ToolFilter({ selected, onChange, compact }: { selected: string[]; onChange: (next: string[]) => void; compact?: boolean }) {
-  return (
-    <CheckboxFilter
-      icon={SlidersHorizontal}
-      label="Tools"
-      emptyLabel="No tools to filter by."
-      options={TOOL_OPTIONS}
-      selected={selected}
-      onChange={onChange}
-      compact={compact}
-      searchable
-    />
-  );
-}
-
-/** The two new cuts: what resolution a run was made at, and what it produced. */
-const TYPE_OPTIONS: FilterOption[] = [
-  { id: "image", label: "Images" },
-  { id: "video", label: "Video" },
-  { id: "text", label: "Text" },
-];
-
-function QualityFilter({
-  options,
-  selected,
-  onChange,
-  compact,
-}: {
-  options: string[];
-  selected: string[];
-  onChange: (next: string[]) => void;
-  compact?: boolean;
-}) {
-  const choices = useMemo(() => options.map((value) => ({ id: value, label: value })), [options]);
-  return (
-    <CheckboxFilter
-      icon={Gauge}
-      label="Quality"
-      emptyLabel="No resolutions to filter by yet."
-      options={choices}
-      selected={selected}
-      onChange={onChange}
-      compact={compact}
-    />
-  );
-}
-
-/**
- * What a run produced — not which tool made it.
- *
- * "Find that video" is one question; answering it through the Tools list
- * means knowing that Image to Video is the only tool that makes them, and a
- * text answer comes from several tools at once.
- */
-function TypeFilter({
-  selected,
-  onChange,
-  compact,
-}: {
-  selected: string[];
-  onChange: (next: string[]) => void;
-  compact?: boolean;
-}) {
-  return (
-    <CheckboxFilter
-      icon={Film}
-      label="Type"
-      emptyLabel="Nothing to filter by."
-      options={TYPE_OPTIONS}
-      selected={selected}
-      onChange={onChange}
-      compact={compact}
-    />
-  );
-}
-
-/** The kit kinds, labelled as the rest of the app labels them. */
-const KIND_OPTIONS: FilterOption[] = (
-  ["brand_story", "collection_story", "campaign", "festive"] as const
-).map((kind) => ({
-  id: kind,
-  label: KIT_LABEL[kind],
-}));
-
-/** Which kinds of kit to show — the Kits tab's counterpart to Tools. */
-function KindFilter({ selected, onChange, compact }: { selected: string[]; onChange: (next: string[]) => void; compact?: boolean }) {
-  return (
-    <CheckboxFilter
-      icon={SlidersHorizontal}
-      label="Kind"
-      emptyLabel="No kinds to filter by."
-      options={KIND_OPTIONS}
-      selected={selected}
-      onChange={onChange}
-      compact={compact}
-    />
-  );
-}
-
-/** Who to show results for — a checkbox per real name the data has reported, never a generic "Whole team" standing in for actual people. */
-function MemberFilter({
-  members,
-  selected,
-  onChange,
-  compact,
-  self,
-}: {
-  members: string[];
-  selected: string[];
-  onChange: (next: string[]) => void;
-  compact?: boolean;
-  /** The viewer's own name, offered first as "Myself". */
-  self?: string;
-}) {
-  const options = useMemo(() => members.map((name) => ({ id: name, label: name })), [members]);
-  return (
-    <CheckboxFilter
-      icon={Users}
-      label="Members"
-      emptyLabel="No results to filter by yet."
-      options={options}
-      selected={selected}
-      onChange={onChange}
-      compact={compact}
-      searchable
-      pinned={self ? { id: self, label: self } : undefined}
-    />
-  );
-}
-
-/**
- * Same shape as a real tile, so the grid doesn't jump when results replace it.
- *
- * Laid out by CSS breakpoints rather than by `useResponsiveColumns`, and that
- * is the whole point: the hook cannot know the viewport until it has mounted
- * and measured, so it necessarily returns its 2-column default for the first
- * paint. That is precisely the frame the skeleton occupies — which is why the
- * loader used to appear as two oversized boxes and then snap to six small
- * ones. Media queries are resolved before the first paint, so there is no
- * wrong frame to correct.
- *
- * The breakpoints below must stay in step with the hook's, or the skeleton
- * would hand over to a grid of a different shape.
- */
-const SKELETON_GRID_COLUMNS = "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6";
-
-function SkeletonGrid({ rows }: { rows: number }) {
-  // Enough tiles for the widest layout; the surplus is hidden at narrower
-  // ones so every breakpoint shows the same number of *rows* rather than the
-  // same number of tiles.
-  const perRowWide = 6;
-  const total = perRowWide * rows;
-
-  return (
-    <div className={cn("grid", SKELETON_GRID_COLUMNS)} style={{ gap: GRID_GAP }}>
-      {Array.from({ length: total }).map((_, i) => (
-        <div
-          key={i}
-          className={cn(
-            "aspect-square animate-pulse rounded-lg bg-white/[0.04] md:rounded-xl",
-            // Beyond what fits in two columns, then in four.
-            i >= 2 * rows && i < 4 * rows && "hidden sm:block",
-            i >= 4 * rows && "hidden lg:block"
-          )}
-        />
-      ))}
-    </div>
-  );
-}
-
-type HistoryTileProps = {
-  item: HistoryItem;
-  toolLabel: string;
-  canContinue: boolean;
-  /** A colleague's result, and the viewer holds org.conversations.read: open its chat to read. */
-  canView: boolean;
-  /** Their own result, or a colleague's with org.results.delete. */
-  canDelete: boolean;
-  deleting: boolean;
-  onOpen: (item: HistoryItem) => void;
-  onContinue: (item: HistoryItem) => void;
-  onDelete: (item: HistoryItem) => void;
-};
-
-/**
- * Memoized so a page full of tiles doesn't all re-render every time one
- * unrelated tile's `deleting` state flips, or a new page of results appends —
- * `onOpen`/`onContinue`/`onDelete` are stable across renders (see the parent's
- * `useCallback`s), and `item` keeps its object identity for every row that
- * hasn't itself changed, so the comparator below bails out on those tiles.
- */
-const HistoryTile = memo(
-  function HistoryTile({
-    item,
-    toolLabel,
-    canContinue,
-    canView,
-    canDelete,
-    deleting,
-    onOpen,
-    onContinue,
-    onDelete,
-  }: HistoryTileProps) {
-    const cover = item.outputs[0];
-
-    return (
-      <div
-        className="group relative aspect-square cursor-pointer overflow-hidden rounded-lg border border-white/[0.06] transition-colors hover:border-white/20 md:rounded-xl"
-        onClick={() => onOpen(item)}
-      >
-        {/* The small copy, not the original: a full page of results is tens
-            of megabytes at full size and under a megabyte here. The original
-            is still what the download link and the lightbox below point at.
-            A video result is a poster frame rather than a broken image.
-
-            A run that made words rather than pictures — Image to Text, and
-            Marketing Kit's writing halves — has no cover at all, and shows
-            an excerpt instead. It used to render nothing, which did not
-            hide the run so much as punch a hole in the grid: the tile was
-            still counted into its row, so the row came up one short. */}
-        {cover ? (
-          <AssetThumb
-            output={cover}
-            alt={toolLabel}
-            className="transition-transform duration-500 group-hover:scale-[1.05]"
-          />
-        ) : (
-          <TextResultCover text={item.text} />
-        )}
-
-        <div className="absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2">
-          <div className="flex min-w-0 items-center gap-1">
-            <span
-              className="max-w-[55%] truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
-              style={toolBadgeStyle(item.tool)}
-            >
-              {toolLabel}
-            </span>
-
-            {/* The output size — "4K", "1K", the video's resolution. Same
-                fact the lightbox prints beside the model name, up here too
-                so a grid can be scanned for it without opening anything.
-                Absent on a text result, which has no size. */}
-            {item.quality && (
-              <span className="shrink-0 rounded-full bg-black/55 px-1 py-0.5 text-[6px] font-semibold text-white/85 backdrop-blur-sm md:text-[8px]">
-                {item.quality}
-              </span>
-            )}
-          </div>
-
-          <div className={TILE_ACTION_GROUP}>
-            {canContinue && (
-              <button
-                type="button"
-                title="Continue this conversation"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onContinue(item);
-                }}
-                className={TILE_ACTION_BUTTON}
-              >
-                <MessageCircle size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-
-            {/* Same destination as Continue — the tool page sees the thread
-                is not the viewer's and opens it without a composer. */}
-            {canView && (
-              <button
-                type="button"
-                title={`View ${item.userName}'s chat (read-only)`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onContinue(item);
-                }}
-                className={TILE_ACTION_BUTTON}
-              >
-                <Eye size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-
-            {/* Absent on a text result — there is no file to save, and a
-                button that does nothing when pressed reads as broken. */}
-            {cover && (
-              <button
-                type="button"
-                title="Download"
-                onClick={(event) => {
-                  // The tile is clickable; downloading must not also open it.
-                  event.stopPropagation();
-                  // The full-size original, never the grid thumbnail — and
-                  // saved under its real extension, so a clip arrives as a
-                  // playable .mp4 rather than an .jpg nothing will open.
-                  downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type));
-                }}
-                className={TILE_ACTION_BUTTON}
-              >
-                <Download size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-
-            {/* Own results, or a colleague's with org.results.delete — on any
-                other tile the server would refuse, so there is no button. */}
-            {canDelete && (
-              <button
-                type="button"
-                title="Delete"
-                disabled={deleting}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDelete(item);
-                }}
-                className={cn(TILE_ACTION_BUTTON, "hover:bg-error/75 disabled:opacity-50")}
-              >
-                {deleting ? (
-                  <Loader2 size={10} className={cn(TILE_ACTION_ICON, "animate-spin")} />
-                ) : (
-                  <Trash2 size={10} className={TILE_ACTION_ICON} />
-                )}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
-          <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]">
-            {item.userName}
-          </span>
-
-          {/* How many images this run produced. Down here rather than up with
-              the actions: it is information about the tile, not a control, and
-              a long name truncates before it rather than pushing it off. */}
-          {item.outputs.length > 1 && (
-            <span className="flex h-5 shrink-0 items-center gap-0.5 rounded-full bg-black/55 px-1.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:h-6 md:text-[10px]">
-              <Copy size={9} className="md:h-2.5 md:w-2.5" /> {item.outputs.length}
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  },
-  (prev, next) =>
-    prev.item === next.item &&
-    prev.toolLabel === next.toolLabel &&
-    prev.canContinue === next.canContinue &&
-    prev.canView === next.canView &&
-    prev.canDelete === next.canDelete &&
-    prev.deleting === next.deleting
-);
-
-

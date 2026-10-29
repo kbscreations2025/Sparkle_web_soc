@@ -1,5 +1,7 @@
 const { registerJobHandler } = require("./registry");
-const { runGenerationJob } = require("./generationRunner");
+const { runGenerationJob, designVariationShots } = require("./generationRunner");
+const { inlineData } = require("./textRunner");
+const { loadJobActor } = require("./actor");
 const {
   buildTextToSketchPrompt,
   buildTextToSketchVariationPrompt,
@@ -11,8 +13,7 @@ const {
   buildSketchToImageRefinePrompt,
   SKETCH_ANALYSIS_PROMPT,
 } = require("../prompts/sketch");
-const { routeTextCall, loadTenantOrThrow } = require("../aiRouting");
-const User = require("../models/user");
+const { routeTextCall } = require("../aiRouting");
 /** Same family Image to Text uses for reading jewellery; flash is plenty for counting and fast. */
 const SKETCH_ANALYSIS_MODEL = "gemini-2.5-flash";
 
@@ -45,20 +46,7 @@ registerJobHandler(TEXT_TO_SKETCH_JOB, (context) =>
       }),
     // "Make variations" on a reference photo: each sketch a different design
     // option grown out of it, rather than the same piece drawn again.
-    ...(context.data?.designVariations && context.data.sourceImages?.length
-      ? {
-          buildShots: ({ data: payload, count }) =>
-            Array.from({ length: count }, (_, index) =>
-              buildTextToSketchVariationPrompt({
-                description: payload.prompt,
-                style: payload.style,
-                aspect: payload.aspect,
-                index,
-                total: count,
-              })
-            ),
-        }
-      : {}),
+    ...designVariationShots(context.data, buildTextToSketchVariationPrompt),
     buildRefinePrompt: buildTextToSketchRefinePrompt,
   })
 );
@@ -104,15 +92,11 @@ async function analyseSketch({ job, data, setProgress }) {
 
   try {
     await setProgress?.(10, "analysing");
-    const dbUser = await User.findById(job.userId);
-    const tenant = await loadTenantOrThrow(dbUser);
+    const { tenant } = await loadJobActor(job);
     const { output } = await routeTextCall({
       tenant,
       modelId: SKETCH_ANALYSIS_MODEL,
-      parts: [
-        ...images.map(({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } })),
-        { text: SKETCH_ANALYSIS_PROMPT },
-      ],
+      parts: [...images.map(inlineData), { text: SKETCH_ANALYSIS_PROMPT }],
       // Transcription, not creativity: the same sketch should give the same count.
       temperature: 0.1,
       thinkingBudget: 4000,

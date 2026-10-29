@@ -1,12 +1,12 @@
 const { registerJobHandler } = require("./registry");
-const { runGenerationJob } = require("./generationRunner");
-const { routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
+const { runGenerationJob, toResult } = require("./generationRunner");
+const { loadJobActor } = require("./actor");
+const { routeProviderCall } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
 const { createLivePreview } = require("../storage/thumbnail");
 const { cutOut, composite } = require("../services/cutout");
 const { segmentPiece } = require("../services/segmentation");
 const { buildScenePrompt, buildRefinePrompt, PLAIN_WHITE_PROMPT } = require("../prompts/productBackground");
-const User = require("../models/user");
 
 const PRODUCT_BACKGROUND_JOB = "productBackground.generate";
 const TOOL = "product_background";
@@ -63,9 +63,7 @@ registerJobHandler(PRODUCT_BACKGROUND_JOB, async (context) => {
 
 /** Transparent, white or a colour — see above. */
 async function runCutoutJob({ job, data, setProgress, withProgress }) {
-  const dbUser = await User.findById(job.userId);
-  if (!dbUser) throw new Error("the user who queued this job no longer exists");
-  const tenant = await loadTenantOrThrow(dbUser);
+  const { dbUser, tenant } = await loadJobActor(job);
 
   const photo = data.sourceImages?.[0];
   if (!photo) throw new Error("no photo to cut out");
@@ -155,17 +153,7 @@ async function runCutoutJob({ job, data, setProgress, withProgress }) {
     provider,
   });
 
-  return {
-    generationId: saved.generationId,
-    conversationId: saved.conversationId,
-    outputUrl: saved.outputs[0]?.url || null,
-    outputUrls: saved.outputs.map((entry) => entry.url),
-    model: modelId,
-    modelLabel,
-    provider,
-    requestedCount: 1,
-    deliveredCount: 1,
-  };
+  return toResult(saved, { model: modelId, modelLabel, provider, requestedCount: 1, deliveredCount: 1 });
 }
 
 module.exports = { PRODUCT_BACKGROUND_JOB };

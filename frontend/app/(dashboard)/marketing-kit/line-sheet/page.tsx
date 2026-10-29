@@ -43,7 +43,6 @@ export default function LineSheetPage() {
   const [edited, setEdited] = useState<DeckDesign | null>(null);
   const latestDesign = useRef<DeckDesign | null>(null);
   const design = edited ?? built;
-  const saveDesign = useCallback((next: DeckDesign) => setEdited(next), []);
 
   /** The design being printed to PDF — what is in the editor right now. */
   const [printing, setPrinting] = useState<DeckDesign | null>(null);
@@ -112,7 +111,7 @@ export default function LineSheetPage() {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
         {error && <p className="px-4 pt-3 text-xs text-red-500 md:px-8">{error}</p>}
-        <DeckEditor key={sheet.rows.length + fileName} initial={design} pieces={pieces} onSave={saveDesign} latestRef={latestDesign} />
+        <DeckEditor key={sheet.rows.length + fileName} initial={design} pieces={pieces} onSave={setEdited} latestRef={latestDesign} />
         {printing && <PrintDeck design={printing} pieces={pieces} onDone={endPrint} />}
       </div>
     );
@@ -167,9 +166,7 @@ export default function LineSheetPage() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                setGenerated(true);
-              }}
+              onClick={() => setGenerated(true)}
               disabled={!sheet || status !== "idle"}
               className="flex shrink-0 items-center gap-1.5 rounded-xl border border-gold/30 bg-gold/15 px-4 text-xs font-semibold text-gold transition-colors hover:bg-gold/25 disabled:cursor-not-allowed disabled:opacity-40"
             >

@@ -288,10 +288,6 @@ function buildCampaignKitRefinePrompt({ instruction, referenceCount = 0, data = 
 module.exports = {
   SCALE_NOTE,
   ANATOMY_NOTE,
-  BOX_STYLE_OPTIONS,
-  POSE_OPTIONS,
-  STUDIO_PROP_OPTIONS,
-  SHOTS,
   buildCampaignKitShots,
   buildCampaignKitRefinePrompt,
 };

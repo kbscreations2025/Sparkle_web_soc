@@ -18,10 +18,8 @@ type Model = {
 /**
  * The compact model picker that sits in the footer of an input form.
  *
- * Distinct from `ModelSelector`, which is the full card grid used where
- * choosing a model is the point of the screen. This is the version for where
- * it is a setting rather than a decision — every generation tool had its own
- * identical copy of this markup.
+ * For where the model is a setting rather than a decision — every generation
+ * tool had its own identical copy of this markup.
  *
  * `showQuality` adds the output size beside the model. It renders as a
  * dropdown when the selected model offers more than one size and as plain

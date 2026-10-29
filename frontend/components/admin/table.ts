@@ -7,9 +7,6 @@
 /** A cell in a top-level table. */
 export const CELL = "px-4 py-3 text-[13px]";
 
-/** A cell in a table nested inside an expanded row — one step tighter. */
-export const NESTED_CELL = "px-3 py-2.5 text-[12px]";
-
 /** The small-caps header row shared by both. */
 export const HEAD_ROW =
   "bg-surface-float/60 text-left text-[10px] font-semibold uppercase tracking-wider text-muted";

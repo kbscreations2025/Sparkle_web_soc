@@ -1,5 +1,7 @@
 const { registerJobHandler } = require("./registry");
-const { routeVideoCall, routeTextCall, loadTenantOrThrow } = require("../aiRouting");
+const { loadJobActor } = require("./actor");
+const { toResult, historyPrompt } = require("./generationRunner");
+const { routeVideoCall, routeTextCall } = require("../aiRouting");
 const { recordGeneration } = require("../generationService");
 const {
   buildImageAnimationPrompt,
@@ -13,7 +15,6 @@ const {
 const { frameSize, framePhotos, turnJump, snapped, retraceScore, retraced, assembleLoop } = require("../video/turntable");
 const gemini = require("../providers/gemini");
 const openrouter = require("../providers/openrouter");
-const User = require("../models/user");
 
 const IMAGE_TO_VIDEO_JOB = "imageToVideo.generate";
 
@@ -33,10 +34,7 @@ const IMAGE_TO_VIDEO_JOB = "imageToVideo.generate";
  * the work is.
  */
 registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProgress }) => {
-  const dbUser = await User.findById(job.userId);
-  if (!dbUser) throw new Error("the user who queued this job no longer exists");
-
-  const tenant = await loadTenantOrThrow(dbUser);
+  const { dbUser, tenant } = await loadJobActor(job);
   // Older queued jobs predate `provider` and are all Veo on Gemini.
   const requestedProvider = data.provider === "openrouter" && openrouter.isKnownVideoModel(data.requestedModel) ? "openrouter" : "gemini";
   const modelId = requestedProvider === "openrouter" ? data.requestedModel : gemini.resolveVideoModel(data.requestedModel);
@@ -179,18 +177,14 @@ registerJobHandler(IMAGE_TO_VIDEO_JOB, async ({ job, data, setProgress, withProg
     providerId,
   });
 
-  return {
-    generationId: saved.generationId,
-    conversationId: saved.conversationId,
-    outputUrl: saved.outputs[0]?.url || null,
-    outputUrls: saved.outputs.map((entry) => entry.url),
+  return toResult(saved, {
     /** So the client renders a player rather than an `<img>` that can't load. */
     outputType: "video",
     durationSeconds: data.durationSeconds,
     model: modelId,
     modelLabel,
     provider,
-  };
+  });
 });
 
 /**
@@ -308,7 +302,7 @@ async function filmTurntable({ job, data, setProgress, withProgress, dbUser, ten
 
   await setProgress(90, "saving");
   const modelLabel = openrouter.videoLabelFor(TURNTABLE.model);
-  const prompt = segments.map((segment) => buildTurntableSegmentPrompt({ ...segment, designSpec, description: data.description })).join("\n\n─────\n\n");
+  const prompt = historyPrompt(segments.map((segment) => buildTurntableSegmentPrompt({ ...segment, designSpec, description: data.description })));
 
   const saved = await recordGeneration({
     tenant,
@@ -344,11 +338,7 @@ async function filmTurntable({ job, data, setProgress, withProgress, dbUser, ten
     providerId: filmed[0].providerId,
   });
 
-  return {
-    generationId: saved.generationId,
-    conversationId: saved.conversationId,
-    outputUrl: saved.outputs[0]?.url || null,
-    outputUrls: saved.outputs.map((entry) => entry.url),
+  return toResult(saved, {
     outputType: "video",
     durationSeconds: data.clipSeconds,
     turntable: true,
@@ -357,7 +347,7 @@ async function filmTurntable({ job, data, setProgress, withProgress, dbUser, ten
     model: TURNTABLE.model,
     modelLabel,
     provider: "openrouter",
-  };
+  });
 }
 
 module.exports = { IMAGE_TO_VIDEO_JOB };

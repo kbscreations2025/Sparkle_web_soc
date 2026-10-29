@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Lock, Sparkles, Users } from "lucide-react";
+import { Sparkles, Users } from "lucide-react";
+import { FixedNoteChip, withFixedNote } from "@/components/studio/FixedNote";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { OptionChips } from "@/components/studio/OptionChips";
@@ -36,13 +37,6 @@ import { cn } from "@/lib/utils";
 const PERMISSION = "tool.life_style.run";
 const MODEL_OPTIONS = toModelOptions(LIFESTYLE_MODELS);
 
-/**
- * Sent with every Lifestyle shot, ahead of the user's own notes. Shown in the
- * "Anything else" box as a locked chip rather than typed text: it gives the
- * best-sized results, so it can't be cleared or edited away.
- */
-const FIXED_NOTE = "make the Jewelry very very very small";
-
 export default function LifeStylePage() {
   const { user } = useAuth();
 
@@ -56,8 +50,7 @@ export default function LifeStylePage() {
   const [theme, setTheme] = useState(THEMES[0].id);
   const [aspectRatio, setAspectRatio] = useState<LifestyleAspectId>(DEFAULT_LIFESTYLE_ASPECT);
   const [description, setDescription] = useState("");
-  // The fixed size note always leads; whatever the user types is added after it.
-  const fullDescription = [FIXED_NOTE, description.trim()].filter(Boolean).join(". ");
+  const fullDescription = withFixedNote(description);
   const [model, setModel] = useState<LifestyleModelId>(DEFAULT_LIFESTYLE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
 
@@ -215,14 +208,7 @@ export default function LifeStylePage() {
             </section>
 
             <PromptCard
-              topSlot={
-                <span
-                  title="Always sent — gives the best-sized results"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-gold/25 bg-gold/10 px-2 py-1 text-[12px] text-gold"
-                >
-                  <Lock size={11} /> {FIXED_NOTE}
-                </span>
-              }
+              topSlot={<FixedNoteChip />}
               label="Anything else"
               value={description}
               onChange={setDescription}
@@ -249,7 +235,6 @@ export default function LifeStylePage() {
     </div>
   );
 }
-
 
 function PlacementChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (

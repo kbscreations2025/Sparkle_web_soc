@@ -13,7 +13,8 @@ import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
 import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
 import { AnnotationOverlay } from "@/components/studio/AnnotationOverlay";
 import { PromptCard } from "@/components/studio/PromptCard";
-import { InlineModelSelect } from "@/components/studio/InlineModelSelect";import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
+import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
+import { AnnotationLayer } from "@/components/studio/AnnotationLayer";
 import { ToolHeader } from "@/components/studio/ToolHeader";
 import { turnImages, type ChatMsg } from "@/components/studio/chat";
 import {
@@ -33,6 +34,7 @@ import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
+import { failureMessage } from "@/lib/useSettledJob";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "./ToolAccessNotice";
@@ -92,6 +94,13 @@ function openingTurn(id: string, original: string, content: string): ChatMsg {
 type ModelOption = { id: string; label: string; quality: string; description: string; badge?: string };
 
 /**
+ * The changes asked for on almost every photo, filled into the "Changes" box
+ * on the pages that pass it as `defaultNotes`, so they needn't be retyped.
+ */
+export const DEFAULT_CLEANING_NOTES =
+  "High resolution image with white background And diamond make it Sharp & diamond yellow tone remove & metal more shine & make it stamp remove & add Shadow";
+
+/**
  * The Image Cleaning workspace: upload, clean, then refine in chat. Shared by
  * every cleaning-flavoured tool page — Default, New Cleaning, and any future
  * mode built the same way — parametrized only by which model(s) it offers and
@@ -101,13 +110,6 @@ type ModelOption = { id: string; label: string; quality: string; description: st
  * the backend still builds every cleaning instruction, from `customPrompt` or
  * whichever built-in prompt the key names (see backend/src/jobs/cleaning.js).
  */
-/**
- * The changes asked for on almost every photo, filled into the "Changes" box
- * on the pages that pass it as `defaultNotes`, so they needn't be retyped.
- */
-export const DEFAULT_CLEANING_NOTES =
-  "High resolution image with white background And diamond make it Sharp & diamond yellow tone remove & metal more shine & make it stamp remove & add Shadow";
-
 export function CleaningWorkspace<TModel extends string>({
   modelOptions,
   defaultModel,
@@ -307,8 +309,7 @@ export function CleaningWorkspace<TModel extends string>({
         }
       } else if (queueJob.status === "failed" || queueJob.status === "cancelled") {
         delete pendingJobs.current[queueJob.id];
-        const message =
-          queueJob.error?.message || (queueJob.status === "cancelled" ? "Cancelled" : "The model returned no image");
+        const message = failureMessage(queueJob, "The model returned no image");
 
         if (pending.kind === "generate") {
           updateJob(pending.localJobId, { status: "failed", error: message });
@@ -436,6 +437,8 @@ export function CleaningWorkspace<TModel extends string>({
 
     setRunning(true);
     setError("");
+    const custom = useCustomPrompt ? customPrompt.trim() : "";
+    const notes = extraNotes.trim();
 
     const queued: Job[] = items.map((item) => ({
       id: item.id,
@@ -446,15 +449,7 @@ export function CleaningWorkspace<TModel extends string>({
       // Opens with what was sent, photo included, so the thread shows the
       // before as well as the after.
       history: [
-        openingTurn(
-          item.id,
-          item.dataUrl,
-          useCustomPrompt && customPrompt.trim()
-            ? customPrompt.trim()
-            : extraNotes.trim()
-              ? `Clean this image — ${extraNotes.trim()}`
-              : "Clean this image"
-        ),
+        openingTurn(item.id, item.dataUrl, custom || (notes ? `Clean this image — ${notes}` : "Clean this image")),
       ],
     }));
     setJobs(queued);
@@ -470,9 +465,7 @@ export function CleaningWorkspace<TModel extends string>({
           // Stored with the upload, so the next time this photo is dropped
           // here it is recognised — see handleAdd.
           sourceChecksum: item.sourceChecksum,
-          ...(useCustomPrompt && customPrompt.trim()
-            ? { customPrompt: customPrompt.trim() }
-            : { variant: promptVariant, ...(extraNotes.trim() ? { extraNotes: extraNotes.trim() } : {}) }),
+          ...(custom ? { customPrompt: custom } : { variant: promptVariant, ...(notes ? { extraNotes: notes } : {}) }),
         });
 
         if (result.status === "queued" && result.job) {
@@ -522,7 +515,8 @@ export function CleaningWorkspace<TModel extends string>({
    */
   async function handleRefine(text: string) {
     const job = jobs.find((row) => row.id === selectedId);
-    if (!job?.cleaned || job.readOnly || !text.trim()) return;
+    const instruction = text.trim();
+    if (!job?.cleaned || job.readOnly || !instruction) return;
 
     // A marked-up copy IS the image this turn edits — the marks are the
     // instruction — not an extra reference beside the clean one. Sending it as
@@ -534,7 +528,7 @@ export function CleaningWorkspace<TModel extends string>({
     appendMessage(job.id, {
       id: crypto.randomUUID(),
       role: "user",
-      content: text.trim(),
+      content: instruction,
       // The version this turn changes — or its marked-up copy — so each
       // request shows what it was about.
       image: source,
@@ -546,6 +540,18 @@ export function CleaningWorkspace<TModel extends string>({
     setSelectedView(null);
     setRefining(true);
     setError("");
+
+    /** A failed turn, keeping what to put back in the composer on retry. */
+    const fail = (content: string) => {
+      appendMessage(job.id, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content,
+        retryInstruction: instruction,
+        retryRefImages: refsThisTurn,
+      });
+      setRefining(false);
+    };
 
     try {
       // A completed job hands back a stored url, but the backend edits bytes,
@@ -560,7 +566,7 @@ export function CleaningWorkspace<TModel extends string>({
 
       const result = await refineImage({
         refineImage: editable,
-        instruction: text.trim(),
+        instruction,
         model,
         referenceImages: refsThisTurn,
         annotated: Boolean(annotatedPhoto),
@@ -577,24 +583,10 @@ export function CleaningWorkspace<TModel extends string>({
         // `refining` stays true until the resolver effect sees this settle —
         // the thread keeps its skeleton bubble in the meantime.
       } else {
-        appendMessage(job.id, {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: result.message || "Could not queue this change",
-          retryInstruction: text.trim(),
-          retryRefImages: refsThisTurn,
-        });
-        setRefining(false);
+        fail(result.message || "Could not queue this change");
       }
     } catch {
-      appendMessage(job.id, {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: "Could not reach the server",
-        retryInstruction: text.trim(),
-        retryRefImages: refsThisTurn,
-      });
-      setRefining(false);
+      fail("Could not reach the server");
     }
   }
 

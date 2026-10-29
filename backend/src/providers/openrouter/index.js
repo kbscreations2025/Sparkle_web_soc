@@ -3,13 +3,14 @@
  * key. This app draws on it two ways: as its own selectable models (GPT's
  * newest image models, picked directly on New Cleaning) and as a fallback
  * that can serve a Gemini/OpenAI model when that provider's own keys are
- * missing or exhausted (see aiRouting.js's `imageCandidatesFor` and
+ * missing or exhausted (see aiRouting.js's `candidatesFor` and
  * `providers/modelEquivalents.js`) — so the Gemini-equivalent ids below are
  * reachable even though nothing lets a user pick them directly yet.
  *
  * Ids are OpenRouter's own `<provider>/<model>` naming.
  */
 const sharp = require("sharp");
+const { withRetry, classifyApiError, promptParts, BLOCKED_FINISH_REASONS, pollVideo } = require("../shared");
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -37,7 +38,9 @@ const EDIT_STYLE_MODELS = [
 ];
 
 const OPENROUTER_MODELS = [...GPT_STYLE_MODELS, ...GEMINI_STYLE_MODELS, ...EDIT_STYLE_MODELS];
-const DEFAULT_OPENROUTER_MODEL = OPENROUTER_MODELS[0];
+
+/** Everything on the "Cleaning in Testing" card — what scripts/benchCleaning.js runs. */
+const TRIAL_MODELS = [...GPT_25_MODELS, ...EDIT_STYLE_MODELS];
 
 /**
  * The label the frontend shows — see frontend/lib/api.ts's NEW_CLEANING_MODELS
@@ -103,97 +106,42 @@ function isKnownModel(modelId) {
   return OPENROUTER_MODELS.includes(modelId);
 }
 
-/** Falls back to the default model whenever the requested one isn't offered. */
-function resolveModel(requestedModel) {
-  return OPENROUTER_MODELS.includes(requestedModel) ? requestedModel : DEFAULT_OPENROUTER_MODEL;
-}
-
-/** Same shape as gemini.js/openai.js's `classifyError` so aiRouting.js can treat every provider identically. */
+/** An OpenRouter error as `{ message, code, retryable }` — see `classifyApiError`. */
 function classifyError(err) {
-  const code = typeof err?.status === "number" ? err.status : undefined;
-  const raw = err?.error?.message || err?.message || String(err);
-  const text = `${raw} ${code ?? ""}`.toLowerCase();
-
-  if (code === 429 || code === 500 || code === 503 || text.includes("overloaded") || text.includes("rate limit") || text.includes("quota")) {
-    return { message: "This model is under heavy load right now. Please try again shortly.", code, retryable: true };
-  }
-
-  if (text.includes("timeout") || text.includes("timed out") || text.includes("econnreset") || text.includes("aborted") || text.includes("network")) {
-    return { message: "The request timed out. Please try again.", code, retryable: true };
-  }
-
-  if (text.includes("safety") || text.includes("content_policy") || text.includes("content policy") || text.includes("blocked") || text.includes("moderation")) {
-    return {
-      message: "That request was blocked by the content safety filter. Try adjusting the image or instructions.",
-      code,
-      retryable: false,
-    };
-  }
-
-  if (code === 401 || code === 403 || text.includes("api key") || text.includes("incorrect api key") || text.includes("permission")) {
-    return { message: "One of this organization's OpenRouter keys was rejected.", code, retryable: false };
-  }
-
-  if (code === 400 || text.includes("invalid")) {
-    return { message: "The request could not be processed. Please adjust the input and try again.", code, retryable: false };
-  }
-
-  // Any other refusal: say what the model said, briefly — "something went
-  // wrong" gives the person nothing to change.
-  const reason = String(raw).replace(/\s+/g, " ").trim().slice(0, 160);
-  if (code >= 400 && code < 500 && reason) {
-    return { message: `The model refused this request: ${reason}`, code, retryable: false };
-  }
-
-  return { message: "Something went wrong talking to the model.", code, retryable: false };
-}
-
-function isWorthTryingNextKey(err) {
-  const { code, retryable } = classifyError(err);
-  return retryable || code === 401 || code === 403;
-}
-
-async function withRetry(fn, { retries = 1, delayMs = 2000 } = {}) {
-  let lastErr;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (attempt === retries || !classifyError(err).retryable) throw err;
-      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
-    }
-  }
-  throw lastErr;
-}
-
-/** Same shape/contract as gemini.js's `withKeyFailover` — see there for the full rationale. */
-async function withKeyFailover(entries, attempt) {
-  let lastErr;
-  for (let i = 0; i < entries.length; i++) {
-    try {
-      return await attempt(entries[i], i);
-    } catch (err) {
-      lastErr = err;
-      const isLastKey = i === entries.length - 1;
-      if (isLastKey || !isWorthTryingNextKey(err)) throw err;
-      console.warn(`[openrouter] key ${i + 1}/${entries.length} failed (${classifyError(err).message}) — trying the next one`);
-    }
-  }
-  throw lastErr;
+  return classifyApiError(err, "OpenRouter", (raw, code) => {
+    // Any other refusal: say what the model said, briefly — "something went
+    // wrong" gives the person nothing to change.
+    const reason = String(raw).replace(/\s+/g, " ").trim().slice(0, 160);
+    return code >= 400 && code < 500 && reason ? { message: `The model refused this request: ${reason}`, code, retryable: false } : null;
+  });
 }
 
 /**
- * One call to any of OpenRouter's image models through its `images/generations`
- * endpoint. Editing an existing photo goes through `input_references` — an
- * array of `{ type: "image_url", image_url: { url } }`, confirmed against
- * OpenRouter's own Playground export — not a bare `image` field (that's
- * silently ignored: an earlier version of this file sent that and got back
- * an unrelated redesign) and not OpenAI's own `images.edit` multipart
- * contract (OpenRouter doesn't expose that route for these models). A data
- * URI works as the reference's `url` same as a hosted one. Shared by both
- * model families below — only the rest of the body differs.
+ * One request to OpenRouter with this key — JSON when there's a body. A non-2xx
+ * answer throws an error carrying its status and body text, which is what
+ * `classifyError` reads; `kind` only names the request in that error.
  */
+async function openrouterFetch(apiKey, kind, path, { timeoutMs = 60_000, ...init } = {}) {
+  const res = await fetch(path.startsWith("http") ? path : `${OPENROUTER_BASE_URL}${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${apiKey}`, ...(init.body ? { "Content-Type": "application/json" } : {}) },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    const raw = await res.text().catch(() => "");
+    const err = new Error(`OpenRouter ${kind} request failed (${res.status})`);
+    err.status = res.status;
+    err.error = { message: raw || res.statusText };
+    throw err;
+  }
+  return res;
+}
+
+/** An image as the `url` an OpenRouter image reference or message part takes. */
+function dataUrl(mimeType, base64) {
+  return `data:${mimeType};base64,${base64}`;
+}
+
 /**
  * The shapes every trial editor accepts — the narrowest list among them
  * (Krea's, from its own rejection message); Nano Banana takes all of these.
@@ -226,14 +174,22 @@ async function photoAspect(image) {
   }
 }
 
+/**
+ * One call to any of OpenRouter's image models through its `images/generations`
+ * endpoint. Editing an existing photo goes through `input_references` — an
+ * array of `{ type: "image_url", image_url: { url } }`, confirmed against
+ * OpenRouter's own Playground export — not a bare `image` field (that's
+ * silently ignored: an earlier version of this file sent that and got back
+ * an unrelated redesign) and not OpenAI's own `images.edit` multipart
+ * contract (OpenRouter doesn't expose that route for these models). A data
+ * URI works as the reference's `url` same as a hosted one. Shared by every
+ * model family below — only the rest of the body differs.
+ */
 async function generateImage({ apiKey, modelId, prompt, images, quality, aspectRatio }) {
   const editAspect = EDIT_STYLE_MODELS.includes(modelId) && !aspectRatio ? await photoAspect(images?.[0]) : null;
   const inputReferences = images?.length
     ? {
-        input_references: images.map(({ mimeType, base64 }) => ({
-          type: "image_url",
-          image_url: { url: `data:${mimeType};base64,${base64}` },
-        })),
+        input_references: images.map(({ mimeType, base64 }) => ({ type: "image_url", image_url: { url: dataUrl(mimeType, base64) } })),
       }
     : {};
 
@@ -273,26 +229,17 @@ async function generateImage({ apiKey, modelId, prompt, images, quality, aspectR
         ...inputReferences,
       };
 
-  const response = await withRetry(async () => {
-    const res = await fetch(`${OPENROUTER_BASE_URL}/images/generations`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(150_000),
-    });
-
-    if (!res.ok) {
-      const raw = await res.text().catch(() => "");
-      const err = new Error(`OpenRouter image request failed (${res.status})`);
-      err.status = res.status;
-      err.error = { message: raw || res.statusText };
-      throw err;
-    }
-    return res.json();
-  });
+  const response = await withRetry(
+    async () =>
+      (
+        await openrouterFetch(apiKey, "image", "/images/generations", {
+          method: "POST",
+          body: JSON.stringify(body),
+          timeoutMs: 150_000,
+        })
+      ).json(),
+    classifyError
+  );
 
   const item = response.data?.[0];
   if (!item?.b64_json) {
@@ -336,16 +283,11 @@ function toMessageContent(parts) {
   return parts
     .map((part) => {
       if (typeof part.text === "string") return { type: "text", text: part.text };
-      if (part.inlineData) {
-        return { type: "image_url", image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } };
-      }
+      if (part.inlineData) return { type: "image_url", image_url: { url: dataUrl(part.inlineData.mimeType, part.inlineData.data) } };
       return null;
     })
     .filter(Boolean);
 }
-
-/** Finish reasons that mean the answer was withheld, not merely short — same set gemini.js treats as blocked. */
-const BLOCKED_NATIVE_REASONS = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"]);
 
 /**
  * A text-out call through OpenRouter's chat-completions endpoint — the stand-in
@@ -372,14 +314,9 @@ async function generateText({
   /** Live web results for the model to answer from — OpenRouter's web plugin. See gemini.js. */
   webSearch = false,
 }) {
-  const parts = extraParts ?? [
-    ...images.map(({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } })),
-    { text: prompt },
-  ];
-
   const messages = [
     ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
-    { role: "user", content: toMessageContent(parts) },
+    { role: "user", content: toMessageContent(extraParts ?? promptParts(images, prompt)) },
   ];
 
   const body = {
@@ -398,22 +335,9 @@ async function generateText({
   };
 
   const response = await withRetry(async () => {
-    const res = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(150_000),
-    });
-
-    if (!res.ok) {
-      const raw = await res.text().catch(() => "");
-      const err = new Error(`OpenRouter text request failed (${res.status})`);
-      err.status = res.status;
-      err.error = { message: raw || res.statusText };
-      throw err;
-    }
-
-    const json = await res.json();
+    const json = await (
+      await openrouterFetch(apiKey, "text", "/chat/completions", { method: "POST", body: JSON.stringify(body), timeoutMs: 150_000 })
+    ).json();
     // OpenRouter can answer 200 with an upstream error in the body.
     if (json?.error) {
       const err = new Error(`OpenRouter text request failed: ${json.error.message || "upstream error"}`);
@@ -422,19 +346,20 @@ async function generateText({
       throw err;
     }
     return json;
-  });
+  }, classifyError);
 
   const choice = response.choices?.[0];
   const finishReason = choice?.native_finish_reason || choice?.finish_reason || null;
+  const nativeReason = String(choice?.native_finish_reason || "").toUpperCase();
   const content = choice?.message?.content;
   const text = (Array.isArray(content) ? content.map((piece) => piece?.text ?? "").join("") : content ?? "").trim();
-  const blocked = choice?.finish_reason === "content_filter" || BLOCKED_NATIVE_REASONS.has(String(choice?.native_finish_reason || "").toUpperCase());
 
   return {
     text,
     finishReason,
-    blocked,
-    truncated: choice?.finish_reason === "length" || String(choice?.native_finish_reason || "").toUpperCase() === "MAX_TOKENS",
+    // Withheld, not merely short — the same reasons gemini.js treats as blocked.
+    blocked: choice?.finish_reason === "content_filter" || BLOCKED_FINISH_REASONS.has(nativeReason),
+    truncated: choice?.finish_reason === "length" || nativeReason === "MAX_TOKENS",
   };
 }
 
@@ -478,30 +403,11 @@ function videoPromptLimit(modelId) {
   return OPENROUTER_VIDEO_MODELS[modelId]?.maxPrompt ?? null;
 }
 
-/** Same cadence and ceiling as gemini.js's Veo polling — see there. */
-const VIDEO_POLL_INTERVAL_MS = 5000;
-const VIDEO_MAX_POLLS = 120;
-
-async function openrouterFetch(apiKey, path, init = {}) {
-  const res = await fetch(path.startsWith("http") ? path : `${OPENROUTER_BASE_URL}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${apiKey}`, ...(init.body ? { "Content-Type": "application/json" } : {}) },
-    signal: AbortSignal.timeout(init.timeoutMs || 60_000),
-  });
-  if (!res.ok) {
-    const raw = await res.text().catch(() => "");
-    const err = new Error(`OpenRouter video request failed (${res.status})`);
-    err.status = res.status;
-    err.error = { message: raw || res.statusText };
-    throw err;
-  }
-  return res;
-}
-
 /**
  * Submit, poll, download — OpenRouter's video API is asynchronous: the POST
- * answers 202 with a job id, the job is polled until `completed`/`failed`,
- * and the bytes come from `/videos/{id}/content` with the same key.
+ * answers 202 with a job id, the job is polled until `completed`/`failed`
+ * (same cadence and ceiling as Veo's, see `pollVideo`), and the bytes come
+ * from `/videos/{id}/content` with the same key.
  *
  * `views` are `[{ mimeType, base64 }]`. One view is pinned as the first
  * frame; several go in as `input_references` instead, mirroring the
@@ -515,7 +421,7 @@ async function openrouterFetch(apiKey, path, init = {}) {
  * Returns `{ base64, mimeType, text }` like every other generator here.
  */
 async function generateVideo({ apiKey, modelId, prompt, views, frames, generateAudio, aspectRatio, resolution, durationSeconds, onPoll }) {
-  const asUrl = ({ mimeType, base64 }) => ({ type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } });
+  const asUrl = ({ mimeType, base64 }) => ({ type: "image_url", image_url: { url: dataUrl(mimeType, base64) } });
   const imageInput =
     frames?.first && frames?.last
       ? {
@@ -530,36 +436,34 @@ async function generateVideo({ apiKey, modelId, prompt, views, frames, generateA
           ? { frame_images: [{ ...asUrl(views[0]), frame_type: "first_frame" }] }
           : { input_references: views.map(asUrl) };
 
-  const submitted = await withRetry(async () =>
-    (
-      await openrouterFetch(apiKey, "/videos", {
-        method: "POST",
-        body: JSON.stringify({
-          model: modelId,
-          prompt,
-          duration: durationSeconds,
-          resolution,
-          aspect_ratio: aspectRatio,
-          ...(generateAudio === false ? { generate_audio: false } : {}),
-          ...imageInput,
-        }),
-      })
-    ).json()
+  const submitted = await withRetry(
+    async () =>
+      (
+        await openrouterFetch(apiKey, "video", "/videos", {
+          method: "POST",
+          body: JSON.stringify({
+            model: modelId,
+            prompt,
+            duration: durationSeconds,
+            resolution,
+            aspect_ratio: aspectRatio,
+            ...(generateAudio === false ? { generate_audio: false } : {}),
+            ...imageInput,
+          }),
+        })
+      ).json(),
+    classifyError
   );
 
   if (!submitted?.id) throw new Error("OpenRouter did not return a video job id");
   const pollUrl = submitted.polling_url || `/videos/${submitted.id}`;
 
-  let job = submitted;
-  for (let poll = 0; job.status !== "completed" && job.status !== "failed" && poll < VIDEO_MAX_POLLS; poll++) {
-    await new Promise((resolve) => setTimeout(resolve, VIDEO_POLL_INTERVAL_MS));
-    job = await withRetry(async () => (await openrouterFetch(apiKey, pollUrl)).json());
-    try {
-      await onPoll?.(poll + 1, VIDEO_MAX_POLLS);
-    } catch (err) {
-      console.error("[openrouter] video poll progress failed:", err.message);
-    }
-  }
+  const job = await pollVideo(submitted, {
+    poll: () => withRetry(async () => (await openrouterFetch(apiKey, "video", pollUrl)).json(), classifyError),
+    isDone: (current) => current.status === "completed" || current.status === "failed",
+    onPoll,
+    provider: "openrouter",
+  });
 
   if (job.status === "failed") {
     // The provider's own reason, shown as it is: a run it accepted and then
@@ -571,16 +475,9 @@ async function generateVideo({ apiKey, modelId, prompt, views, frames, generateA
     if (reason) err.expose = true;
     throw err;
   }
-  if (job.status !== "completed") {
-    const err = new Error("The video is taking longer than expected. Try a shorter duration or a faster model.");
-    err.code = "video_timeout";
-    err.expose = true;
-    err.noRetry = true;
-    throw err;
-  }
 
   const contentUrl = job.unsigned_urls?.[0] || `/videos/${submitted.id}/content?index=0`;
-  const res = await withRetry(() => openrouterFetch(apiKey, contentUrl, { timeoutMs: 300_000 }));
+  const res = await withRetry(() => openrouterFetch(apiKey, "video", contentUrl, { timeoutMs: 300_000 }), classifyError);
   const buffer = Buffer.from(await res.arrayBuffer());
   // Same guard as gemini.js: a 0-byte video must fail the job, not be stored.
   if (!buffer.length) throw new Error("The generated video downloaded as an empty file");
@@ -596,15 +493,12 @@ module.exports = {
   videoPromptLimit,
   generateVideo,
   OPENROUTER_MODELS,
-  DEFAULT_OPENROUTER_MODEL,
+  TRIAL_MODELS,
   qualityFor,
   qualitiesFor,
-  resolveModel,
   isKnownModel,
   labelFor,
   classifyError,
-  withKeyFailover,
   generateImage,
   generateText,
-  toJsonSchema,
 };

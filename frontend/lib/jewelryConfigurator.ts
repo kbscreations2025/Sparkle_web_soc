@@ -30,7 +30,8 @@ export const STYLES = [
   { id: "product-studio", label: "Product Studio" },
   { id: "photorealistic", label: "Photorealistic" },
   { id: "luxury-campaign", label: "Luxury Campaign" },
-  { id: "dark-velvet", label: "Dark Velvet" },] as const;
+  { id: "dark-velvet", label: "Dark Velvet" },
+] as const;
 
 export type StyleId = (typeof STYLES)[number]["id"];
 
@@ -58,10 +59,10 @@ export const DEFAULT_PHOTO_COUNT = 1;
 
 // ── who it's for, and what it is ────────────────────────────────────────────
 
-export const AUDIENCE_OPTIONS = ["Women", "Men", "General"];
+const AUDIENCE_OPTIONS = ["Women", "Men", "General"];
 
 /** What the rows fall back to whenever no jewelry type has been chosen yet. */
-export const DEFAULT_JEWELRY_TYPE = "Ring";
+const DEFAULT_JEWELRY_TYPE = "Ring";
 
 /** Every type, for when nobody has said who the piece is for. */
 const ALL_TYPES = ["Ring", "Pendant", "Necklace", "Chain", "Earring", "Bangle", "Kada", "Bracelet", "Cufflink", "Set"];
@@ -132,7 +133,7 @@ const MEN_DESIGN_STYLE_OPTIONS = [
 ];
 
 /** How many design styles can be combined — "Trending" with "Bold Gold", say. */
-export const MAX_DESIGN_STYLES = 2;
+const MAX_DESIGN_STYLES = 2;
 
 const RELIGIOUS_SYMBOL_OPTIONS = [
   "Om", "Ganesha", "Trishul", "Lakshmi", "Cross", "Allah", "Ayatul Kursi", "Khanda", "Star of David", "Evil Eye", "Hamsa", "Buddha",
@@ -149,7 +150,7 @@ export const TRENDING = "Trending";
  * The styles that mean "what's in fashion now". Either one sends each image
  * after a different current trend — see `wantsTrendMix`.
  */
-export const TREND_STYLES = [TRENDING, "Modern"];
+const TREND_STYLES = [TRENDING, "Modern"];
 
 // ── metal ───────────────────────────────────────────────────────────────────
 
@@ -163,7 +164,7 @@ const FINISH_OPTIONS = ["Polished", "Matte", "Brushed", "Hammered", "Sandblasted
 
 // ── stones ──────────────────────────────────────────────────────────────────
 
-export const NO_CENTER_STONE = "No Center Stone";
+const NO_CENTER_STONE = "No Center Stone";
 
 const CENTER_STONE_TYPE_OPTIONS = [
   NO_CENTER_STONE, "Diamond", "Lab-Grown Diamond", "Black Diamond", "Champagne Diamond", "Colour Diamond", "Emerald", "Ruby",
@@ -193,12 +194,13 @@ const CENTER_STONE_SIZE_OPTIONS = ["0.5 Carat", "1 Carat", "1.5 Carat", "2 Carat
  * The stones around the center one — side stones, halo, pavé. Several can be
  * picked in each row: emerald and diamond side stones, pear and baguette cuts.
  */
-export const MAX_SIDE_STONE_PICKS = 3;
+const MAX_SIDE_STONE_PICKS = 3;
 
 const SIDE_STONE_SHAPE_OPTIONS = [
   "Round Brilliant", "Baguette", "Tapered Baguette", "Trillion", "Pear", "Marquise", "Oval", "Princess", "Emerald Cut", "Half Moon",
   "Kite", "Heart",
 ];
+
 // ── setting, accents, inspiration ───────────────────────────────────────────
 
 /** Setting-style options, keyed by type. */
@@ -353,7 +355,8 @@ export function buildJewelryConfigurator(sel: Record<string, string>): Configura
       options: (men ? MEN_CENTER_STONE_TYPE_OPTIONS : CENTER_STONE_TYPE_OPTIONS).filter((option) => option !== NO_CENTER_STONE),
       multi: MAX_SIDE_STONE_PICKS,
     },
-    { key: "sideStoneShape", label: "Side Stone Shape", options: SIDE_STONE_SHAPE_OPTIONS, multi: MAX_SIDE_STONE_PICKS },    { key: "settingStyle", label: "Setting Style", options: forType(SETTING_STYLE_BY_TYPE, type, MEN_SETTING_STYLE_BY_TYPE, men) },
+    { key: "sideStoneShape", label: "Side Stone Shape", options: SIDE_STONE_SHAPE_OPTIONS, multi: MAX_SIDE_STONE_PICKS },
+    { key: "settingStyle", label: "Setting Style", options: forType(SETTING_STYLE_BY_TYPE, type, MEN_SETTING_STYLE_BY_TYPE, men) },
     { key: "accentStyle", label: "Accent / Side Stones", options: forType(ACCENT_STYLE_BY_TYPE, type, MEN_ACCENT_STYLE_BY_TYPE, men) },
     { key: "designInspiration", label: "Design Inspiration", options: men ? MEN_DESIGN_INSPIRATION_OPTIONS : DESIGN_INSPIRATION_OPTIONS },
   ].map((group) => (TREND_FACETS.includes(group.key) ? { ...group, options: [TRENDING, ...group.options], trendable: true } : group));
@@ -391,7 +394,7 @@ export function pruneJewelrySelections(sel: Record<string, string>): Record<stri
 }
 
 /** Whether each image should follow a whole current design direction — "Trending" or "Modern" as the design style. */
-export function wantsTrendMix(sel: Record<string, string>): boolean {
+function wantsTrendMix(sel: Record<string, string>): boolean {
   return splitMulti(sel.designStyle).some((style) => TREND_STYLES.includes(style));
 }
 

@@ -250,5 +250,3 @@ marketingKitSchema.index({ tenantId: 1, kind: 1, deletedAt: 1, _id: -1 });
 
 module.exports = mongoose.model("MarketingKit", marketingKitSchema);
 module.exports.MARKETING_KIT_TYPES = MARKETING_KIT_TYPES;
-module.exports.MARKETING_KIT_STATUSES = MARKETING_KIT_STATUSES;
-module.exports.MARKETING_KIT_IMAGE_ROLES = MARKETING_KIT_IMAGE_ROLES;

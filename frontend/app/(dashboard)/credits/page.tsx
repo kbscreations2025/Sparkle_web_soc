@@ -12,9 +12,9 @@ import {
   reclaimCredits,
   revokeCredits,
   updateOrgMember,
-  type updateMember,
   type CreditMember,
   type CreditTenantSummary,
+  type Member,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
@@ -25,7 +25,6 @@ import { MemberRows } from "@/components/admin/MemberRows";
 import { CreditAmountDialog } from "@/components/admin/CreditAmountDialog";
 import { cn } from "@/lib/utils";
 import { useMemberFilter } from "@/components/admin/MemberFilterBar";
-
 
 /**
  * Credits: who holds them, and the console for issuing them.
@@ -89,9 +88,7 @@ function StaffCredits() {
     }
   }, [cacheKey]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useLoad(load);
 
   if (openTenantId) {
     return <TenantCredits tenantId={openTenantId} onBack={() => { setOpenTenantId(null); load(); }} />;
@@ -173,6 +170,11 @@ function StaffCredits() {
   );
 }
 
+type MyOrgSnapshot = {
+  data: Awaited<ReturnType<typeof fetchMyOrgCredits>>;
+  roster: Awaited<ReturnType<typeof fetchOrgMembers>> | null;
+};
+
 /**
  * An organization admin's view of their own organization.
  *
@@ -182,11 +184,6 @@ function StaffCredits() {
  * what is in the pool — an organization that has run out has to ask
  * platform staff for more.
  */
-type MyOrgSnapshot = {
-  data: Awaited<ReturnType<typeof fetchMyOrgCredits>>;
-  roster: Awaited<ReturnType<typeof fetchOrgMembers>> | null;
-};
-
 function MyOrgCredits() {
   const cacheKey = useCreditsCacheKey("my-org");
   // Last visit's pool and roster show at once; `load` below refreshes both.
@@ -201,7 +198,6 @@ function MyOrgCredits() {
     /** What they hold now, so the dialog can show what it becomes. */
     balance: number;
   } | null>(null);
-  const [busy, setBusy] = useState(false);
   const memberFilter = useMemberFilter();
 
   /*
@@ -225,9 +221,8 @@ function MyOrgCredits() {
     setPageCache<MyOrgSnapshot>(cacheKey, { data: res, roster: nextRoster });
   }, [cacheKey]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useLoad(load);
+  const { busy, run } = useCreditChange(load, setError, () => setPending(null));
 
   /**
    * Saves one permission change.
@@ -238,7 +233,7 @@ function MyOrgCredits() {
    * reason is surfaced and the roster re-read, rather than leaving a
    * checkbox showing a state the server never accepted.
    */
-  const patchMember = useCallback(async (id: string, patch: Parameters<typeof updateMember>[1]) => {
+  const patchMember = useCallback(async (id: string, patch: Parameters<typeof updateOrgMember>[1]) => {
     const res = await updateOrgMember(id, patch);
     setError(res.status === "success" ? "" : res.message || "That change was not allowed.");
 
@@ -248,19 +243,8 @@ function MyOrgCredits() {
 
   async function apply(amount: number) {
     if (!pending) return;
-    setBusy(true);
-    setError("");
-    try {
-      const body = { userId: pending.userId, amount };
-      const res = pending.mode === "distribute" ? await distributeCredits(body) : await reclaimCredits(body);
-      if (res.status === "success") await load();
-      else setError(res.message || "That did not go through.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That did not go through.");
-    } finally {
-      setBusy(false);
-      setPending(null);
-    }
+    const body = { userId: pending.userId, amount };
+    await run(() => (pending.mode === "distribute" ? distributeCredits(body) : reclaimCredits(body)));
   }
 
   if (!data || data.status !== "success") {
@@ -272,7 +256,12 @@ function MyOrgCredits() {
   }
 
   const shortfall = data.pool.available === 0;
-
+  /** Opens the amount dialog on one member — only for an admin who may share credits out. */
+  const askAmount = (mode: "distribute" | "reclaim") =>
+    data.canManage
+      ? (member: Member) =>
+          setPending({ userId: member.id, holder: member.name || member.email, mode, balance: member.credits.available })
+      : undefined;
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
@@ -345,28 +334,8 @@ function MyOrgCredits() {
               canRemove={false}
               onPatch={patchMember}
               onRemove={async () => {}}
-              onGrantCredits={
-                data.canManage
-                  ? (member) =>
-                      setPending({
-                        userId: member.id,
-                        holder: member.name || member.email,
-                        mode: "distribute",
-                        balance: member.credits.available,
-                      })
-                  : undefined
-              }
-              onReclaimCredits={
-                data.canManage
-                  ? (member) =>
-                      setPending({
-                        userId: member.id,
-                        holder: member.name || member.email,
-                        mode: "reclaim",
-                        balance: member.credits.available,
-                      })
-                  : undefined
-              }
+              onGrantCredits={askAmount("distribute")}
+              onReclaimCredits={askAmount("reclaim")}
               dailyAllowance={data.canManage ? { onSaved: load } : undefined}
             />
           ) : (
@@ -397,21 +366,17 @@ function MyOrgCredits() {
   );
 }
 
+/** A grant or revoke waiting on its confirmation. `userId: null` is the organization pool. */
+type TenantChange = { userId: string | null; holder: string; mode: "grant" | "revoke"; amount: number };
+
 /** One organization: the pool, every member, and the statement. */
 function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => void }) {
   const cacheKey = useCreditsCacheKey("tenant", tenantId);
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchCreditTenant>> | null>(
     () => getPageCache<Awaited<ReturnType<typeof fetchCreditTenant>>>(cacheKey) ?? null
   );
-  // Bumped after a grant or revoke, so the logs re-read along with the balances.
   const [error, setError] = useState("");
-  const [pending, setPending] = useState<{
-    userId: string | null;
-    holder: string;
-    mode: "grant" | "revoke";
-    amount: number;
-  } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<TenantChange | null>(null);
 
   const load = useCallback(async () => {
     const detail = await fetchCreditTenant(tenantId);
@@ -421,25 +386,13 @@ function TenantCredits({ tenantId, onBack }: { tenantId: string; onBack: () => v
     } else setError(detail.message || "Could not load that organization.");
   }, [tenantId, cacheKey]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useLoad(load);
+  const { busy, run } = useCreditChange(load, setError, () => setPending(null));
 
   async function apply() {
     if (!pending) return;
-    setBusy(true);
-    setError("");
-    try {
-      const body = { tenantId, userId: pending.userId, amount: pending.amount };
-      const res = pending.mode === "grant" ? await grantCredits(body) : await revokeCredits(body);
-      if (res.status === "success") await load();
-      else setError(res.message || "That did not go through.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That did not go through.");
-    } finally {
-      setBusy(false);
-      setPending(null);
-    }
+    const body = { tenantId, userId: pending.userId, amount: pending.amount };
+    await run(() => (pending.mode === "grant" ? grantCredits(body) : revokeCredits(body)));
   }
 
   if (!data || data.status !== "success") {
@@ -601,7 +554,7 @@ function MemberRow({
   onAllowanceSaved,
 }: {
   member: CreditMember;
-  onAct: (p: { userId: string | null; holder: string; mode: "grant" | "revoke"; amount: number }) => void;
+  onAct: (p: TenantChange) => void;
   tenantId: string;
   onAllowanceSaved: () => void;
 }) {
@@ -646,6 +599,43 @@ function MemberRow({
       </div>
     </div>
   );
+}
+
+/**
+ * Runs `load` on mount, and again whenever it changes (another tenant or cache
+ * key). `load` only sets state once its request has resolved, so nothing here
+ * renders synchronously inside the effect.
+ */
+function useLoad(load: () => Promise<void>) {
+  useEffect(() => {
+    load();
+  }, [load]);
+}
+
+/**
+ * Sends one grant, revoke, hand-out or take-back from its dialog: busy while
+ * it is in flight, the balances re-read when it lands, the reason surfaced
+ * when it does not, and the dialog closed either way.
+ */
+function useCreditChange(load: () => Promise<void>, setError: (message: string) => void, close: () => void) {
+  const [busy, setBusy] = useState(false);
+
+  async function run(request: () => Promise<{ status: string; message?: string }>) {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await request();
+      if (res.status === "success") await load();
+      else setError(res.message || "That did not go through.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That did not go through.");
+    } finally {
+      setBusy(false);
+      close();
+    }
+  }
+
+  return { busy, run };
 }
 
 /** This person's cache slot for one part of the page — see `lib/pageCache`. */

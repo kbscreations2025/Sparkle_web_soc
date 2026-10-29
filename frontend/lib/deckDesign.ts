@@ -1,7 +1,6 @@
 import type { AffinityItem } from "./api";
 import {
   DECK,
-  PER_SLIDE,
   sourceCodeFallback,
   splitCategoryEntries,
   splitEntries,
@@ -76,7 +75,7 @@ export type TextElement = ElementBase & {
   placeholder?: string;
 };
 
-export type ImageElement = ElementBase & {
+type ImageElement = ElementBase & {
   type: "image";
   /**
    * A piece's photo is referenced by position rather than copied in: a fresh
@@ -233,7 +232,7 @@ export function blankSlide(background = "#FFFFFF"): DesignSlide {
  * hairline: the editor and phones show the page at a quarter of its size or
  * less, where a 1.5px rule all but disappeared.
  */
-export const FRAME_STROKE_WIDTH = 3;
+const FRAME_STROKE_WIDTH = 3;
 
 function frame() {
   return shapeElement({
@@ -299,8 +298,8 @@ const CARD_LEFT = 64;
 const CARD_TOP = 104;
 const CARD_GAP_X = 40;
 const CARD_GAP_Y = 28;
-export const CARD_W = (SLIDE_W - CARD_LEFT * 2 - CARD_GAP_X * (CARD_COLS - 1)) / CARD_COLS;
-export const CARD_H = (SLIDE_H - CARD_TOP - 36 - CARD_GAP_Y) / CARD_ROWS;
+const CARD_W = (SLIDE_W - CARD_LEFT * 2 - CARD_GAP_X * (CARD_COLS - 1)) / CARD_COLS;
+const CARD_H = (SLIDE_H - CARD_TOP - 36 - CARD_GAP_Y) / CARD_ROWS;
 
 /** Where the card at a grid position (0–5, left to right, top to bottom) sits. */
 function cardSlot(position: number): Box {
@@ -573,6 +572,16 @@ export function imageSource(element: ImageElement, pieces: AffinityPiece[]) {
   return "";
 }
 
+/** A picture's own width ÷ height, so it can be sized — or fitted and cropped, in PowerPoint — without stretching. */
+export function aspectOf(src: string): Promise<number> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth / Math.max(1, img.naturalHeight) || 1);
+    img.onerror = () => resolve(1);
+    img.src = src;
+  });
+}
+
 export type Box = { x: number; y: number; w: number; h: number };
 
 /** The axis-aligned box around a rotated element. */
@@ -639,5 +648,3 @@ export function cloneElements(elements: DesignElement[], offset = 0): DesignElem
 export function cloneSlide(slide: DesignSlide): DesignSlide {
   return { ...slide, id: uid(), elements: cloneElements(slide.elements) };
 }
-
-export { PER_SLIDE };

@@ -130,21 +130,21 @@ async function enqueueJob({
   try {
     await withTimeout(
       getQueueForType(type).add(
-      type,
-      { jobId: String(job._id), ...payload },
-      {
-        // Same id on both sides, so one id identifies the work everywhere:
-        // in Mongo, in Redis, in Bull Board and in the client's URL.
-        jobId: String(job._id),
-        attempts: config.queue.attempts,
-        backoff: { type: "exponential", delay: 5000 },
-        // The Mongo document is the lasting record, so a finished job's Redis
-        // copy is dead weight — and it still holds the image payload, which
-        // makes keeping it expensive. Failures are kept briefly and in small
-        // numbers so they can be inspected (and retried) from Bull Board.
-        removeOnComplete: true,
-        removeOnFail: { age: 24 * 3600, count: 50 },
-      }
+        type,
+        { jobId: String(job._id), ...payload },
+        {
+          // Same id on both sides, so one id identifies the work everywhere:
+          // in Mongo, in Redis, in Bull Board and in the client's URL.
+          jobId: String(job._id),
+          attempts: config.queue.attempts,
+          backoff: { type: "exponential", delay: 5000 },
+          // The Mongo document is the lasting record, so a finished job's Redis
+          // copy is dead weight — and it still holds the image payload, which
+          // makes keeping it expensive. Failures are kept briefly and in small
+          // numbers so they can be inspected (and retried) from Bull Board.
+          removeOnComplete: true,
+          removeOnFail: { age: 24 * 3600, count: 50 },
+        }
       ),
       ENQUEUE_TIMEOUT_MS,
       `the job queue did not accept the job within ${ENQUEUE_TIMEOUT_MS}ms`
@@ -252,7 +252,6 @@ async function closeQueue() {
 }
 
 module.exports = {
-  getQueue,
   getQueueForType,
   enqueueJob,
   toPublicJob,

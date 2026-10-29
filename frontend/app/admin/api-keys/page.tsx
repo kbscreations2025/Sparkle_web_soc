@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useState, type FormEvent, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   listOrganizations,
@@ -17,20 +17,24 @@ import { CELL, HEAD_ROW, TABLE_FRAME, NESTED_TABLE_FRAME } from "@/components/ad
 import { cn } from "@/lib/utils";
 import { Select } from "@/components/ui/Select";
 import { TableFilterBar } from "@/components/admin/TableFilterBar";
+import { ErrorBanner } from "@/components/admin/ErrorBanner";
+import { useConsoleLoad } from "@/components/admin/useConsoleLoad";
 
 const FIELD =
   "w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-cream placeholder:text-faint outline-none focus:border-gold/40";
 
 /** Matches the schema default in backend/src/models/tenant.js. */
-const DEFAULT_PRIORITY =1;
+const DEFAULT_PRIORITY = 1;
 
 const PRIORITY_HELP =
   "Lowest priority runs first. Give the provider you want tried first the smaller number — e.g. gemini 1, openai 20.";
 
+// Fetched together: neither depends on the other, so one round-trip's worth
+// of waiting rather than two.
+const loadOrgsAndCatalogue = () => Promise.all([listOrganizations(), getGrantCatalogue()]);
+
 export default function ApiKeysPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [orgQuery, setOrgQuery] = useState("");
 
   const [openId, setOpenId] = useState<string | null>(null);
@@ -44,27 +48,11 @@ export default function ApiKeysPage() {
   /** The provider names the backend accepts — it owns the list, we just render it. */
   const [providerNames, setProviderNames] = useState<string[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    // Fetched together: neither depends on the other, so one round-trip's worth
-    // of waiting rather than two.
-    Promise.all([listOrganizations(), getGrantCatalogue()])
-      .then(([orgs, catalogue]) => {
-        if (cancelled) return;
-        if (orgs.status === "success") setOrganizations(orgs.organizations ?? []);
-        else setError(orgs.message || "Could not load organizations");
-        if (catalogue.status === "success") setProviderNames(catalogue.providers ?? []);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setError("Could not reach the server");
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { loading, error, setError } = useConsoleLoad(loadOrgsAndCatalogue, ([orgs, catalogue]) => {
+    if (catalogue.status === "success") setProviderNames(catalogue.providers ?? []);
+    if (orgs.status === "success") setOrganizations(orgs.organizations ?? []);
+    else return orgs.message || "Could not load organizations";
+  });
 
   async function loadProviders(orgId: string) {
     setLoadingProviders(true);
@@ -127,11 +115,7 @@ export default function ApiKeysPage() {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-6xl space-y-5">
-        {error && (
-          <p className="rounded-lg border border-error/20 bg-error/[0.08] px-3 py-2 text-xs text-error">
-            {error}
-          </p>
-        )}
+        <ErrorBanner message={error} />
 
         {loading ? (
           <p className="flex items-center gap-2 text-sm text-faint">
@@ -438,26 +422,46 @@ function KeyInput({
   );
 }
 
-/** Title, error line, fields and submit — the frame all three dialogs share. */
+/**
+ * Title, error line, fields and submit — the frame all three dialogs share —
+ * and the save itself: `save` makes the request, and a failure shows its
+ * message (or `failMessage`) here rather than closing the dialog.
+ */
 function FormShell({
   title,
-  error,
   onClose,
-  onSubmit,
-  saving,
+  save,
+  failMessage,
+  onSaved,
   canSave,
   submitLabel,
   children,
 }: {
   title: string;
-  error: string;
   onClose: () => void;
-  onSubmit: (event: FormEvent) => void;
-  saving: boolean;
+  save: () => Promise<{ status: string; message?: string }>;
+  failMessage: string;
+  onSaved: () => void;
   canSave: boolean;
   submitLabel: string;
   children: ReactNode;
 }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const result = await save();
+      if (result.status !== "success") return setError(result.message || failMessage);
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-3 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -472,7 +476,7 @@ function FormShell({
 
       {error && <p className="text-[11px] text-error">{error}</p>}
 
-      <form onSubmit={onSubmit} className="space-y-2">
+      <form onSubmit={handleSubmit} className="space-y-2">
         {children}
         <button
           type="submit"
@@ -537,34 +541,21 @@ function AddKeyForm({
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [priority, setPriority] = useState(String(nextPriority));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError("");
-    try {
-      const result = await addAiProvider(orgId, {
-        provider,
-        label: label.trim(),
-        apiKey: apiKey.trim(),
-        priority: Number(priority),
-      });
-      if (result.status !== "success") return setError(result.message || "Could not add that key");
-      onSaved();
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <FormShell
       title={`Add a key to ${orgName}`}
-      error={error}
       onClose={onClose}
-      onSubmit={handleSubmit}
-      saving={saving}
+      save={() =>
+        addAiProvider(orgId, {
+          provider,
+          label: label.trim(),
+          apiKey: apiKey.trim(),
+          priority: Number(priority),
+        })
+      }
+      failMessage="Could not add that key"
+      onSaved={onSaved}
       canSave={label.trim() !== "" && apiKey.trim() !== ""}
       submitLabel="Add key"
     >
@@ -605,29 +596,14 @@ function ReplaceKeyForm({
   onClose: () => void;
 }) {
   const [apiKey, setApiKey] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError("");
-    try {
-      const result = await updateAiProvider(orgId, entry.id, { apiKey: apiKey.trim() });
-      if (result.status !== "success") return setError(result.message || "Could not replace that key");
-      onSaved();
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <FormShell
       title={`Replace the key for ${entry.label}`}
-      error={error}
       onClose={onClose}
-      onSubmit={handleSubmit}
-      saving={saving}
+      save={() => updateAiProvider(orgId, entry.id, { apiKey: apiKey.trim() })}
+      failMessage="Could not replace that key"
+      onSaved={onSaved}
       canSave={apiKey.trim() !== ""}
       submitLabel="Replace key"
     >
@@ -657,32 +633,14 @@ function EditDetailsForm({
 }) {
   const [label, setLabel] = useState(entry.label);
   const [priority, setPriority] = useState(String(entry.priority));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError("");
-    try {
-      const result = await updateAiProvider(orgId, entry.id, {
-        label: label.trim(),
-        priority: Number(priority),
-      });
-      if (result.status !== "success") return setError(result.message || "Could not save those changes");
-      onSaved();
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <FormShell
       title={`Edit ${entry.label}`}
-      error={error}
       onClose={onClose}
-      onSubmit={handleSubmit}
-      saving={saving}
+      save={() => updateAiProvider(orgId, entry.id, { label: label.trim(), priority: Number(priority) })}
+      failMessage="Could not save those changes"
+      onSaved={onSaved}
       canSave={label.trim() !== ""}
       submitLabel="Save changes"
     >

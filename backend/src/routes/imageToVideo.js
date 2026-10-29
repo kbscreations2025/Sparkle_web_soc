@@ -52,6 +52,11 @@ function clampDuration(value) {
   return Math.max(MIN_DURATION, Math.min(MAX_DURATION, seconds));
 }
 
+/** The client's angle names for the first `count` views, bounded; null when it sent none. */
+function readViewLabels(viewLabels, count) {
+  return Array.isArray(viewLabels) ? viewLabels.slice(0, count).map((label) => String(label).slice(0, 24)) : null;
+}
+
 /** Falls back to the default for anything not on the list, never passing it through. */
 function oneOf(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
@@ -73,7 +78,7 @@ function oneOf(value, allowed, fallback) {
  * its share of the loop — rather than by the length of the finished loop.
  */
 function queueTurntable(req, res, { parsedViews, viewLabels, description, aspectRatio, resolution, durationSeconds, preview, conversationId }) {
-  const labels = Array.isArray(viewLabels) ? viewLabels.slice(0, parsedViews.length).map((label) => String(label).slice(0, 24)) : [];
+  const labels = readViewLabels(viewLabels, parsedViews.length) ?? [];
   const pinned = TURNTABLE.angles
     .map((angle) => ({ label: angle.label, degrees: angle.degrees, index: labels.indexOf(angle.label) }))
     .filter((angle) => angle.index >= 0);
@@ -217,9 +222,7 @@ router.post("/", async (req, res) => {
        * views so a dropped seventh angle cannot shift the labels out of step
        * with the photographs they name.
        */
-      viewLabels: Array.isArray(viewLabels)
-        ? viewLabels.slice(0, parsedViews.length).map((label) => String(label).slice(0, 24))
-        : null,
+      viewLabels: readViewLabels(viewLabels, parsedViews.length),
       description: description || null,
       camera: oneOf(camera, CAMERA_STYLES.map((style) => style.id), CAMERA_STYLES[0].id),
       mood: oneOf(mood, MOOD_STYLES.map((style) => style.id), MOOD_STYLES[0].id),

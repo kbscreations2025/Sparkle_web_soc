@@ -1,5 +1,5 @@
 const { registerJobHandler } = require("./registry");
-const { runTextJob } = require("./textRunner");
+const { runTextJob, inlineData } = require("./textRunner");
 const { ANALYSIS_PROMPT } = require("../prompts/imageToText");
 
 const IMAGE_TO_TEXT_JOB = "imageToText.generate";
@@ -23,10 +23,7 @@ registerJobHandler(IMAGE_TO_TEXT_JOB, (context) =>
     temperature: 0.1,
     thinkingBudget: 8000,
     maxOutputTokens: 12288,
-    buildParts: ({ data }) => [
-      { inlineData: { mimeType: data.image.mimeType, data: data.image.base64 } },
-      { text: ANALYSIS_PROMPT },
-    ],
+    buildParts: ({ data }) => [inlineData(data.image), { text: ANALYSIS_PROMPT }],
     inputImages: [{ image: context.data.image, role: "uploaded" }],
     promptForHistory: ANALYSIS_PROMPT,
     // What History shows as the user's own words. There are none — they

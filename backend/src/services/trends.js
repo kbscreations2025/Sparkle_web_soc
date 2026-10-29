@@ -247,4 +247,4 @@ function readTrendCues(raw) {
     .slice(0, MAX_TRENDS);
 }
 
-module.exports = { getTrends, parseResearch, readTrendCues, trendingOf };
+module.exports = { getTrends, readTrendCues, trendingOf };

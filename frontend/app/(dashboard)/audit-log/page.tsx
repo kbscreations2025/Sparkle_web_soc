@@ -16,8 +16,9 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { useDismissable } from "@/lib/useEscapeKey";
-import { HEAD_ROW } from "@/components/admin/table";
+import { COMPACT_CELL, HEAD_ROW } from "@/components/admin/table";
 import { ScrollEnds } from "@/components/admin/ScrollEnds";
+import { ErrorBanner } from "@/components/admin/ErrorBanner";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +32,7 @@ const FIELD =
  * dozen rows. An audit log is read fifty rows at a time, so the row height
  * decides how much history fits on one screen.
  */
-const ROW_CELL = "px-3 py-1.5 text-[12px]";
+const ROW_CELL = COMPACT_CELL;
 
 /**
  * A pinned column header.
@@ -206,16 +207,122 @@ function formatWhen(iso: string) {
   });
 }
 
-export default function AuditLogPage() {
-  const { user } = useAuth();
+/** One page from either paged endpoint — the audit trail or the credit ledger. */
+type PageResult<T> = {
+  status: string;
+  message?: string;
+  entries?: T[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
+};
 
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [facets, setFacets] = useState<AuditFacets | null>(null);
+/**
+ * A list read a page at a time: the first page whenever `fetchPage` changes
+ * (while `enabled`), and the next one from `loadMore` — called as the end of
+ * the list scrolls into view. `fetchPage(before)` continues from a cursor.
+ */
+function usePagedRows<T>(
+  fetchPage: (before?: string) => Promise<PageResult<T>>,
+  failMessage: string,
+  enabled = true
+) {
+  const [rows, setRows] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
+
+  /*
+   * Guards against a slow first page landing after a faster later one and
+   * overwriting it — every filter change fires a new request, and they do not
+   * come back in order.
+   */
+  const requestId = useRef(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const id = ++requestId.current;
+
+    async function run() {
+      setLoading(true);
+      try {
+        const result = await fetchPage();
+        // A newer filter already superseded this request.
+        if (id !== requestId.current) return;
+        if (result.status === "success") {
+          setRows(result.entries ?? []);
+          setHasMore(Boolean(result.hasMore));
+          setCursor(result.nextCursor ?? null);
+          setError("");
+        } else {
+          setError(result.message || failMessage);
+        }
+      } catch {
+        if (id !== requestId.current) return;
+        setError("Could not reach the server");
+      } finally {
+        if (id === requestId.current) setLoading(false);
+      }
+    }
+
+    run();
+  }, [fetchPage, failMessage, enabled]);
+
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    const id = requestId.current;
+    try {
+      const result = await fetchPage(cursor);
+      // A filter changed while this page was in flight — its rows belong to a
+      // query nobody is looking at any more.
+      if (id !== requestId.current) return;
+      if (result.status === "success") {
+        setRows((current) => [...current, ...(result.entries ?? [])]);
+        setHasMore(Boolean(result.hasMore));
+        setCursor(result.nextCursor ?? null);
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [cursor, loadingMore, fetchPage]);
+
+  /*
+   * Loads the next page as the end of the list comes into view.
+   *
+   * `rootMargin` fires it roughly a screen early — enough that the rows are
+   * usually there by the time scrolling reaches them, and not so early that
+   * someone who stops after the first screen has silently pulled three more.
+   * The scroller is the root, not the viewport: the list scrolls inside its
+   * own frame, so against the viewport the sentinel would count as visible
+   * from the moment the page rendered.
+   */
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) loadMore();
+      },
+      { root: scrollerRef.current, rootMargin: "400px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore]);
+
+  return { rows, loading, loadingMore, error, hasMore, loadMore, sentinelRef, scrollerRef };
+}
+
+export default function AuditLogPage() {
+  const { user } = useAuth();
+
+  const [facets, setFacets] = useState<AuditFacets | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   // ── filters ──
@@ -310,41 +417,9 @@ export default function AuditLogPage() {
     [debouncedSearch, actions, statuses, actorUserIds, from, to, tenantIds]
   );
 
-  /*
-   * Guards against a slow first page landing after a faster later one and
-   * overwriting it — every filter change fires a new request, and they do not
-   * come back in order.
-   */
-  const requestId = useRef(0);
-
-  useEffect(() => {
-    if (!allowed) return;
-    const id = ++requestId.current;
-
-    async function run() {
-      setLoading(true);
-      try {
-        const result = await listAuditLog(query);
-        // A newer filter already superseded this request.
-        if (id !== requestId.current) return;
-        if (result.status === "success") {
-          setEntries(result.entries ?? []);
-          setHasMore(Boolean(result.hasMore));
-          setCursor(result.nextCursor ?? null);
-          setError("");
-        } else {
-          setError(result.message || "Could not load the audit log");
-        }
-      } catch {
-        if (id !== requestId.current) return;
-        setError("Could not reach the server");
-      } finally {
-        if (id === requestId.current) setLoading(false);
-      }
-    }
-
-    run();
-  }, [query, allowed]);
+  const fetchPage = useCallback((before?: string) => listAuditLog({ ...query, before }), [query]);
+  const audit = usePagedRows(fetchPage, "Could not load the audit log", allowed);
+  const { rows: entries, loading, error, hasMore } = audit;
 
   useEffect(() => {
     if (!allowed) return;
@@ -356,53 +431,6 @@ export default function AuditLogPage() {
         /* The filters degrade to text search alone; not worth an error banner. */
       });
   }, [allowed]);
-
-  const loadMore = useCallback(async () => {
-    if (!cursor || loadingMore) return;
-    setLoadingMore(true);
-    const id = requestId.current;
-    try {
-      const result = await listAuditLog({ ...query, before: cursor });
-      // A filter changed while this page was in flight — its rows belong to a
-      // query nobody is looking at any more.
-      if (id !== requestId.current) return;
-      if (result.status === "success") {
-        setEntries((current) => [...current, ...(result.entries ?? [])]);
-        setHasMore(Boolean(result.hasMore));
-        setCursor(result.nextCursor ?? null);
-      }
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [cursor, loadingMore, query]);
-
-  /*
-   * Loads the next page as the end of the list comes into view.
-   *
-   * `rootMargin` fires it roughly a screen early — enough that the rows are
-   * usually there by the time scrolling reaches them, and not so early that
-   * someone who stops after the first screen has silently pulled three more.
-   * The scroller is the root, not the viewport: the list scrolls inside its
-   * own frame, so against the viewport the sentinel would count as visible
-   * from the moment the page rendered.
-   */
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const scrollerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || !hasMore) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) loadMore();
-      },
-      { root: scrollerRef.current, rootMargin: "400px" }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, loadMore]);
 
   /**
    * The phone's one icon stands for every field, so its badge counts them all.
@@ -433,6 +461,21 @@ export default function AuditLogPage() {
 
   if (!allowed) return <ToolAccessNotice tool="Audit Log" />;
 
+  const filterFields = {
+    actors: facets?.actors ?? [],
+    actorUserIds,
+    setActorUserIds,
+    statuses,
+    setStatuses,
+    from,
+    setFrom,
+    to,
+    setTo,
+    tenants: facets?.tenants,
+    tenantIds,
+    setTenantIds,
+  };
+
   /*
    * The page itself does not scroll — `overflow-hidden` here and a single
    * scrolling region around the rows further down. That is what lets the
@@ -447,11 +490,7 @@ export default function AuditLogPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 flex-col gap-3">
-        {error && (
-          <p className="shrink-0 rounded-lg border border-error/20 bg-error/[0.08] px-3 py-2 text-xs text-error">
-            {error}
-          </p>
-        )}
+        <ErrorBanner message={error} className="shrink-0" />
 
         {/*
          * One wrapping toolbar rather than a fixed six-column grid: the grid
@@ -541,43 +580,15 @@ export default function AuditLogPage() {
             onChange={setActions}
           />
 
-          {/* From sm up the three remaining filters sit in the bar. Below it
           {/* Every filter sits in the bar from sm up, each reduced to an icon.
               Below it they move behind one icon — six controls across a 375px
               screen wrapped to four rows, which pushed the table off the fold. */}
           <div className="hidden items-center gap-1.5 sm:flex">
-            <FilterFields
-              actors={facets?.actors ?? []}
-              actorUserIds={actorUserIds}
-              setActorUserIds={setActorUserIds}
-              statuses={statuses}
-              setStatuses={setStatuses}
-              from={from}
-              setFrom={setFrom}
-              to={to}
-              setTo={setTo}
-              tenants={facets?.tenants}
-              tenantIds={tenantIds}
-              setTenantIds={setTenantIds}
-            />
+            <FilterFields {...filterFields} />
           </div>
 
           <MoreFilters activeCount={mobileFilterCount} className="sm:hidden">
-            <FilterFields
-              stacked
-              actors={facets?.actors ?? []}
-              actorUserIds={actorUserIds}
-              setActorUserIds={setActorUserIds}
-              statuses={statuses}
-              setStatuses={setStatuses}
-              from={from}
-              setFrom={setFrom}
-              to={to}
-              setTo={setTo}
-              tenants={facets?.tenants}
-              tenantIds={tenantIds}
-              setTenantIds={setTenantIds}
-            />
+            <FilterFields stacked {...filterFields} />
           </MoreFilters>
           {/* Pushed to the far end, so the count and the reset sit together
               in the bar instead of costing a row of their own. */}
@@ -610,69 +621,95 @@ export default function AuditLogPage() {
             {activeFilters > 0 ? "Nothing matches those filters." : "No activity recorded yet."}
           </p>
         ) : (
-          // The wrapper holds the jump arrows still while the rows scroll.
-          <div className="relative -mt-3 flex min-h-0 flex-1 flex-col">
-            {/* The one scrolling region on the page. */}
-            <div
-              ref={scrollerRef}
-              className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-b-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
-            >
-              {/* 460 rather than 900: with the tighter cells and a relative
-                  timestamp the columns fit the pane without a horizontal
-                  scrollbar, which was hiding the IP column entirely. */}
-              <table className="w-full sm:min-w-[460px] border-collapse">
-                <thead>
-                  <tr className={HEAD_ROW}>
-                    {/* Below lg the time moves inside the Action cell rather
-                        than holding a column of its own — see AuditRow. */}
-                    <th className={cn(STICKY_HEAD, "hidden w-[92px] lg:table-cell")}>When</th>
-                    <th className={cn(STICKY_HEAD, "w-[110px] sm:w-[150px]")}>Action</th>
-                    <th className={cn(STICKY_HEAD, "hidden w-[130px] md:table-cell")}>Who</th>
-                    <th className={STICKY_HEAD}>What happened</th>
-                    <th className={cn(STICKY_HEAD, "hidden w-[90px] lg:table-cell")}>IP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((entry) => (
-                    <AuditRow
-                      key={entry.id}
-                      entry={entry}
-                      expanded={expanded === entry.id}
-                      onToggle={() =>
-                        setExpanded((current) => (current === entry.id ? null : entry.id))
-                      }
-                    />
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Inside the scroller, after the last row — it is the end of
-                  the list, so it belongs where scrolling actually ends
-                  rather than pinned under the frame. */}
-              {hasMore && (
-                <div
-                  ref={sentinelRef}
-                  className="flex w-full items-center justify-center gap-1.5 border-t border-white/5 px-3 py-3 text-[11px] text-faint"
-                >
-                  {loadingMore ? (
-                    <>
-                      <Loader2 size={12} className="animate-spin" /> Loading more…
-                    </>
-                  ) : (
-                    // Visible when the observer has not fired yet, and the
-                    // fallback if it never does.
-                    <button onClick={loadMore} className="transition-colors hover:text-cream">
-                      Load more
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-            <ScrollEnds scrollerRef={scrollerRef} insetTop={30} />
-          </div>
+          <ScrollingRows pager={audit}>
+            <AuditHead />
+            <tbody>
+              {entries.map((entry) => (
+                <AuditRow
+                  key={entry.id}
+                  entry={entry}
+                  expanded={expanded === entry.id}
+                  onToggle={() =>
+                    setExpanded((current) => (current === entry.id ? null : entry.id))
+                  }
+                />
+              ))}
+            </tbody>
+          </ScrollingRows>
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * A paged table inside the page's one scrolling region: the rows' frame, the
+ * next page's sentinel after the last row, and the jump arrows beside it.
+ */
+function ScrollingRows({
+  pager: { hasMore, loadingMore, loadMore, sentinelRef, scrollerRef },
+  children,
+}: {
+  pager: Pick<
+    ReturnType<typeof usePagedRows>,
+    "hasMore" | "loadingMore" | "loadMore" | "sentinelRef" | "scrollerRef"
+  >;
+  children: ReactNode;
+}) {
+  return (
+    // The wrapper holds the jump arrows still while the rows scroll.
+    <div className="relative -mt-3 flex min-h-0 flex-1 flex-col">
+      {/* The one scrolling region on the page. */}
+      <div
+        ref={scrollerRef}
+        className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-b-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
+      >
+        {/* 460 rather than 900: with the tighter cells and a relative
+            timestamp the columns fit the pane without a horizontal
+            scrollbar, which was hiding the IP column entirely. */}
+        <table className="w-full sm:min-w-[460px] border-collapse">{children}</table>
+
+        {/* Inside the scroller, after the last row — it is the end of
+            the list, so it belongs where scrolling actually ends
+            rather than pinned under the frame. */}
+        {hasMore && (
+          <div
+            ref={sentinelRef}
+            className="flex w-full items-center justify-center gap-1.5 border-t border-white/5 px-3 py-3 text-[11px] text-faint"
+          >
+            {loadingMore ? (
+              <>
+                <Loader2 size={12} className="animate-spin" /> Loading more…
+              </>
+            ) : (
+              // Visible when the observer has not fired yet, and the
+              // fallback if it never does.
+              <button onClick={loadMore} className="transition-colors hover:text-cream">
+                Load more
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <ScrollEnds scrollerRef={scrollerRef} insetTop={30} />
+    </div>
+  );
+}
+
+/** The audit table's column headers, shared with its loading skeleton. */
+function AuditHead() {
+  return (
+    <thead>
+      <tr className={HEAD_ROW}>
+        {/* Below lg the time moves inside the Action cell rather
+            than holding a column of its own — see AuditRow. */}
+        <th className={cn(STICKY_HEAD, "hidden w-[92px] lg:table-cell")}>When</th>
+        <th className={cn(STICKY_HEAD, "w-[110px] sm:w-[150px]")}>Action</th>
+        <th className={cn(STICKY_HEAD, "hidden w-[130px] md:table-cell")}>Who</th>
+        <th className={STICKY_HEAD}>What happened</th>
+        <th className={cn(STICKY_HEAD, "hidden w-[90px] lg:table-cell")}>IP</th>
+      </tr>
+    </thead>
   );
 }
 
@@ -692,15 +729,7 @@ function TableSkeleton() {
       className="-mt-3 min-h-0 flex-1 overflow-hidden rounded-b-xl border border-white/10 bg-surface-raised/60"
     >
       <table className="w-full sm:min-w-[460px] border-collapse">
-        <thead>
-          <tr className={HEAD_ROW}>
-            <th className={cn(STICKY_HEAD, "hidden w-[92px] lg:table-cell")}>When</th>
-            <th className={cn(STICKY_HEAD, "w-[110px] sm:w-[150px]")}>Action</th>
-            <th className={cn(STICKY_HEAD, "hidden w-[130px] md:table-cell")}>Who</th>
-            <th className={STICKY_HEAD}>What happened</th>
-            <th className={cn(STICKY_HEAD, "hidden w-[90px] lg:table-cell")}>IP</th>
-          </tr>
-        </thead>
+        <AuditHead />
         <tbody>
           {Array.from({ length: 12 }).map((_, row) => (
             <tr key={row} className="border-t border-white/5">
@@ -778,77 +807,17 @@ function CreditMovements({
   tenantIds: string[];
   onSummary: (summary: { count: number; hasMore: boolean; loading: boolean }) => void;
 }) {
-  const [rows, setRows] = useState<LedgerRow[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState("");
-  const requestId = useRef(0);
   const tenantKey = tenantIds.join(",");
-
-  useEffect(() => {
-    const id = ++requestId.current;
-    setLoading(true);
-    fetchAllCreditLedger({ tenantIds: tenantKey ? tenantKey.split(",") : [] })
-      .then((result) => {
-        if (id !== requestId.current) return;
-        if (result.status === "success") {
-          setRows(result.entries ?? []);
-          setHasMore(Boolean(result.hasMore));
-          setCursor(result.nextCursor ?? null);
-          setError("");
-        } else {
-          setError(result.message || "Could not load credit movements");
-        }
-      })
-      .catch(() => {
-        if (id === requestId.current) setError("Could not reach the server");
-      })
-      .finally(() => {
-        if (id === requestId.current) setLoading(false);
-      });
-  }, [tenantKey]);
+  const fetchPage = useCallback(
+    (before?: string) => fetchAllCreditLedger({ tenantIds: tenantKey ? tenantKey.split(",") : [], before }),
+    [tenantKey]
+  );
+  const ledger = usePagedRows(fetchPage, "Could not load credit movements");
+  const { rows, loading, error, hasMore } = ledger;
 
   useEffect(() => {
     onSummary({ count: rows.length, hasMore, loading });
   }, [rows.length, hasMore, loading, onSummary]);
-
-  const loadMore = useCallback(async () => {
-    if (!cursor || loadingMore) return;
-    setLoadingMore(true);
-    const id = requestId.current;
-    try {
-      const result = await fetchAllCreditLedger({
-        tenantIds: tenantKey ? tenantKey.split(",") : [],
-        before: cursor,
-      });
-      if (id !== requestId.current) return;
-      if (result.status === "success") {
-        setRows((current) => [...current, ...(result.entries ?? [])]);
-        setHasMore(Boolean(result.hasMore));
-        setCursor(result.nextCursor ?? null);
-      }
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [cursor, loadingMore, tenantKey]);
-
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const scrollerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || !hasMore) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) loadMore();
-      },
-      { root: scrollerRef.current, rootMargin: "400px" }
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, loadMore]);
 
   const amountOf = (entry: LedgerRow) =>
     entry.kind === "hold"
@@ -857,80 +826,51 @@ function CreditMovements({
         ? `+${entry.held.toLocaleString()} released`
         : `${entry.amount > 0 ? "+" : ""}${entry.amount.toLocaleString()}`;
 
-  if (error) {
-    return (
-      <p className="shrink-0 rounded-lg border border-error/20 bg-error/[0.08] px-3 py-2 text-xs text-error">{error}</p>
-    );
-  }
+  if (error) return <ErrorBanner message={error} className="shrink-0" />;
   if (loading && rows.length === 0) return <TableSkeleton />;
   if (rows.length === 0) return <p className="-mt-3 rounded-b-xl border border-white/10 bg-surface-raised/60 px-3 py-6 text-center text-sm text-muted">No credits have moved yet.</p>;
 
   return (
-    <div className="relative -mt-3 flex min-h-0 flex-1 flex-col">
-      <div
-        ref={scrollerRef}
-        className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-b-xl border border-white/10 bg-surface-raised/60 [--scroll-inset-top:30px]"
-      >
-        <table className="w-full sm:min-w-[460px] border-collapse">
-          <thead>
-            <tr className={HEAD_ROW}>
-              <th className={cn(STICKY_HEAD, "w-[92px]")}>When</th>
-              <th className={cn(STICKY_HEAD, "hidden w-[140px] md:table-cell")}>Organization</th>
-              <th className={cn(STICKY_HEAD, "w-[140px]")}>Holder</th>
-              <th className={STICKY_HEAD}>Movement</th>
-              <th className={cn(STICKY_HEAD, "w-[120px] text-right")}>Credits</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((entry) => (
-              <tr key={entry.id} className="border-t border-white/5">
-                <td
-                  className={cn(ROW_CELL, "whitespace-nowrap text-muted tabular-nums")}
-                  title={formatWhen(entry.createdAt)}
-                >
-                  {formatRelative(entry.createdAt)}
-                </td>
-                <td className={cn(ROW_CELL, "hidden truncate text-muted md:table-cell")}>
-                  {entry.tenant || <span className="text-faint">—</span>}
-                </td>
-                <td className={cn(ROW_CELL, "truncate text-cream")}>{entry.holder || "—"}</td>
-                <td className={ROW_CELL}>
-                  <span className="font-medium text-cream">{entry.kind}</span>
-                  {entry.tool && <span className="ml-1.5 text-faint">{entry.tool}</span>}
-                  {/* The quote, which is what makes a charge explicable */}
-                  {entry.unitPrice !== null && entry.units !== null && (
-                    <span className="ml-1.5 text-faint">
-                      {entry.units} × {entry.unitPrice}
-                    </span>
-                  )}
-                </td>
-                <td className={cn(ROW_CELL, "whitespace-nowrap text-right tabular-nums text-cream")}>
-                  {amountOf(entry)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-  
-        {hasMore && (
-          <div
-            ref={sentinelRef}
-            className="flex w-full items-center justify-center gap-1.5 border-t border-white/5 px-3 py-3 text-[11px] text-faint"
-          >
-            {loadingMore ? (
-              <>
-                <Loader2 size={12} className="animate-spin" /> Loading more…
-              </>
-            ) : (
-              <button onClick={loadMore} className="transition-colors hover:text-cream">
-                Load more
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      <ScrollEnds scrollerRef={scrollerRef} insetTop={30} />
-    </div>
+    <ScrollingRows pager={ledger}>
+      <thead>
+        <tr className={HEAD_ROW}>
+          <th className={cn(STICKY_HEAD, "w-[92px]")}>When</th>
+          <th className={cn(STICKY_HEAD, "hidden w-[140px] md:table-cell")}>Organization</th>
+          <th className={cn(STICKY_HEAD, "w-[140px]")}>Holder</th>
+          <th className={STICKY_HEAD}>Movement</th>
+          <th className={cn(STICKY_HEAD, "w-[120px] text-right")}>Credits</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((entry) => (
+          <tr key={entry.id} className="border-t border-white/5">
+            <td
+              className={cn(ROW_CELL, "whitespace-nowrap text-muted tabular-nums")}
+              title={formatWhen(entry.createdAt)}
+            >
+              {formatRelative(entry.createdAt)}
+            </td>
+            <td className={cn(ROW_CELL, "hidden truncate text-muted md:table-cell")}>
+              {entry.tenant || <span className="text-faint">—</span>}
+            </td>
+            <td className={cn(ROW_CELL, "truncate text-cream")}>{entry.holder || "—"}</td>
+            <td className={ROW_CELL}>
+              <span className="font-medium text-cream">{entry.kind}</span>
+              {entry.tool && <span className="ml-1.5 text-faint">{entry.tool}</span>}
+              {/* The quote, which is what makes a charge explicable */}
+              {entry.unitPrice !== null && entry.units !== null && (
+                <span className="ml-1.5 text-faint">
+                  {entry.units} × {entry.unitPrice}
+                </span>
+              )}
+            </td>
+            <td className={cn(ROW_CELL, "whitespace-nowrap text-right tabular-nums text-cream")}>
+              {amountOf(entry)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </ScrollingRows>
   );
 }
 
@@ -1139,12 +1079,6 @@ function AuditRow({
  * the bar on a wide screen and in a popover on a phone, and a second copy
  * would be the thing that drifts when a filter is added. `stacked` is the
  * popover's full-width form.
- *
- * `include` splits them by how often they are reached for. Organization and
- * person are the cuts someone makes constantly, so they stay in the bar;
- * outcome and a date range are occasional, and six controls in one row left
- * the bar too dense to read — they moved behind the filter icon, which had
- * only existed on phones.
  */
 function FilterFields({
   stacked = false,
@@ -1266,10 +1200,7 @@ function DateRangeFilter({
   setTo: (value: string) => void;
   stacked?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismissable(rootRef, open, close);
+  const { open, toggleOpen, rootRef } = useDropdown();
 
   // Opens showing whatever the current values carry, so reopening a range that
   // was set with times does not silently present itself as a date-only one.
@@ -1349,7 +1280,7 @@ function DateRangeFilter({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggleOpen}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Filter by date range"
@@ -1369,33 +1300,32 @@ function DateRangeFilter({
   );
 }
 
-/** A filter icon, opening a panel of the fields it stands for. */
-function MoreFilters({
-  activeCount,
-  className,
-  align = "left",
-  children,
-}: {
-  activeCount: number;
-  className?: string;
-  /**
-   * Which edge the panel hangs from. The bar's own icon sits at its right
-   * end, where a left-anchored panel runs off the screen and takes half the
-   * date range with it.
-   */
-  align?: "left" | "right";
-  children: ReactNode;
-}) {
+/** A filter dropdown's open state, closed again by Escape or a click outside `rootRef`. */
+function useDropdown() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismissable(rootRef, open, close);
+  return { open, toggleOpen: () => setOpen((current) => !current), rootRef };
+}
+
+/** A filter icon, opening a panel of the fields it stands for. */
+function MoreFilters({
+  activeCount,
+  className,
+  children,
+}: {
+  activeCount: number;
+  className?: string;
+  children: ReactNode;
+}) {
+  const { open, toggleOpen, rootRef } = useDropdown();
 
   return (
     <div ref={rootRef} className={cn("relative", className)}>
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggleOpen}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="More filters"
@@ -1407,16 +1337,38 @@ function MoreFilters({
       </button>
 
       {open && (
-        <div
-          className={cn(
-            "absolute top-full z-30 mt-1.5 w-[230px] space-y-2 rounded-lg border border-white/10 bg-surface-raised p-2 shadow-lg",
-            align === "right" ? "right-0" : "left-0"
-          )}
-        >
+        <div className="absolute top-full z-30 mt-1.5 w-[230px] space-y-2 rounded-lg border border-white/10 bg-surface-raised p-2 shadow-lg left-0">
           {children}
         </div>
       )}
     </div>
+  );
+}
+
+/** One row of a filter's checklist, ticking `value` in or out of `selected`. */
+function CheckOption({
+  value,
+  selected,
+  onChange,
+  children,
+}: {
+  value: string;
+  selected: string[];
+  onChange: (next: string[]) => void;
+  children: ReactNode;
+}) {
+  const checked = selected.includes(value);
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={checked}
+      onClick={() => onChange(checked ? selected.filter((item) => item !== value) : [...selected, value])}
+      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] text-cream transition-colors hover:bg-white/[0.06]"
+    >
+      <input type="checkbox" readOnly checked={checked} className="pointer-events-none accent-[var(--color-gold)]" />
+      {children}
+    </button>
   );
 }
 
@@ -1454,20 +1406,13 @@ function ChecklistFilter({
   icon: ReactNode;
   stacked?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const { open, toggleOpen, rootRef } = useDropdown();
   // A long list — 40-odd people — is found by typing, not by scrolling.
   const [query, setQuery] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismissable(rootRef, open, close);
   // Each opening starts from the whole list.
   useEffect(() => {
     if (!open) setQuery("");
   }, [open]);
-
-  function toggle(id: string) {
-    onChange(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
-  }
 
   const needle = query.trim().toLowerCase();
   const shown = needle ? options.filter((option) => option.name.toLowerCase().includes(needle)) : options;
@@ -1484,7 +1429,7 @@ function ChecklistFilter({
     <div ref={rootRef} className={cn("relative", stacked && "w-full")}>
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggleOpen}
         disabled={options.length === 0}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -1547,22 +1492,9 @@ function ChecklistFilter({
           )}
           {shown.length === 0 && <p className="px-2.5 py-2 text-[11px] text-faint">No matches.</p>}
           {shown.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              role="option"
-              aria-selected={selected.includes(option.id)}
-              onClick={() => toggle(option.id)}
-              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] text-cream transition-colors hover:bg-white/[0.06]"
-            >
-              <input
-                type="checkbox"
-                readOnly
-                checked={selected.includes(option.id)}
-                className="pointer-events-none accent-[var(--color-gold)]"
-              />
+            <CheckOption key={option.id} value={option.id} selected={selected} onChange={onChange}>
               <span className="truncate">{option.name}</span>
-            </button>
+            </CheckOption>
           ))}
         </div>
       )}
@@ -1586,10 +1518,7 @@ function ActionFilter({
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismissable(rootRef, open, close);
+  const { open, toggleOpen, rootRef } = useDropdown();
 
   const grouped = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -1600,19 +1529,13 @@ function ActionFilter({
     return [...map.entries()];
   }, [options]);
 
-  function toggle(action: string) {
-    onChange(
-      selected.includes(action) ? selected.filter((a) => a !== action) : [...selected, action]
-    );
-  }
-
   return (
     <div ref={rootRef} className="relative">
       {/* Icon-only on a phone, a labelled field from sm up — the same
           control, sized to the space it has. */}
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggleOpen}
         disabled={options.length === 0}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -1656,22 +1579,9 @@ function ActionFilter({
                 {area}
               </p>
               {list.map((action) => (
-                <button
-                  key={action}
-                  type="button"
-                  role="option"
-                  aria-selected={selected.includes(action)}
-                  onClick={() => toggle(action)}
-                  className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] text-cream transition-colors hover:bg-white/[0.06]"
-                >
-                  <input
-                    type="checkbox"
-                    readOnly
-                    checked={selected.includes(action)}
-                    className="pointer-events-none accent-[var(--color-gold)]"
-                  />
+                <CheckOption key={action} value={action} selected={selected} onChange={onChange}>
                   {humanizeAction(action)}
-                </button>
+                </CheckOption>
               ))}
             </div>
           ))}

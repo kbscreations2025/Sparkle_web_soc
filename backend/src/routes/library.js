@@ -1,12 +1,12 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const { requireAuth, requirePermission } = require("../middleware/auth");
-const { hasPermission } = require("../permissions");
+// History's reach, unchanged — the same filter, so the two never disagree about who sees what.
+const { hasPermission, reachFilter } = require("../permissions");
 const Asset = require("../models/asset");
 const { GENERATION_TOOLS } = require("../generations");
 const { publicUrlFor } = require("../storage/r2");
 const { handle, bad } = require("./_shared");
-const { buildScopeFilter } = require("./history");
 
 const router = express.Router();
 
@@ -63,12 +63,6 @@ const FIELDS = "_id tool role mimeType sizeBytes width height s3Key thumbnail ch
  * different model — and the library shows it once, at its latest.
  */
 const photoKey = (asset) => asset.sourceChecksum || asset.checksum;
-
-/** History's reach, unchanged — see buildScopeFilter. Its `status` is a generation's ("completed"), which an asset row doesn't have. */
-function reachFilter(dbUser, wantsTeam) {
-  const { status: _generationStatus, ...reach } = buildScopeFilter(dbUser, wantsTeam);
-  return reach;
-}
 
 /**
  * Just these people's pictures inside the team reach. An `$and` beside the

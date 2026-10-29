@@ -1,10 +1,10 @@
 const express = require("express");
 const { requireAuth, requirePermission, requireAnyPermission } = require("../middleware/auth");
 const { resolveProviderModel } = require("../aiRouting");
-const { parseDataUri, resolveInlineImage } = require("../generationService");
-const { queueGeneration, parseImages } = require("./queueGeneration");
+const { parseDataUri } = require("../generationService");
+const { queueGeneration, parseImages, refinementPayload } = require("./queueGeneration");
+const { resolveBaseModel } = require("./baseModel");
 const { LIFESTYLE_JOB, LIFESTYLE_MODEL_JOB } = require("../jobs/lifestyle");
-const { loadPreset, PRESET_IDS } = require("../services/lifestylePresets");
 const models = require("../services/lifestyleModels");
 
 const router = express.Router();
@@ -137,11 +137,8 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     model: requestedModel,
     quality: requestedQuality,
     refineImage,
-    referenceImages,
     instruction,
-    displayPrompt,
     conversationId,
-    parentGenerationId,
   } = req.body || {};
 
   const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
@@ -159,7 +156,8 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     }
 
     const jewelryRefs = parseImages(jewelryImages);
-    const styleRefs = parseImages(referenceImages);
+    // Its `references` are the style references alone.
+    const refinement = refinementPayload(req.body, parsedImage);
 
     return queueGeneration(req, res, {
       type: LIFESTYLE_JOB,
@@ -171,22 +169,15 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
         quality,
         isRefinement: true,
         instruction,
-        referenceCount: styleRefs.length,
+        referenceCount: refinement.references.length,
         conversationId: conversationId || null,
       },
       payload: {
-        isRefinement: true,
-        refineImage: parsedImage,
+        ...refinement,
         // Order matters and is described by the prompt: the jewellery
         // originals first, then anything attached as inspiration.
-        references: [...jewelryRefs, ...styleRefs],
+        references: [...jewelryRefs, ...refinement.references],
         jewelryCount: jewelryRefs.length,
-        instruction,
-        displayPrompt,
-        requestedModel,
-        requestedQuality,
-        conversationId,
-        parentGenerationId,
       },
       preview: null,
       message: `queued a Lifestyle refinement on ${modelLabel}`,
@@ -253,33 +244,5 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     message: `queued a Lifestyle run (${jewelryList.length} piece${jewelryList.length > 1 ? "s" : ""}) on ${modelLabel}`,
   });
 });
-
-/**
- * The chosen model as `{ mimeType, base64 }`.
- *
- * A saved model is stored as a url, so it is fetched back rather than
- * trusted from the client: the browser sending the bytes of "model 7" is the
- * browser deciding what model 7 is.
- */
-async function resolveBaseModel({ dbUser, modelNumber, modelId, modelImage }) {
-  if (modelId) {
-    const saved = await models.findUsableModel({ dbUser, id: modelId });
-    if (!saved) throw new Error("that saved model is not available");
-    return resolveInlineImage(saved.imageUrl);
-  }
-
-  if (modelImage) {
-    const uploaded = await resolveInlineImage(modelImage);
-    if (!uploaded) throw new Error("the model photo must be an image");
-    return uploaded;
-  }
-
-  if (modelNumber !== undefined && modelNumber !== null && modelNumber !== "") {
-    if (!PRESET_IDS.includes(Number(modelNumber))) throw new Error(`there is no preset model ${modelNumber}`);
-    return loadPreset(modelNumber);
-  }
-
-  return null;
-}
 
 module.exports = router;

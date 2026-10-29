@@ -142,4 +142,3 @@ jobSchema.index(
 jobSchema.index({ status: 1 }, { partialFilterExpression: { status: "running" } });
 
 module.exports = mongoose.model("Job", jobSchema);
-module.exports.JOB_STATUSES = JOB_STATUSES;

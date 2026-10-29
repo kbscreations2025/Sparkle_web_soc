@@ -7,7 +7,7 @@ import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
-import { LibraryPicker } from "@/components/studio/LibraryPicker";
+import { usePhotoPicker } from "@/components/studio/SinglePhotoUpload";
 import { OptionChips } from "@/components/studio/OptionChips";
 import {
   replaceJewellery,
@@ -22,7 +22,6 @@ import {
   type ReplacementSize,
 } from "@/lib/api";
 import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
-import { useLibraryPicker } from "@/lib/library";
 import { useGenerationWorkspace, type RefineRequest } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -80,10 +79,9 @@ export default function ReplacementPage() {
   const [model, setModel] = useState<CleaningModelId>(DEFAULT_CLEANING_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   const [dropTarget, setDropTarget] = useState<Slot | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
   /** Which box the file picker — or the library — is filling. */
   const pickingFor = useRef<Slot>("photo");
-  const library = useLibraryPicker(fileInput);
+  const picker = usePhotoPicker((file) => void place(pickingFor.current, file));
 
   const kind = CATEGORIES.find((entry) => entry.id === category)!;
   const sizeValue = size === "described" ? null : size;
@@ -160,7 +158,7 @@ export default function ReplacementPage() {
 
   function pick(slot: Slot) {
     pickingFor.current = slot;
-    library.show();
+    picker.show();
   }
 
   const busy = workspace.isGenerating;
@@ -237,22 +235,7 @@ export default function ReplacementPage() {
 
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
         <div className="mx-auto max-w-3xl space-y-6">
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(event) => {
-              void place(pickingFor.current, event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <LibraryPicker
-            open={library.open}
-            onClose={library.close}
-            onFiles={(files) => void place(pickingFor.current, files[0])}
-            room={1}
-          />
+          {picker.inputs}
 
           <section className="space-y-2">
             <h2 className="text-[10px] font-semibold uppercase tracking-wider text-faint">Jewellery</h2>

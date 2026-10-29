@@ -8,6 +8,7 @@ import { urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
+import { failureMessage } from "@/lib/useSettledJob";
 
 /**
  * Everything a generate-then-refine tool does that isn't its own input form.
@@ -79,8 +80,7 @@ export function useGenerationWorkspace({
 
   const conversationId = useRef<string | null>(null);
   const parentGenerationId = useRef<string | null>(null);
-  const pendingJobId = useRef<string | null>(null);
-  const pendingKind = useRef<"generate" | "refine" | null>(null);
+  const pendingJob = useRef<{ id: string; kind: "generate" | "refine" } | null>(null);
 
   // Held in a ref so a caller passing an inline arrow doesn't re-run the
   // resume effect — and re-fetch the conversation — on every render. Kept
@@ -150,11 +150,11 @@ export function useGenerationWorkspace({
   const [deliveredCount, setDeliveredCount] = useState(0);
   /** Settles this page's one in-flight job once the queue reports it finished. */
   useEffect(() => {
-    const jobId = pendingJobId.current;
-    const kind = pendingKind.current;
-    if (!jobId || !kind) return;
+    const pending = pendingJob.current;
+    if (!pending) return;
+    const { kind } = pending;
 
-    const job = queueJobs.find((entry) => entry.id === jobId);
+    const job = queueJobs.find((entry) => entry.id === pending.id);
     if (!job) return;
 
     if (job.status === "running") {
@@ -163,8 +163,7 @@ export function useGenerationWorkspace({
     }
 
     if (job.status === "completed" && job.result) {
-      pendingJobId.current = null;
-      pendingKind.current = null;
+      pendingJob.current = null;
 
       const { outputUrl, outputUrls, conversationId: cid, generationId, intentLabel, views } = job.result;
       const urls = outputUrls?.length ? outputUrls : outputUrl ? [outputUrl] : [];
@@ -199,9 +198,8 @@ export function useGenerationWorkspace({
         },
       ]);
     } else if (job.status === "failed" || job.status === "cancelled") {
-      pendingJobId.current = null;
-      pendingKind.current = null;
-      const message = job.error?.message || (job.status === "cancelled" ? "Cancelled" : "The model returned no image");
+      pendingJob.current = null;
+      const message = failureMessage(job, "The model returned no image");
 
       if (kind === "generate") {
         setStatus("failed");
@@ -261,8 +259,7 @@ export function useGenerationWorkspace({
 
       const result = await send();
       if (result.status === "queued" && result.job) {
-        pendingJobId.current = result.job.id;
-        pendingKind.current = "generate";
+        pendingJob.current = { id: result.job.id, kind: "generate" };
         track(result.job);
       } else if (creditGuard(result)) {
         // Refused on price, so nothing was queued and nothing was charged. The
@@ -347,8 +344,7 @@ export function useGenerationWorkspace({
       });
 
       if (result.status === "queued" && result.job) {
-        pendingJobId.current = result.job.id;
-        pendingKind.current = "refine";
+        pendingJob.current = { id: result.job.id, kind: "refine" };
         track(result.job);
       } else if (creditGuard(result)) {
         // The dialog carries the explanation, so the thread doesn't also need a
@@ -388,8 +384,7 @@ export function useGenerationWorkspace({
     attach.reset();
     conversationId.current = null;
     parentGenerationId.current = null;
-    pendingJobId.current = null;
-    pendingKind.current = null;
+    pendingJob.current = null;
   }, [attach]);
 
   const retry = useCallback((msg: ChatMsg) => {

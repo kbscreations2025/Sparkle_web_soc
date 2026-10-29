@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 export type Tool = "select" | "pen" | "eraser" | ShapeKind | "text";
 
-export const TOOLS: { id: Tool; label: string; icon: typeof Pencil }[] = [
+const TOOLS: { id: Tool; label: string; icon: typeof Pencil }[] = [
   { id: "select", label: "Select — move and resize shapes", icon: MousePointer2 },
   { id: "pen", label: "Pen", icon: Pencil },
   { id: "eraser", label: "Eraser", icon: Eraser },
@@ -47,7 +47,7 @@ export const isShapeTool = (tool: Tool): tool is ShapeKind => SHAPE_TOOLS.includ
  * both counts — its midpoint drew a hairline, and rounding to whole pixels and
  * back nudged the handle a step each time.
  */
-export const WIDTHS = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48] as const;
+const WIDTHS = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48] as const;
 
 /** The stop a width sits at — the nearest one, for a width set from elsewhere. */
 function widthToStop(width: number) {
@@ -180,6 +180,16 @@ export function DrawingToolbar({
       <X size={14} />
     </ToolbarAction>
   );
+  const undoRedoButtons = (
+    <>
+      <ToolbarAction label="Undo" onClick={onUndo} disabled={!canUndo}>
+        <Undo2 size={14} />
+      </ToolbarAction>
+      <ToolbarAction label="Redo" onClick={onRedo} disabled={!canRedo}>
+        <Redo2 size={14} />
+      </ToolbarAction>
+    </>
+  );
 
   if (collapsed) {
     // The active tool stands in for the whole row: it shows what a stroke
@@ -211,12 +221,7 @@ export function DrawingToolbar({
         {/* Undo and redo stay out while drawing — they are the two most
             used controls after a stroke, and opening the full toolbar for
             them would defeat folding it away. */}
-        <ToolbarAction label="Undo" onClick={onUndo} disabled={!canUndo}>
-          <Undo2 size={14} />
-        </ToolbarAction>
-        <ToolbarAction label="Redo" onClick={onRedo} disabled={!canRedo}>
-          <Redo2 size={14} />
-        </ToolbarAction>
+        {undoRedoButtons}
         {confirmButton}
         {closeButton}
       </div>
@@ -257,12 +262,7 @@ export function DrawingToolbar({
 
         <Divider />
 
-        <ToolbarAction label="Undo" onClick={onUndo} disabled={!canUndo}>
-          <Undo2 size={14} />
-        </ToolbarAction>
-        <ToolbarAction label="Redo" onClick={onRedo} disabled={!canRedo}>
-          <Redo2 size={14} />
-        </ToolbarAction>
+        {undoRedoButtons}
         <ToolbarAction label={deleteLabel} onClick={onDelete}>
           <Trash2 size={14} />
         </ToolbarAction>

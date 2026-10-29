@@ -75,14 +75,14 @@ function exposedError(message, code) {
   return err;
 }
 
+/** Encoded image bytes, upright and flattened onto white, in sRGB — the photo and the answer are both read this way. */
+function srgbPipeline(base64) {
+  return sharp(Buffer.from(base64, "base64"), { failOn: "none" }).rotate().flatten({ background: "#ffffff" }).toColourspace("srgb");
+}
+
 /** A `{ base64 }` image as raw sRGB pixels: what every later step reads, and what the result is made of. */
 async function decodeImage({ mimeType, base64 }) {
-  const { data, info } = await sharp(Buffer.from(base64, "base64"), { failOn: "none" })
-    .rotate()
-    .flatten({ background: "#ffffff" })
-    .toColourspace("srgb")
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const { data, info } = await srgbPipeline(base64).raw().toBuffer({ resolveWithObject: true });
   if (info.channels !== 3) throw new Error(`expected an RGB image, got ${info.channels} channels`);
   return { data, width: info.width, height: info.height, mimeType };
 }
@@ -529,17 +529,14 @@ async function compositeIntoPhoto({ photo, frame, answer, oldMask, outline }) {
   // The answer, back in the frame it was asked for, at the photo's own scale.
   const answerWidth = Math.round((frame.width * width) / frame.innerWidth);
   const answerHeight = Math.round((frame.height * height) / frame.innerHeight);
-  const answerData = await sharp(Buffer.from(answer.base64, "base64"), { failOn: "none" })
-    .rotate()
-    .flatten({ background: "#ffffff" })
-    .toColourspace("srgb")
-    .resize(answerWidth, answerHeight, { fit: "fill" })
-    .raw()
-    .toBuffer();
+  const answerData = await srgbPipeline(answer.base64).resize(answerWidth, answerHeight, { fit: "fill" }).raw().toBuffer();
   const answerImage = { data: answerData, width: answerWidth, height: answerHeight };
 
+  // The old piece's outline at the photo's size, resized once: it is also where
+  // the changed area starts below, grown in place once the alignment is done.
+  let changed = await maskAt(oldMask, width, height);
   // The old piece and its surroundings are where the photo and the answer are meant to differ.
-  const oldArea = await blur1(await maskAt(oldMask, width, height), width, height, grow / 2, 5);
+  const oldArea = await blur1(changed, width, height, grow / 2, 5);
 
   const { params, score } = await align({ photo, answer: answerImage, frame, exclude: oldArea });
   if (score < MIN_MATCH) {
@@ -556,7 +553,6 @@ async function compositeIntoPhoto({ photo, frame, answer, oldMask, outline }) {
     .toBuffer();
   const newMask = await outline(aligned).catch(() => null);
 
-  let changed = Buffer.from(await maskAt(oldMask, width, height));
   let outlinedNew = false;
   if (newMask) {
     const added = await maskAt(newMask, width, height);

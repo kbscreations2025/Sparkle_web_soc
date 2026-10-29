@@ -80,7 +80,7 @@ module.exports = {
     /**
      * How many times a job is retried before it is marked failed for good.
      * This is the outer loop: each attempt already retries transient errors on
-     * one key and fails over across the tenant's other keys (see gemini.js).
+     * one key and fails over across the tenant's other keys (see aiRouting.js).
      */
     attempts: Number(process.env.JOB_ATTEMPTS || 2),
     /**
@@ -92,7 +92,7 @@ module.exports = {
     lockDurationMs: Number(process.env.JOB_LOCK_DURATION_MS || 300_000),
     /**
      * The same rule as `lockDurationMs`, against a much slower job: Veo is
-     * polled for up to ten minutes (see gemini.js), and the upload of a
+     * polled for up to ten minutes (see providers/shared.js), and the upload of a
      * multi-megabyte clip follows that. Set below it and a healthy video
      * generation is handed to a second worker and produced — and billed —
      * twice.

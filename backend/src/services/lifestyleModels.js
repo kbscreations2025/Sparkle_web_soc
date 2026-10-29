@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 const LifestyleModel = require("../models/lifestyleModel");
-const { buildLibraryKey, variantKeyFor, uploadObject, publicUrlFor } = require("../storage/r2");
-const { createThumbnail, THUMB_EXTENSION } = require("../storage/thumbnail");
+const { uploadLibraryImage } = require("../storage/libraryImage");
 const { parseDataUri } = require("../generationService");
 const { hasPermission } = require("../permissions");
 
@@ -13,12 +12,6 @@ const { hasPermission } = require("../permissions");
  * is *generating* a model, which does go through the queue (see
  * jobs/lifestyle.js) and lands here afterwards.
  */
-
-const EXTENSION_BY_MIME = { "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
-
-function extensionFor(mimeType) {
-  return EXTENSION_BY_MIME[mimeType] || "jpg";
-}
 
 /**
  * Whose models this person may pick from, besides the shared ones: their
@@ -93,29 +86,17 @@ async function createModel({ dbUser, name, attrs = {}, notes = null, imageDataUr
     throw err;
   }
 
-  const buffer = Buffer.from(image.base64, "base64");
   const id = new mongoose.Types.ObjectId();
-  const key = buildLibraryKey({
+  // The thumbnail is best-effort, exactly as for a generated asset: a picker
+  // that falls back to the full-size photo is slower, not broken.
+  const stored = await uploadLibraryImage({
     tenantId: dbUser.tenantId,
     userId: dbUser._id,
     collection: "lifestyle-models",
     id,
-    extension: extensionFor(image.mimeType),
+    image,
+    logTag: "lifestyle-models",
   });
-
-  await uploadObject(key, buffer, image.mimeType);
-
-  // Best-effort, exactly as for a generated asset: a picker that falls back
-  // to the full-size photo is slower, not broken.
-  let thumbnailUrl = null;
-  try {
-    const thumb = await createThumbnail(buffer);
-    const thumbKey = variantKeyFor(key, "thumb", THUMB_EXTENSION);
-    await uploadObject(thumbKey, thumb.buffer, thumb.mimeType);
-    thumbnailUrl = publicUrlFor(thumbKey);
-  } catch (err) {
-    console.error(`[lifestyle-models] could not build a thumbnail for ${key}:`, err.message);
-  }
 
   const row = await LifestyleModel.create({
     _id: id,
@@ -125,9 +106,9 @@ async function createModel({ dbUser, name, attrs = {}, notes = null, imageDataUr
     name: (name || "").trim() || defaultName(attrs),
     attrs,
     notes: notes?.trim() || null,
-    imageUrl: publicUrlFor(key),
-    thumbnailUrl,
-    r2Key: key,
+    imageUrl: stored.url,
+    thumbnailUrl: stored.thumbnail?.url ?? null,
+    r2Key: stored.key,
   });
 
   return toPublicModel(row, dbUser);
@@ -212,5 +193,4 @@ module.exports = {
   setModelPublic,
   deleteModel,
   findUsableModel,
-  toPublicModel,
 };

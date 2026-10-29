@@ -357,9 +357,12 @@ function readDetails(
   return { fields, components, stones, minWeight: null, chargingWeight: null, remarks };
 }
 
+/** Whether a file name is a workbook — the only kind of sheet whose fields can be read here. */
+export const isWorkbook = (name: string) => /\.(xlsx|xlsm|xls|csv)$/i.test(name);
+
 /** Reads one workbook's fields; null for anything that isn't one or can't be read. */
 export async function readSheetFields(file: File, settingCodes?: Record<string, string>): Promise<SheetFields | null> {
-  if (!/\.(xlsx|xlsm|xls|csv)$/i.test(file.name)) return null;
+  if (!isWorkbook(file.name)) return null;
   try {
     const xlsx = await import("xlsx");
     return fieldsFromWorkbook(xlsx, xlsx.read(await file.arrayBuffer(), { type: "array" }), settingCodes);

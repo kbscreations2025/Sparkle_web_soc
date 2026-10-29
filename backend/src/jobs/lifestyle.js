@@ -1,8 +1,8 @@
 const { registerJobHandler } = require("./registry");
 const { runGenerationJob } = require("./generationRunner");
-const { resolveProviderModel, routeProviderCall, loadTenantOrThrow } = require("../aiRouting");
+const { loadJobActor } = require("./actor");
+const { resolveProviderModel, routeProviderCall } = require("../aiRouting");
 const { createLivePreview } = require("../storage/thumbnail");
-const { loadPreset } = require("../services/lifestylePresets");
 const { createModel } = require("../services/lifestyleModels");
 const { logAudit } = require("../auditLog");
 const { matchColour, wantsColourChange } = require("../services/colorMatch");
@@ -12,7 +12,6 @@ const {
   buildLifestyleRefinePrompt,
   buildLifestyleModelPrompt,
 } = require("../prompts/lifestyle");
-const User = require("../models/user");
 
 const LIFESTYLE_JOB = "lifestyle.generate";
 const LIFESTYLE_MODEL_JOB = "lifestyle.model";
@@ -55,10 +54,7 @@ registerJobHandler(LIFESTYLE_JOB, (context) =>
  * in the results feed as though it were work someone asked for.
  */
 registerJobHandler(LIFESTYLE_MODEL_JOB, async ({ job, data, setProgress, withProgress }) => {
-  const dbUser = await User.findById(job.userId);
-  if (!dbUser) throw new Error("the user who queued this job no longer exists");
-
-  const tenant = await loadTenantOrThrow(dbUser);
+  const { dbUser, tenant } = await loadJobActor(job);
   const { provider, model, modelLabel, quality } = resolveProviderModel(
     data.requestedModel,
     data.requestedQuality

@@ -2,8 +2,9 @@ const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri } = require("../generationService");
-const { queueGeneration, parseImages, MAX_REFERENCE_PHOTOS } = require("./queueGeneration");
-const { TEXT_TO_IMAGE_JOB, MAX_IMAGE_COUNT, DEFAULT_IMAGE_COUNT } = require("../jobs/textToImage");
+const { queueGeneration, parseImages, refinementPayload, MAX_REFERENCE_PHOTOS } = require("./queueGeneration");
+const { TEXT_TO_IMAGE_JOB } = require("../jobs/textToImage");
+const { clampCount } = require("../jobs/generationRunner");
 const { readTrendCues } = require("../services/trends");
 
 const router = express.Router();
@@ -29,13 +30,10 @@ router.post("/", async (req, res) => {
     model: requestedModel,
     quality: requestedQuality,
     refineImage,
-    referenceImages,
     referenceImage,
     instruction,
-    displayPrompt,
     preview,
     conversationId,
-    parentGenerationId,
     trends,
     designVariations,
   } = req.body || {};
@@ -47,7 +45,7 @@ router.post("/", async (req, res) => {
     if (!parsedImage) {
       return res.status(400).json({ status: "error", message: "refine image must be a data URI", code: "invalid" });
     }
-    const parsedReferences = parseImages(referenceImages);
+    const refinement = refinementPayload(req.body, parsedImage);
 
     return queueGeneration(req, res, {
       type: TEXT_TO_IMAGE_JOB,
@@ -60,20 +58,10 @@ router.post("/", async (req, res) => {
         quality,
         isRefinement: true,
         instruction,
-        referenceCount: parsedReferences.length,
+        referenceCount: refinement.references.length,
         conversationId: conversationId || null,
       },
-      payload: {
-        isRefinement: true,
-        refineImage: parsedImage,
-        references: parsedReferences,
-        instruction,
-        displayPrompt,
-        requestedModel,
-        requestedQuality,
-        conversationId,
-        parentGenerationId,
-      },
+      payload: refinement,
       message: `queued a text-to-image refinement on ${modelLabel}`,
     });
   }
@@ -85,7 +73,7 @@ router.post("/", async (req, res) => {
   }
 
   const description = String(prompt || "").trim();
-  const numImages = Math.max(1, Math.min(MAX_IMAGE_COUNT, Math.round(Number(count)) || DEFAULT_IMAGE_COUNT));
+  const numImages = clampCount(count);
 
   return queueGeneration(req, res, {
     type: TEXT_TO_IMAGE_JOB,

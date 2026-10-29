@@ -47,6 +47,12 @@ function parseList(text) {
   }
 }
 
+/** An entry's `box_2d` as four finite numbers (y0, x0, y1, x1 in 0–1000), or null. */
+function boxOf(item) {
+  const box = Array.isArray(item?.box_2d) ? item.box_2d.map(Number) : null;
+  return box && box.length === 4 && box.every((v) => Number.isFinite(v)) ? box : null;
+}
+
 /**
  * One answer → a full-frame mask at the sent copy's size, or null when the
  * answer has nothing usable in it.
@@ -55,9 +61,9 @@ async function toFrameMask(list, width, height) {
   const frame = Buffer.alloc(width * height);
   let used = 0;
   for (const item of list) {
-    const box = Array.isArray(item?.box_2d) ? item.box_2d.map(Number) : null;
+    const box = boxOf(item);
     const encoded = typeof item?.mask === "string" ? item.mask : "";
-    if (!box || box.length !== 4 || box.some((v) => !Number.isFinite(v)) || !encoded.includes("base64,")) continue;
+    if (!box || !encoded.includes("base64,")) continue;
 
     const [y0, x0, y1, x1] = box;
     const left = Math.max(0, Math.round((x0 / 1000) * width));
@@ -101,8 +107,8 @@ function toBoxMask(list, width, height) {
   const frame = Buffer.alloc(width * height);
   let used = 0;
   for (const item of list) {
-    const box = Array.isArray(item?.box_2d) ? item.box_2d.map(Number) : null;
-    if (!box || box.length !== 4 || box.some((v) => !Number.isFinite(v))) continue;
+    const box = boxOf(item);
+    if (!box) continue;
     const [y0, x0, y1, x1] = box;
     const left = Math.max(0, Math.round((x0 / 1000) * width));
     const top = Math.max(0, Math.round((y0 / 1000) * height));

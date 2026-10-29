@@ -691,7 +691,6 @@ const SECTIONS: { title: string; fields: string[] }[] = [
   { title: "Outfit", fields: ["outfit"] },
 ];
 
-
 /**
  * Describe a person, get a model.
  *
@@ -775,9 +774,9 @@ function ModelBuilder({
               const attr = ATTRS_BY_KEY[key];
               if (!attr) return null;
               const chosen = picks[key] ?? [];
-              // The wardrobe follows gender — see `outfitsFor`.
-              const options = key === "outfit" ? outfitsFor(picks.gender) : attr.options;
               const isOutfit = key === "outfit";
+              // The wardrobe follows gender — see `outfitsFor`.
+              const options = isOutfit ? outfitsFor(picks.gender) : attr.options;
 
               return (
                 <div key={key} className={cn("space-y-2", isOutfit && "sm:col-span-2")}>

@@ -12,14 +12,11 @@ import type { UploadItem } from "@/components/studio/UploadZone";
  * megabytes and these travel to the server as base64 inside a JSON body.
  *
  * Rejects on the first unreadable file rather than silently dropping it, so
- * a caller can tell the user why nothing appeared. `limit` caps how many are
- * taken, for the tools that accept a bounded number of pieces.
+ * a caller can tell the user why nothing appeared.
  */
-export async function filesToUploadItems(files: File[], limit?: number): Promise<UploadItem[]> {
-  const accepted = typeof limit === "number" ? files.slice(0, Math.max(0, limit)) : files;
-
+export async function filesToUploadItems(files: File[]): Promise<UploadItem[]> {
   return Promise.all(
-    accepted.map(async (file) => ({
+    files.map(async (file) => ({
       id: crypto.randomUUID(),
       name: file.name,
       dataUrl: await compressImage(file),

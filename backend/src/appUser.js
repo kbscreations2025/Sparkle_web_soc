@@ -92,4 +92,4 @@ async function resolveAppUser(central, profile) {
   return resolved;
 }
 
-module.exports = { resolveAppUser, toSessionUser };
+module.exports = { resolveAppUser };

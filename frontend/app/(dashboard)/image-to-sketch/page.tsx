@@ -1,16 +1,16 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useStoredImageCount } from "@/lib/useStoredImageCount";
 import Image from "next/image";
-import { Maximize2, PenLine, Upload, X } from "lucide-react";
+import { Maximize2, PenLine, X } from "lucide-react";
 import { ImageCountSelector } from "@/components/studio/ImageCountSelector";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { OptionChips } from "@/components/studio/OptionChips";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
-import { LibraryPicker } from "@/components/studio/LibraryPicker";
+import { SinglePhotoUpload } from "@/components/studio/SinglePhotoUpload";
 import {
   imageToSketch,
   refineOn,
@@ -26,13 +26,11 @@ import {
   type SketchStyleId,
 } from "@/lib/jewelryConfigurator";
 import { compressImage, makeThumbnail } from "@/lib/image";
-import { useLibraryPicker } from "@/lib/library";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
-import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.image_to_sketch.run";
 const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
@@ -54,11 +52,7 @@ export default function ImageToSketchPage() {
   const [quality, setQuality] = useModelQuality(model);
   // Shared with the other photo tools — see useStoredImageCount.
   const [count, setCount] = useStoredImageCount("photo", PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT);
-  const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  // A cleaned result can be sketched without saving it to disk first.
-  const library = useLibraryPicker(fileInput);
 
   const workspace = useGenerationWorkspace({
     tool: "image_to_sketch",
@@ -113,18 +107,6 @@ export default function ImageToSketchPage() {
 
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
         <div className="mx-auto max-w-3xl space-y-6">
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(event) => {
-              accept(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <LibraryPicker open={library.open} onClose={library.close} onFiles={(files) => accept(files[0])} room={1} />
-
           {photo ? (
             <div className="relative inline-block overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
               {/* The photo the sketch follows — open it to look closely, or to
@@ -150,30 +132,8 @@ export default function ImageToSketchPage() {
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={library.show}
-              onDragOver={(event) => {
-                event.preventDefault();
-                setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragging(false);
-                accept(event.dataTransfer.files?.[0]);
-              }}
-              className={cn(
-                "flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-12 transition-colors",
-                dragging ? "border-gold/40 bg-gold/[0.06]" : "border-white/[0.12] bg-white/[0.02] hover:border-white/25"
-              )}
-            >
-              <Upload size={20} className="text-faint" />
-              <p className="text-sm font-medium text-cream">
-                {library.available ? "Drop a photo here, or click to upload or pick from your library" : "Drop a photo here, or click to choose"}
-              </p>
-              <p className="text-[11px] text-faint">The sketch follows this piece exactly — design, stones and angle.</p>
-            </button>
+            // A cleaned result can be sketched without saving it to disk first.
+            <SinglePhotoUpload hint="The sketch follows this piece exactly — design, stones and angle." onFile={accept} />
           )}
 
           <OptionChips label="Sketch Style" options={SKETCH_STYLES} value={style} onChange={setStyle} />

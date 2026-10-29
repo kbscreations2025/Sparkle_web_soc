@@ -9,7 +9,7 @@ import { compressImage } from "@/lib/image";
 import { useLibraryPicker } from "@/lib/library";
 
 /** Reference photos per run — several views of a piece, or pieces to combine. */
-export const MAX_REFERENCE_PHOTOS = 4;
+const MAX_REFERENCE_PHOTOS = 4;
 
 /**
  * The optional "start from photos" field the generate-from-text tools share

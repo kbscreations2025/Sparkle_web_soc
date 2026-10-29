@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ClipboardEvent } from "react";
+import { useRef } from "react";
 import { ImagePlus, Send, Loader2 } from "lucide-react";
 import { AttachmentChips, type Attachment } from "./AttachmentChips";
 import { SpellCheckedTextarea } from "./SpellCheckedTextarea";
@@ -68,16 +68,6 @@ export function ChatInputBar<TModel extends string>({
 
   const canSend = (value.trim() !== "" || attachments.length > 0) && !busy;
 
-  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const imageItem = [...event.clipboardData.items].find((item) => item.type.startsWith("image/"));
-    if (!imageItem) return; // let normal text paste through
-    const file = imageItem.getAsFile();
-    if (file) {
-      event.preventDefault();
-      onPasteImage(file);
-    }
-  }
-
   return (
     <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] transition-colors focus-within:border-gold/30">
       <AttachmentChips attachments={attachments} onOpen={onOpenAttachment} onRemove={onRemoveAttachment} />
@@ -85,7 +75,7 @@ export function ChatInputBar<TModel extends string>({
       <SpellCheckedTextarea
         value={value}
         onChange={onChange}
-        onPaste={handlePaste}
+        onPasteImage={onPasteImage}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();

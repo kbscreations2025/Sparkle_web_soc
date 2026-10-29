@@ -3,12 +3,12 @@ const express = require("express");
 const { Readable } = require("stream");
 const config = require("../config");
 const { requireAuth, requirePermission } = require("../middleware/auth");
-const { hasPermission } = require("../permissions");
+const { hasPermission, reachFilter } = require("../permissions");
 const Generation = require("../models/generation");
 const Asset = require("../models/asset");
 const { GENERATION_TOOLS, toPublicAsset } = require("../generations");
 const { deleteObject } = require("../storage/r2");
-const { logAudit, actorFrom, requestMeta } = require("../auditLog");
+const { logRequestAudit } = require("../auditLog");
 const { emitToTenant } = require("../socket");
 
 const router = express.Router();
@@ -63,6 +63,33 @@ function safeFilename(name, fallback) {
   return cleaned || fallback;
 }
 
+const notFound = (res) => res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+const loadFailed = (res) => res.status(502).json({ status: "error", message: "could not load image", code: "fetch_failed" });
+
+/**
+ * Fetches a caller-supplied url for the two routes below, but only one in
+ * this app's own bucket — see `isOwnPublicUrl`. Answers for them and returns
+ * null when the url isn't ours (400) or the bucket can't serve it (502).
+ */
+async function fetchOwnImage(res, url, label) {
+  if (!isOwnPublicUrl(url)) {
+    res.status(400).json({ status: "error", message: "invalid url", code: "invalid" });
+    return null;
+  }
+
+  let upstream;
+  try {
+    upstream = await fetch(url);
+  } catch (err) {
+    console.error(`${label}: could not reach R2:`, err.message);
+  }
+  if (!upstream?.ok) {
+    loadFailed(res);
+    return null;
+  }
+  return upstream;
+}
+
 /**
  * Streams one stored image back as a file attachment.
  *
@@ -85,21 +112,9 @@ function safeFilename(name, fallback) {
  * needless way to run a small instance out of heap.
  */
 router.get("/download", requireAuth, async (req, res) => {
-  const { url } = req.query;
-  if (!isOwnPublicUrl(url)) {
-    return res.status(400).json({ status: "error", message: "invalid url", code: "invalid" });
-  }
-
-  let upstream;
-  try {
-    upstream = await fetch(url);
-  } catch (err) {
-    console.error("download: could not reach R2:", err.message);
-    return res.status(502).json({ status: "error", message: "could not load image", code: "fetch_failed" });
-  }
-  if (!upstream.ok || !upstream.body) {
-    return res.status(502).json({ status: "error", message: "could not load image", code: "fetch_failed" });
-  }
+  const upstream = await fetchOwnImage(res, req.query.url, "download");
+  if (!upstream) return;
+  if (!upstream.body) return loadFailed(res);
 
   const filename = safeFilename(req.query.filename, "sparkle-image.jpg");
   res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/octet-stream");
@@ -135,48 +150,17 @@ const MAX_LIMIT = 60;
  * signed-in user make this server request an arbitrary URL.
  */
 router.get("/image-data", async (req, res) => {
-  const { url } = req.query;
-  if (!isOwnPublicUrl(url)) {
-    return res.status(400).json({ status: "error", message: "invalid url", code: "invalid" });
-  }
-
-  let upstream;
-  try {
-    upstream = await fetch(url);
-  } catch (err) {
-    console.error("image-data: could not reach R2:", err.message);
-    return res.status(502).json({ status: "error", message: "could not load image", code: "fetch_failed" });
-  }
-  if (!upstream.ok) {
-    return res.status(502).json({ status: "error", message: "could not load image", code: "fetch_failed" });
-  }
+  const upstream = await fetchOwnImage(res, req.query.url, "image-data");
+  if (!upstream) return;
 
   const buffer = Buffer.from(await upstream.arrayBuffer());
   const mimeType = upstream.headers.get("content-type") || "image/jpeg";
   res.json({ status: "success", dataUri: `data:${mimeType};base64,${buffer.toString("base64")}` });
 });
 
-/**
- * Own work only, unless the caller both holds `result.read.others` and asks
- * for `scope=team` — the permission decides *whether* a "Whole team" toggle
- * can do anything, `dataScope` decides how far it reaches once it's flipped.
- */
+/** The finished runs within the caller's reach — see `reachFilter`. */
 function buildScopeFilter(dbUser, wantsTeam) {
-  const filter = { tenantId: dbUser.tenantId, status: "completed", deletedAt: null };
-  if (!wantsTeam || !hasPermission(dbUser, "result.read.others")) {
-    filter.userId = dbUser._id;
-    return filter;
-  }
-
-  const scope = dbUser.dataScope || { kind: "own" };
-  if (scope.kind === "selected") {
-    filter.userId = { $in: [dbUser._id, ...(scope.userIds || [])] };
-  } else if (scope.kind === "own") {
-    filter.userId = dbUser._id;
-  }
-  // kind === "organization" adds no userId clause — the whole tenant is in reach.
-  if (scope.notBefore) filter.createdAt = { $gte: scope.notBefore };
-  return filter;
+  return { ...reachFilter(dbUser, wantsTeam), status: "completed" };
 }
 
 /**
@@ -348,11 +332,9 @@ router.get("/", async (req, res) => {
  * grid opens, anything else is a 404.
  */
 router.get("/item/:id", async (req, res) => {
-  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-    return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
-  }
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) return notFound(res);
   const generation = await Generation.findOne({ ...buildScopeFilter(req.dbUser, true), _id: req.params.id }).lean();
-  if (!generation) return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+  if (!generation) return notFound(res);
   res.json({ status: "success", item: toHistoryItem(generation, req.dbUser) });
 });
 
@@ -440,7 +422,7 @@ router.get("/conversations/:id", async (req, res) => {
     .lean();
 
   if (generations.length === 0) {
-    return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+    return notFound(res);
   }
   const owner = generations[0];
   const isOwn = String(owner.userId) === String(req.dbUser._id);
@@ -458,9 +440,7 @@ router.get("/conversations/:id", async (req, res) => {
       if (!inScope) return forbidden();
     }
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: req.dbUser.tenantId,
       action: "conversation.viewed",
       status: "success",
@@ -535,7 +515,7 @@ router.delete("/:id", async (req, res) => {
      * than returning null), and it means the same thing as no match.
      */
     if (err.name === "CastError") {
-      return res.status(404).json({ status: "error", message: "not found", code: "not_found" });
+      return notFound(res);
     }
     console.error(`history delete: ${req.params.id} failed:`, err);
     return res.status(500).json({ status: "error", message: "Could not delete that result", code: "delete_failed" });
@@ -550,8 +530,6 @@ router.delete("/:id", async (req, res) => {
  * exists is not something to confirm to a caller who may not touch it.
  */
 async function deleteGeneration(req, res) {
-  const notFound = () => res.status(404).json({ status: "error", message: "not found", code: "not_found" });
-
   const own = await Generation.findOne({
     _id: req.params.id,
     tenantId: req.dbUser.tenantId,
@@ -561,14 +539,14 @@ async function deleteGeneration(req, res) {
 
   let generation = own;
   if (!generation) {
-    if (!req.isSuperAdmin && !hasPermission(req.dbUser, "org.results.delete")) return notFound();
+    if (!req.isSuperAdmin && !hasPermission(req.dbUser, "org.results.delete")) return notFound(res);
     generation = await Generation.findOne(
       req.isSuperAdmin
         ? { _id: req.params.id, tenantId: req.dbUser.tenantId, deletedAt: null }
         : { ...buildScopeFilter(req.dbUser, true), _id: req.params.id }
     );
   }
-  if (!generation) return notFound();
+  if (!generation) return notFound(res);
 
   // Optional all the way down: a row that never got as far as recording its
   // assets is exactly the kind of row a user wants to clear out, so it must
@@ -604,9 +582,7 @@ async function deleteGeneration(req, res) {
   // Removing a colleague's work is the kind of thing someone later asks
   // "who did this" about. Clearing out your own is just housekeeping.
   if (!own) {
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: req.dbUser.tenantId,
       action: "generation.deleted",
       status: "success",
@@ -626,6 +602,3 @@ async function deleteGeneration(req, res) {
 }
 
 module.exports = router;
-// The upload boxes' library (routes/library.js) reaches exactly as far as
-// History does — one filter, so the two can never disagree about who sees what.
-module.exports.buildScopeFilter = buildScopeFilter;

@@ -163,4 +163,3 @@ creditPricingRuleSchema.statics.findApplicable = async function findApplicable({
 module.exports = mongoose.model("CreditPricingRule", creditPricingRuleSchema);
 module.exports.PRICING_UNITS = PRICING_UNITS;
 module.exports.PRICING_CURRENCIES = PRICING_CURRENCIES;
-module.exports.SPECIFICITY_WEIGHTS = SPECIFICITY_WEIGHTS;

@@ -18,7 +18,7 @@ export const DECK = {
 } as const;
 
 /** 3 columns × 2 rows — matches how the PPTX lays a slide out. */
-export const PER_SLIDE = 6;
+const PER_SLIDE = 6;
 
 /** One piece being assembled: its hero photo, and its own production sheet. */
 export type AffinityPiece = {
@@ -108,24 +108,4 @@ export function toSlides(entries: DeckEntry[]) {
 export function sourceCodeFallback(entry: DeckEntry, section: "existing" | "ideation") {
   if (section === "existing") return `Style ${entry.index + 1}`;
   return `${entry.piece?.designerInitial || "R"}-${entry.index + 1}`;
-}
-
-/**
- * Where a card starts before anyone drags it. After a drag the item's own
- * `width`/`height` take over, free of any step.
- */
-export const DEFAULT_CARD_SIZE = {
-  sm: { w: 170, h: 170 },
-  md: { w: 190, h: 340 },
-  lg: { w: 360, h: 340 },
-} as const;
-
-export const CARD_MIN = 90;
-export const CARD_MAX = 620;
-
-export function clampCard(width: number, height: number) {
-  return {
-    w: Math.min(CARD_MAX, Math.max(CARD_MIN, width)),
-    h: Math.min(CARD_MAX, Math.max(CARD_MIN, height)),
-  };
 }

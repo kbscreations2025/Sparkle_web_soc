@@ -27,4 +27,4 @@ function isCentralSuperAdmin(centralUser) {
   return centralUser?.role === SUPER_ADMIN;
 }
 
-module.exports = { isCentralSuperAdmin, SUPER_ADMIN };
+module.exports = { isCentralSuperAdmin };

@@ -1,7 +1,7 @@
 /**
  * Which OpenRouter model id serves the same model as a native Gemini/OpenAI
  * id, so an OpenRouter key can stand in when that provider's own keys are
- * missing or exhausted — see aiRouting.js's `imageCandidatesFor`.
+ * missing or exhausted — see aiRouting.js's `candidatesFor`.
  *
  * Confirmed against OpenRouter's own Playground export for each model
  * (same way gpt-image-2/1's payload shape was confirmed) rather than

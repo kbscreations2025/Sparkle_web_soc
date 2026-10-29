@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { chapterName, chapterPages, type PageScope } from "@/lib/deckDesign";
 import { cn } from "@/lib/utils";
 import type { EditorApi } from "./DeckEditor";
@@ -21,10 +22,24 @@ export function useScope(api: EditorApi, scope: PageScope) {
   return { effective, reach, hasCategories, name, description };
 }
 
-export function ScopeSwitch({ api, scope, onScope }: { api: EditorApi; scope: PageScope; onScope: (scope: PageScope) => void }) {
+export function ScopeSwitch({
+  api,
+  scope,
+  onScope,
+  className,
+  children,
+}: {
+  api: EditorApi;
+  scope: PageScope;
+  onScope: (scope: PageScope) => void;
+  className?: string;
+  /** Shown above the switch, inside its box — a panel's title. */
+  children?: ReactNode;
+}) {
   const { hasCategories, name, description } = useScope(api, scope);
   return (
-    <div>
+    <div className={className}>
+      {children}
       <div className="grid grid-cols-3 gap-0.5 rounded-md bg-black/5 p-0.5 text-[10px]">
         {(
           [

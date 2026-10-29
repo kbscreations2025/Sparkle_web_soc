@@ -31,8 +31,4 @@ function getJobHandler(type) {
   return handler;
 }
 
-function registeredTypes() {
-  return [...handlers.keys()];
-}
-
-module.exports = { registerJobHandler, getJobHandler, registeredTypes };
+module.exports = { registerJobHandler, getJobHandler };

@@ -249,16 +249,10 @@ function normalizeGrants({ role, permissions, scopeKind }) {
 }
 
 module.exports = {
-  TOOLS,
   TOOL_KEYS,
   normalizeGrants,
   GRANT_GROUPS,
   ALL_GRANTS,
-  ADMIN_ONLY_GRANTS,
-  BASELINE_GRANTS,
   DEFAULT_MEMBER_GRANTS,
-  demoteGrants,
-  withScopeGrant,
-  withBaselineGrants,
   unknownGrants,
 };

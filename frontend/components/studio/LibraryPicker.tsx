@@ -21,6 +21,12 @@ const PAGE_SIZE = 48;
 const MAX_PICK = 20;
 
 const SECTIONS: LibrarySection[] = ["results", "uploads"];
+const SECTION_LABELS: Record<LibrarySection, string> = { uploads: "Uploaded", results: "Generated" };
+
+/** A half's icon, where there is no room for its name. */
+function SectionIcon({ section }: { section: LibrarySection }) {
+  return section === "uploads" ? <Upload size={13} /> : <Sparkles size={13} />;
+}
 
 /**
  * `people` is whose pictures — teammates' user ids, "me" for the viewer.
@@ -134,7 +140,6 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
   const { scope, members: scopeMembers } = scopeOf(view);
   const peopleKey = scopeMembers.join(",");
   const teamView = scope === "team" && canReadTeam;
-  const owner = teamView ? "Team" : "My";
 
   useEscapeKey(onClose);
 
@@ -369,19 +374,14 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
   const isFileDrag = (event: DragEvent) => event.dataTransfer.types.includes("Files");
 
   const full = limit > 1 && selected.length >= limit;
-  const status =
-    adding !== null
-      ? selected.length > 1
-        ? `Adding ${selected.length} photos… ${adding} of ${selected.length} ready`
-        : "Adding photo…"
-      : error ||
-        (selected.length
-          ? full
-            ? `${selected.length} selected — the most this box takes`
-            : `${selected.length} selected`
-          : limit === 1
-            ? "Pick one photo"
-            : `Pick up to ${limit}`);
+  function statusLine() {
+    if (adding !== null) {
+      return selected.length > 1 ? `Adding ${selected.length} photos… ${adding} of ${selected.length} ready` : "Adding photo…";
+    }
+    if (error) return error;
+    if (selected.length) return full ? `${selected.length} selected — the most this box takes` : `${selected.length} selected`;
+    return limit === 1 ? "Pick one photo" : `Pick up to ${limit}`;
+  }
 
   return (
     <div
@@ -451,14 +451,14 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
                   type="button"
                   onClick={() => changeView({ section, tools: [] })}
                   aria-pressed={view.section === section}
-                  aria-label={section === "uploads" ? "Uploaded" : "Generated"}
-                  title={section === "uploads" ? "Uploaded" : "Generated"}
+                  aria-label={SECTION_LABELS[section]}
+                  title={SECTION_LABELS[section]}
                   className={cn(
                     "flex h-7 w-8 items-center justify-center rounded-md transition-colors",
                     view.section === section ? "bg-gold/15 text-gold" : "text-muted hover:text-cream"
                   )}
                 >
-                  {section === "uploads" ? <Upload size={13} /> : <Sparkles size={13} />}
+                  <SectionIcon section={section} />
                 </button>
               ))}
             </div>
@@ -491,21 +491,15 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
                   type="button"
                   role="tab"
                   aria-selected={view.section === section}
-                  aria-label={section === "uploads" ? "Uploaded" : "Generated"}
-                  title={section === "uploads" ? "Uploaded" : "Generated"}
+                  aria-label={SECTION_LABELS[section]}
+                  title={SECTION_LABELS[section]}
                   onClick={() => changeView({ section, tools: [] })}
                   className={cn(
                     "flex min-h-7 items-center justify-center rounded-md text-[11px] font-medium transition-colors",
                     view.section === section ? "bg-gold/15 text-gold" : "text-muted hover:text-cream"
                   )}
                 >
-                  {compactSidebar ? (
-                    section === "uploads" ? <Upload size={13} /> : <Sparkles size={13} />
-                  ) : section === "uploads" ? (
-                    "Uploaded"
-                  ) : (
-                    "Generated"
-                  )}
+                  {compactSidebar ? <SectionIcon section={section} /> : SECTION_LABELS[section]}
                 </button>
               ))}
             </div>
@@ -629,7 +623,7 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
 
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-2 sm:px-5">
           <div className="flex min-w-0 items-center gap-2">
-            <p className={cn("min-w-0 truncate text-[11px]", error ? "text-error" : "text-muted")}>{status}</p>
+            <p className={cn("min-w-0 truncate text-[11px]", error ? "text-error" : "text-muted")}>{statusLine()}</p>
             {selected.length > 1 && adding === null && (
               <button type="button" onClick={() => setSelected([])} className="shrink-0 text-[11px] text-faint hover:text-cream">
                 Clear
@@ -797,7 +791,8 @@ function UploadBox({
 function TileSizeSlider({ columns, onChange }: { columns: number; onChange: (columns: number) => void }) {
   // The slider runs small → big, columns the other way.
   const size = COLUMNS_MAX + COLUMNS_MIN - columns;
-  const step = (delta: number) => onChange(Math.min(COLUMNS_MAX, Math.max(COLUMNS_MIN, columns - delta)));
+  const percent = ((size - COLUMNS_MIN) / (COLUMNS_MAX - COLUMNS_MIN)) * 100;
+  const step =(delta: number) => onChange(Math.min(COLUMNS_MAX, Math.max(COLUMNS_MIN, columns - delta)));
   return (
     <div className="flex h-7 items-center gap-1 rounded-md border border-white/[0.1] bg-white/[0.03] px-1.5 text-muted">
       <button type="button" onClick={() => step(-1)} aria-label="Smaller photos" title="Smaller photos" className="hover:text-cream">
@@ -810,7 +805,7 @@ function TileSizeSlider({ columns, onChange }: { columns: number; onChange: (col
         <div
           aria-hidden
           className="pointer-events-none absolute left-0 top-1/2 h-px -translate-y-1/2 bg-gold"
-          style={{ width: `${((size - COLUMNS_MIN) / (COLUMNS_MAX - COLUMNS_MIN)) * 100}%` }}
+          style={{ width: `${percent}%` }}
         />
         {Array.from({ length: COLUMNS_MAX - COLUMNS_MIN + 1 }, (_, index) => (
           <span
@@ -826,7 +821,7 @@ function TileSizeSlider({ columns, onChange }: { columns: number; onChange: (col
         <span
           aria-hidden
           className="pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-gold bg-surface-raised shadow-sm"
-          style={{ left: `${((size - COLUMNS_MIN) / (COLUMNS_MAX - COLUMNS_MIN)) * 100}%` }}
+          style={{ left: `${percent}%` }}
         />
         <input
           type="range"
@@ -859,18 +854,6 @@ function ToolSelect({
   selected: string[];
   onChange: (tools: string[]) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: PointerEvent) => {
-      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, [open]);
-
   const toggle = (tool: string) =>
     onChange(selected.includes(tool) ? selected.filter((t) => t !== tool) : [...selected, tool]);
   const summary =
@@ -881,16 +864,94 @@ function ToolSelect({
         : `${selected.length} tools`;
 
   return (
+    <ChecklistDropdown
+      label="Which tools"
+      icon={selected.length === 1 && <ToolDot tool={selected[0]} />}
+      summary={summary}
+      triggerClassName="px-2"
+      panelClassName="left-0 w-52"
+    >
+      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
+        <span className="flex-1 text-[10px] text-faint">{selected.length ? `${selected.length} selected` : "All tools"}</span>
+        {selected.length > 0 && (
+          <button type="button" onClick={() => onChange([])} className="shrink-0 text-[11px] font-medium text-gold hover:text-cream">
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="thin-scrollbar max-h-64 overflow-y-auto py-1">
+        {tools.length === 0 && <p className="px-3 py-1.5 text-[11px] text-faint">Nothing yet</p>}
+        {tools.map((tool) => (
+          <label key={tool} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]">
+            <input
+              type="checkbox"
+              checked={selected.includes(tool)}
+              onChange={() => toggle(tool)}
+              style={{ accentColor: "var(--color-gold)" }}
+            />
+            <ToolDot tool={tool} />
+            <span className="truncate">{TOOL_LABELS[tool] ?? tool}</span>
+          </label>
+        ))}
+      </div>
+    </ChecklistDropdown>
+  );
+}
+
+/**
+ * What ToolSelect and PersonSelect share: a trigger summing up what is ticked,
+ * and the checklist panel under it.
+ *
+ * Closes on `pointerdown` outside rather than through `useDismissable`, which
+ * listens for `mousedown`: on a phone — where these two live — a touch that
+ * starts a scroll elsewhere fires no `mousedown`, and would leave it open.
+ * Escape needs nothing here: it closes the whole dialog.
+ */
+function ChecklistDropdown({
+  label,
+  icon,
+  summary,
+  triggerClassName,
+  panelClassName,
+  children,
+}: {
+  /** The trigger's accessible name. */
+  label: string;
+  icon: ReactNode;
+  summary: string;
+  /** The trigger's horizontal padding. */
+  triggerClassName: string;
+  /** Which edge the panel hangs from, and its width. */
+  panelClassName: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // Closes on a click anywhere outside it.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  return (
     <div className="relative" ref={boxRef}>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-label="Which tools"
-        className="flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.03] px-2 text-xs text-muted transition-colors hover:border-white/20"
+        aria-label={label}
+        className={cn(
+          "flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.03] text-xs text-muted transition-colors hover:border-white/20",
+          triggerClassName
+        )}
       >
-        {selected.length === 1 && <ToolDot tool={selected[0]} />}
+        {icon}
         <span className="min-w-0 flex-1 truncate text-left font-medium text-cream">{summary}</span>
         <ChevronDown size={12} className="shrink-0" />
       </button>
@@ -899,31 +960,12 @@ function ToolSelect({
         <div
           role="listbox"
           aria-multiselectable="true"
-          className="absolute left-0 top-full z-50 mt-1.5 w-52 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg"
+          className={cn(
+            "absolute top-full z-50 mt-1.5 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg",
+            panelClassName
+          )}
         >
-          <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
-            <span className="flex-1 text-[10px] text-faint">{selected.length ? `${selected.length} selected` : "All tools"}</span>
-            {selected.length > 0 && (
-              <button type="button" onClick={() => onChange([])} className="shrink-0 text-[11px] font-medium text-gold hover:text-cream">
-                Clear
-              </button>
-            )}
-          </div>
-          <div className="thin-scrollbar max-h-64 overflow-y-auto py-1">
-            {tools.length === 0 && <p className="px-3 py-1.5 text-[11px] text-faint">Nothing yet</p>}
-            {tools.map((tool) => (
-              <label key={tool} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(tool)}
-                  onChange={() => toggle(tool)}
-                  style={{ accentColor: "var(--color-gold)" }}
-                />
-                <ToolDot tool={tool} />
-                <span className="truncate">{TOOL_LABELS[tool] ?? tool}</span>
-              </label>
-            ))}
-          </div>
+          {children}
         </div>
       )}
     </div>
@@ -961,33 +1003,6 @@ function FolderButton({
   );
 }
 
-function FolderChip({
-  active,
-  tool,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  tool?: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] transition-colors",
-        active ? "border-gold/40 bg-gold/15 text-gold" : "border-white/[0.08] text-muted hover:text-cream"
-      )}
-    >
-      {tool && <ToolDot tool={tool} />}
-      {children}
-    </button>
-  );
-}
-
 /**
  * Whose pictures, as History's member filter does it: a searchable checklist
  * with the viewer pinned first as "Myself". Nothing ticked is the viewer's own.
@@ -1003,19 +1018,7 @@ function PersonSelect({
   selfName?: string;
   onChange: (patch: Partial<View>) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const boxRef = useRef<HTMLDivElement>(null);
-
-  // Closes on a click anywhere outside it.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: PointerEvent) => {
-      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, [open]);
 
   const selected = view.people;
   const set = (people: string[]) => onChange({ people, tools: [] });
@@ -1035,80 +1038,65 @@ function PersonSelect({
   const allIds = ["me", ...members.map((member) => member.id)];
 
   return (
-    <div className="relative" ref={boxRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-label="Whose pictures"
-        className="flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.03] px-2.5 text-xs text-muted transition-colors hover:border-white/20"
-      >
-        <Users size={12} className="shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-left font-medium text-cream">{summary}</span>
-        <ChevronDown size={12} className="shrink-0" />
-      </button>
-
-      {open && (
-        <div
-          role="listbox"
-          aria-multiselectable="true"
-          className="absolute right-0 top-full z-50 mt-1.5 w-56 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg"
-        >
-          <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
-            <Search size={12} className="shrink-0 text-faint" />
+    <ChecklistDropdown
+      label="Whose pictures"
+      icon={<Users size={12} className="shrink-0" />}
+      summary={summary}
+      triggerClassName="px-2.5"
+      panelClassName="right-0 w-56"
+    >
+      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
+        <Search size={12} className="shrink-0 text-faint" />
+        <input
+          autoFocus
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search members…"
+          aria-label="Search members"
+          className="min-w-0 flex-1 bg-transparent text-xs text-cream outline-none placeholder:text-faint"
+        />
+        {selected.length > 0 ? (
+          <button type="button" onClick={() => set([])} className="shrink-0 text-[11px] font-medium text-gold hover:text-cream">
+            Clear
+          </button>
+        ) : (
+          members.length > 0 && (
+            <button type="button" onClick={() => set(allIds)} className="shrink-0 text-[11px] font-medium text-gold hover:text-cream">
+              All
+            </button>
+          )
+        )}
+      </div>
+      <div className="thin-scrollbar max-h-64 overflow-y-auto py-1">
+        {showSelf && (
+          <label className="flex cursor-pointer items-center gap-2 border-b border-white/5 px-3 py-1.5 text-xs font-medium text-cream hover:bg-white/[0.05]">
             <input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search members…"
-              aria-label="Search members"
-              className="min-w-0 flex-1 bg-transparent text-xs text-cream outline-none placeholder:text-faint"
+              type="checkbox"
+              checked={selected.includes("me")}
+              onChange={() => toggle("me")}
+              style={{ accentColor: "var(--color-gold)" }}
             />
-            {selected.length > 0 ? (
-              <button type="button" onClick={() => set([])} className="shrink-0 text-[11px] font-medium text-gold hover:text-cream">
-                Clear
-              </button>
-            ) : (
-              members.length > 0 && (
-                <button type="button" onClick={() => set(allIds)} className="shrink-0 text-[11px] font-medium text-gold hover:text-cream">
-                  All
-                </button>
-              )
-            )}
-          </div>
-          <div className="thin-scrollbar max-h-64 overflow-y-auto py-1">
-            {showSelf && (
-              <label className="flex cursor-pointer items-center gap-2 border-b border-white/5 px-3 py-1.5 text-xs font-medium text-cream hover:bg-white/[0.05]">
-                <input
-                  type="checkbox"
-                  checked={selected.includes("me")}
-                  onChange={() => toggle("me")}
-                  style={{ accentColor: "var(--color-gold)" }}
-                />
-                <span className="truncate">Myself</span>
-                {selfName && <span className="truncate text-[10px] font-normal text-faint">{selfName}</span>}
-              </label>
-            )}
-            {listed.length === 0 && !showSelf && <p className="px-3 py-1.5 text-[11px] text-faint">No matches</p>}
-            {listed.map((member) => (
-              <label
-                key={member.id}
-                className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.includes(member.id)}
-                  onChange={() => toggle(member.id)}
-                  style={{ accentColor: "var(--color-gold)" }}
-                />
-                <span className="truncate">{member.name}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+            <span className="truncate">Myself</span>
+            {selfName && <span className="truncate text-[10px] font-normal text-faint">{selfName}</span>}
+          </label>
+        )}
+        {listed.length === 0 && !showSelf && <p className="px-3 py-1.5 text-[11px] text-faint">No matches</p>}
+        {listed.map((member) => (
+          <label
+            key={member.id}
+            className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]"
+          >
+            <input
+              type="checkbox"
+              checked={selected.includes(member.id)}
+              onChange={() => toggle(member.id)}
+              style={{ accentColor: "var(--color-gold)" }}
+            />
+            <span className="truncate">{member.name}</span>
+          </label>
+        ))}
+      </div>
+    </ChecklistDropdown>
   );
 }
 

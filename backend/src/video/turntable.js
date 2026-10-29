@@ -176,7 +176,7 @@ async function motionOf(file, aspectRatio) {
   return motion;
 }
 
-/** Runs `fn(files)` with each buffer written to a temporary file, removed afterwards. */
+/** Runs `fn(files, dir)` with each buffer written to a temporary file in `dir`, removed afterwards. */
 async function withFiles(buffers, fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "turn-"));
   try {
@@ -187,7 +187,7 @@ async function withFiles(buffers, fn) {
         return file;
       })
     );
-    return await fn(files);
+    return await fn(files, dir);
   } finally {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -294,16 +294,7 @@ function evenFrames(motion, count) {
  * @returns the MP4 bytes
  */
 async function assembleLoop(segments, { degrees, loopSeconds, fps, aspectRatio, width, height }) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "turntable-"));
-  try {
-    const files = await Promise.all(
-      segments.map(async (buffer, index) => {
-        const file = path.join(dir, `segment-${index}.mp4`);
-        await fs.writeFile(file, buffer);
-        return file;
-      })
-    );
-
+  return withFiles(segments, async (files, dir) => {
     // The loop's frames, shared out by angle — every frame of it is one step of the same turn.
     const total = Math.round(loopSeconds * fps);
     const turned = degrees.reduce((sum, angle) => sum + angle, 0);
@@ -349,18 +340,14 @@ async function assembleLoop(segments, { degrees, loopSeconds, fps, aspectRatio, 
       ],
       { maxBuffer: 1 << 24 }
     );
-    return await fs.readFile(out);
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
+    return fs.readFile(out);
+  });
 }
 
 module.exports = {
   frameSize,
   framePhotos,
   planTurntable,
-  segmentSeconds,
-  evenFrames,
   turnJump,
   snapped,
   retraceScore,

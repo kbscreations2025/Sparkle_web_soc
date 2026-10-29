@@ -70,9 +70,9 @@ type NamedViewId = (typeof NAMED_VIEWS)[number]["id"];
 
 const EMPTY_SLOTS: Record<NamedViewId, string | null> = { front: null, side: null, back: null, "other-side": null };
 
-/** The allowed loop length nearest to what was picked. */
-function nearestLength(seconds: number) {
-  return VIDEO_TURNTABLE.lengths.reduce((best, option) => (Math.abs(option - seconds) < Math.abs(best - seconds) ? option : best));
+/** The allowed length nearest to what was picked — of a loop, or of a model's clips. */
+function nearestLength(lengths: readonly number[], seconds: number) {
+  return lengths.reduce((best, option) => (Math.abs(option - seconds) < Math.abs(best - seconds) ? option : best));
 }
 
 /**
@@ -186,7 +186,21 @@ export default function ImageToVideoPage() {
     Boolean(sideId) &&
     (!slots.back || samePhoto("front", "back")) &&
     (!(slots.side && slots["other-side"]) || samePhoto("side", "other-side"));
-  const loopSeconds = nearestLength(durationSeconds);
+  const loopSeconds = nearestLength(VIDEO_TURNTABLE.lengths, durationSeconds);
+  const multiView = photos.length > 1;
+
+  /*
+   * With more than one view the settings are not all the user's to choose.
+   * Reference mode accepts exactly one combination, shown as the locked
+   * values rather than left displaying picks the run would ignore. A pinned
+   * 360° fixes only the model; its length is the finished loop's.
+   */
+  const referenceMode = multiView && !turntable;
+  const effective = turntable
+    ? { model: VIDEO_TURNTABLE.model, aspectRatio, resolution, durationSeconds: loopSeconds }
+    : referenceMode
+      ? VIDEO_REFERENCE_MODE
+      : { model, aspectRatio, resolution, durationSeconds };
 
   /**
    * What each angle is for, tagged on its empty slot so the minimum is plain:
@@ -250,11 +264,7 @@ export default function ImageToVideoPage() {
       preview,
       // Multi-view runs send the locked combination, matching what the
       // settings card is showing and what the backend will enforce anyway.
-      ...(turntable
-        ? { turntable: true, model: VIDEO_TURNTABLE.model, aspectRatio, resolution, durationSeconds: loopSeconds }
-        : photos.length > 1
-          ? VIDEO_REFERENCE_MODE
-          : { model, aspectRatio, resolution, durationSeconds }),
+      ...(turntable ? { turntable: true, ...effective } : effective),
     });
 
     if (res.status === "queued" && res.job) {
@@ -277,20 +287,6 @@ export default function ImageToVideoPage() {
   }
 
   const rendering = status === "rendering";
-  const multiView = photos.length > 1;
-
-  /*
-   * With more than one view the settings are not all the user's to choose.
-   * Reference mode accepts exactly one combination, shown as the locked
-   * values rather than left displaying picks the run would ignore. A pinned
-   * 360° fixes only the model; its length is the finished loop's.
-   */
-  const referenceMode = multiView && !turntable;
-  const effective = turntable
-    ? { model: VIDEO_TURNTABLE.model, aspectRatio, resolution, durationSeconds: loopSeconds }
-    : referenceMode
-      ? VIDEO_REFERENCE_MODE
-      : { model, aspectRatio, resolution, durationSeconds };
 
   /** Each model has its own lengths and sizes — the pickers offer only those. */
   const modelSpec = VIDEO_MODELS.find((entry) => entry.id === effective.model) ?? VIDEO_MODELS[0];
@@ -301,9 +297,7 @@ export default function ImageToVideoPage() {
     const spec = VIDEO_MODELS.find((entry) => entry.id === next) ?? VIDEO_MODELS[0];
     setModel(next);
     const lengths: readonly number[] = spec.durations;
-    if (!lengths.includes(durationSeconds)) {
-      setDurationSeconds(lengths.reduce((best, s) => (Math.abs(s - durationSeconds) < Math.abs(best - durationSeconds) ? s : best)));
-    }
+    if (!lengths.includes(durationSeconds)) setDurationSeconds(nearestLength(lengths, durationSeconds));
     const sizes: readonly string[] = spec.resolutions;
     if (!sizes.includes(resolution)) setResolution(sizes[0]);
   }

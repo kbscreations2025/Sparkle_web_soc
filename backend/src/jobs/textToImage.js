@@ -1,5 +1,5 @@
 const { registerJobHandler } = require("./registry");
-const { runGenerationJob, MAX_IMAGE_COUNT, DEFAULT_IMAGE_COUNT } = require("./generationRunner");
+const { runGenerationJob, designVariationShots } = require("./generationRunner");
 const { buildTextToImagePrompt, buildTextToImageRefinePrompt } = require("../prompts");
 const { buildTextToImageVariationPrompt } = require("../prompts/textToImage");
 
@@ -24,22 +24,9 @@ registerJobHandler(TEXT_TO_IMAGE_JOB, (context) =>
       }),
     // "Design variations" on a reference photo: each image a different design
     // option grown out of it, rather than the same piece repeated.
-    ...(context.data?.designVariations && context.data.sourceImages?.length
-      ? {
-          buildShots: ({ data: payload, count }) =>
-            Array.from({ length: count }, (_, index) =>
-              buildTextToImageVariationPrompt({
-                description: payload.prompt,
-                style: payload.style,
-                aspect: payload.aspect,
-                index,
-                total: count,
-              })
-            ),
-        }
-      : {}),
+    ...designVariationShots(context.data, buildTextToImageVariationPrompt),
     buildRefinePrompt: buildTextToImageRefinePrompt,
   })
 );
 
-module.exports = { TEXT_TO_IMAGE_JOB, MAX_IMAGE_COUNT, DEFAULT_IMAGE_COUNT };
+module.exports = { TEXT_TO_IMAGE_JOB };

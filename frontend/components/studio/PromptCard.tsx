@@ -1,6 +1,6 @@
 "use client";
 
-import type { ClipboardEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { SpellCheckedTextarea } from "./SpellCheckedTextarea";
 
 /**
@@ -59,17 +59,6 @@ export function PromptCard({
    */
   onPasteImage?: (file: File) => void;
 }) {
-  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (!onPasteImage) return;
-    const imageItem = [...event.clipboardData.items].find((item) => item.type.startsWith("image/"));
-    if (!imageItem) return; // let normal text paste through
-    const file = imageItem.getAsFile();
-    if (file) {
-      event.preventDefault();
-      onPasteImage(file);
-    }
-  }
-
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
@@ -86,7 +75,7 @@ export function PromptCard({
           rows={rows}
           placeholder={placeholder}
           onIssueCount={onIssueCount}
-          onPaste={onPasteImage ? handlePaste : undefined}
+          onPasteImage={onPasteImage}
         />
 
         {(footerStart || footerEnd) && (

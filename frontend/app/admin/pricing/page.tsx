@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { ChevronRight, Coins, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   getPricingCatalogue,
@@ -18,6 +18,8 @@ import { HoverInfo } from "@/components/ui/HoverInfo";
 import { cn } from "@/lib/utils";
 import { Select } from "@/components/ui/Select";
 import { TableFilterBar, FILTER_FIELD as BAR_FIELD } from "@/components/admin/TableFilterBar";
+import { ErrorBanner } from "@/components/admin/ErrorBanner";
+import { useConsoleLoad } from "@/components/admin/useConsoleLoad";
 
 const FIELD =
   "w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[12px] text-cream placeholder:text-faint outline-none focus:border-gold/40";
@@ -73,39 +75,31 @@ function formatRates(rate: number, currency: string, usdToInr: number) {
 export default function PricingPage() {
   const [rules, setRules] = useState<PricingRule[]>([]);
   const [catalogue, setCatalogue] = useState<PricingCatalogue | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [includeRetired, setIncludeRetired] = useState(false);
 
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<PricingRule | null>(null);
 
-  const loadRules = useCallback(async (withRetired: boolean) => {
-    const result = await listPricingRules(withRetired);
-    if (result.status === "success") setRules(result.rules ?? []);
-    else setError(result.message || "Could not load the price table");
-  }, []);
+  /** Folds a fresh rule list into state, returning the error to show if it failed. */
+  function applyRules(list: Awaited<ReturnType<typeof listPricingRules>>) {
+    if (list.status === "success") setRules(list.rules ?? []);
+    else return list.message || "Could not load the price table";
+  }
 
-  useEffect(() => {
-    let cancelled = false;
-    // Neither depends on the other, so one round-trip's worth of waiting.
-    Promise.all([listPricingRules(includeRetired), getPricingCatalogue()])
-      .then(([list, cat]) => {
-        if (cancelled) return;
-        if (list.status === "success") setRules(list.rules ?? []);
-        else setError(list.message || "Could not load the price table");
-        if (cat.status === "success") setCatalogue(cat);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setError("Could not reach the server");
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [includeRetired]);
+  // Neither depends on the other, so one round-trip's worth of waiting.
+  const loadPage = useCallback(
+    () => Promise.all([listPricingRules(includeRetired), getPricingCatalogue()]),
+    [includeRetired]
+  );
+  const { loading, error, setError } = useConsoleLoad(loadPage, ([list, cat]) => {
+    if (cat.status === "success") setCatalogue(cat);
+    return applyRules(list);
+  });
+
+  async function loadRules(withRetired: boolean) {
+    const message = applyRules(await listPricingRules(withRetired));
+    if (message) setError(message);
+  }
 
   const orgNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -200,11 +194,7 @@ export default function PricingPage() {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
       <div className="mx-auto max-w-[1400px] space-y-5">
-        {error && (
-          <p className="rounded-lg border border-error/20 bg-error/[0.08] px-3 py-2 text-xs text-error">
-            {error}
-          </p>
-        )}
+        <ErrorBanner message={error} />
 
         {loading ? (
           <p className="flex items-center gap-2 text-sm text-faint">

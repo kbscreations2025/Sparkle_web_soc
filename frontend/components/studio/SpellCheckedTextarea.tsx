@@ -55,7 +55,7 @@ export function SpellCheckedTextarea({
   textClassName = SHARED_TEXT_CLASSES,
   autoGrowMaxHeight,
   onKeyDown,
-  onPaste,
+  onPasteImage,
   onIssueCount,
 }: {
   value: string;
@@ -71,7 +71,12 @@ export function SpellCheckedTextarea({
   autoGrowMaxHeight?: number;
   /** Runs only for keys the suggestion list didn't claim, so Enter-to-send still works. */
   onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  onPaste?: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
+  /**
+   * Takes an image pasted into the box instead of letting the browser drop it
+   * into the text. Text pastes go through untouched; left unset, an image
+   * paste is the browser's default too.
+   */
+  onPasteImage?: (file: File) => void;
   /** How many misspellings are currently showing — for a count beside the label. */
   onIssueCount?: (count: number) => void;
 }) {
@@ -208,6 +213,16 @@ export function SpellCheckedTextarea({
     });
   }
 
+  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const imageItem = [...event.clipboardData.items].find((item) => item.type.startsWith("image/"));
+    if (!imageItem) return; // let normal text paste through
+    const file = imageItem.getAsFile();
+    if (file) {
+      event.preventDefault();
+      onPasteImage?.(file);
+    }
+  }
+
   async function addToDictionary(word: string) {
     // Suppressed immediately; the request only decides whether it also persists
     // for the rest of the organisation.
@@ -314,7 +329,7 @@ export function SpellCheckedTextarea({
         onKeyDown={handleKeyDown}
         onKeyUp={syncCaret}
         onClick={syncCaret}
-        onPaste={onPaste}
+        onPaste={onPasteImage ? handlePaste : undefined}
         onBlur={() => setCaret(null)}
         onScroll={(event) => {
           if (mirrorRef.current) mirrorRef.current.scrollTop = event.currentTarget.scrollTop;

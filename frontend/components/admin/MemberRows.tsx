@@ -147,7 +147,7 @@ export function MemberRows({
               onReclaimCredits={onReclaimCredits}
               dailyAllowance={dailyAllowance}
               assignableGrants={assignableGrants}
-              readOnly={Boolean(selfId) && String(member.id) === String(selfId)}
+              readOnly={isSelf(member)}
               canRemove={canRemove}
             />
           ))}
@@ -244,10 +244,10 @@ function MemberRow({
     }
   }
 
-  function toggleGrant(grant: string) {
+  /** Applies `change` to the newest desired set of grants and queues it to save. */
+  function updateGrants(change: (next: Set<string>) => void) {
     const next = new Set(desired.current ?? member.permissions);
-    if (next.has(grant)) next.delete(grant);
-    else next.add(grant);
+    change(next);
 
     const list = [...next];
     desired.current = list; // synchronous, so the next click in this tick sees it
@@ -256,19 +256,21 @@ function MemberRow({
     flushGrants();
   }
 
+  function toggleGrant(grant: string) {
+    updateGrants((next) => {
+      if (next.has(grant)) next.delete(grant);
+      else next.add(grant);
+    });
+  }
+
   /** "Select all" for a group: grants every listed permission at once, or clears them all. */
   function toggleAllGrants(grants: string[], shouldGrant: boolean) {
-    const next = new Set(desired.current ?? member.permissions);
-    for (const grant of grants) {
-      if (shouldGrant) next.add(grant);
-      else next.delete(grant);
-    }
-
-    const list = [...next];
-    desired.current = list;
-    queued.current = list;
-    setPending(list);
-    flushGrants();
+    updateGrants((next) => {
+      for (const grant of grants) {
+        if (shouldGrant) next.add(grant);
+        else next.delete(grant);
+      }
+    });
   }
 
   function setScope(kind: DataScope["kind"]) {

@@ -53,6 +53,17 @@ const SNAP = 6;
 
 type Guide = { axis: "x" | "y"; at: number };
 
+/** Follows a drag: `onMove` on every pointer move, then `onUp` once when the pointer comes up. */
+function trackPointer(onMove: (event: PointerEvent) => void, onUp: () => void) {
+  const up = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", up);
+    onUp();
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", up);
+}
+
 export function DeckEditor({
   initial,
   pieces,
@@ -67,7 +78,7 @@ export function DeckEditor({
   latestRef?: MutableRefObject<DeckDesign | null>;
 }) {
   const api = useEditorApi(initial);
-  const { design, active, slide, selected, setSelected, editingId, setEditingId } = api;
+  const { design, active, slide, selected, setSelected, selectedElements, editingId, setEditingId } = api;
 
   const [tab, setTab] = useState<PanelTab>("pages");
   /** Whether the panel sheet is showing below desktop width, where it slides up over the page; desktop always shows it. */
@@ -222,15 +233,11 @@ export function DeckEditor({
       );
     };
 
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+    trackPointer(move, () => {
       setGuides([]);
       if (moved) api.commitFrom(snapshot);
       else onClick?.();
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    });
   }
 
   function onElementPointerDown(event: ReactPointerEvent, element: DesignElement) {
@@ -240,14 +247,14 @@ export function DeckEditor({
     // An open text editor closes by losing focus, which this click is about to do — closing it
     // here instead would unmount it before its text is saved.
 
+    const unit = api.unitOf(element);
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
-      const unit = api.unitOf(element);
       const allIn = unit.every((id) => selected.includes(id));
       setSelected(allIn ? selected.filter((id) => !unit.includes(id)) : [...new Set([...selected, ...unit])]);
       return;
     }
 
-    const ids = selected.includes(element.id) ? selected : api.unitOf(element);
+    const ids = selected.includes(element.id) ? selected : unit;
     setSelected(ids);
     /*
      * As in Canva: the first click on a grouped element selects its whole
@@ -255,7 +262,6 @@ export function DeckEditor({
      * selected group picks out just that member. Dragging still moves the
      * whole group.
      */
-    const unit = api.unitOf(element);
     const groupSelected = unit.length > 1 && selected.includes(element.id) && unit.every((id) => selected.includes(id));
     startMove(event, ids, groupSelected ? () => setSelected([element.id]) : undefined);
   }
@@ -288,19 +294,14 @@ export function DeckEditor({
       });
       setSelected([...new Set([...before, ...hit.flatMap((element) => api.unitOf(element))])]);
     };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+    trackPointer(move, () => {
       setMarquee(null);
       if (!dragged && !additive) setSelected([]);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    });
   }
 
   /* ── Resizing and rotating ───────────────────────────────────────────── */
 
-  const selectedElements = slide.elements.filter((element) => selected.includes(element.id));
   const single = selectedElements.length === 1 ? selectedElements[0] : null;
   const selectionBox = single ? null : unionBox(selectedElements.map(boundsOf));
   const anyLocked = selectedElements.some((element) => element.locked);
@@ -349,13 +350,7 @@ export function DeckEditor({
         }
         api.setLive((current) => api.mapSlide(current, active, (element) => (element.id === el.id ? ({ ...element, ...patch } as DesignElement) : element)));
       };
-      const up = () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        api.commitFrom(snapshot);
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
+      trackPointer(move, () => api.commitFrom(snapshot));
       return;
     }
 
@@ -387,13 +382,7 @@ export function DeckEditor({
         })
       );
     };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      api.commitFrom(snapshot);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    trackPointer(move, () => api.commitFrom(snapshot));
   }
 
   function startRotate(event: ReactPointerEvent) {
@@ -412,13 +401,7 @@ export function DeckEditor({
       const rotation = Math.round(angle % 360);
       api.setLive((current) => api.mapSlide(current, active, (element) => (element.id === single.id ? { ...element, rotation } : element)));
     };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      api.commitFrom(snapshot);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    trackPointer(move, () => api.commitFrom(snapshot));
   }
 
   /* ── Keyboard ────────────────────────────────────────────────────────── */
@@ -525,7 +508,7 @@ export function DeckEditor({
       <EditorPanels api={api} pieces={pieces} tab={tab} onTab={setTab} open={panelOpen} onOpenChange={setPanelOpen} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <EditorToolbar api={api} pieces={pieces} onOpenImages={() => {
+        <EditorToolbar api={api} onOpenImages={() => {
             setTab("images");
             setPanelOpen(true);
           }} />
@@ -556,7 +539,7 @@ export function DeckEditor({
                   >
                     <div className="absolute inset-0" style={{ outline: `${2 / scale}px solid #8B5CF6` }} />
                     {!anyLocked && (
-                      <Handles handle={handle} scale={scale} onResize={startResize} onRotate={startRotate} rotatable sides />
+                      <Handles handle={handle} scale={scale} onResize={startResize} onRotate={startRotate} />
                     )}
                   </div>
                 )}
@@ -574,7 +557,7 @@ export function DeckEditor({
                       style={{ left: selectionBox.x, top: selectionBox.y, width: selectionBox.w, height: selectionBox.h }}
                     >
                       <div className="absolute inset-0" style={{ outline: `${2 / scale}px solid #8B5CF6` }} />
-                      {!anyLocked && <Handles handle={handle} scale={scale} onResize={startResize} sides />}
+                      {!anyLocked && <Handles handle={handle} scale={scale} onResize={startResize} />}
                     </div>
                   </>
                 )}
@@ -670,29 +653,21 @@ function Handles({
   scale,
   onResize,
   onRotate,
-  rotatable,
-  sides,
 }: {
   handle: number;
   scale: number;
   onResize: (event: ReactPointerEvent, sx: number, sy: number) => void;
   onRotate?: (event: ReactPointerEvent) => void;
-  rotatable?: boolean;
-  sides?: boolean;
 }) {
   const points: [number, number, string][] = [
     [-1, -1, "nwse-resize"],
     [1, -1, "nesw-resize"],
     [-1, 1, "nesw-resize"],
     [1, 1, "nwse-resize"],
-    ...(sides
-      ? ([
-          [0, -1, "ns-resize"],
-          [0, 1, "ns-resize"],
-          [-1, 0, "ew-resize"],
-          [1, 0, "ew-resize"],
-        ] as [number, number, string][])
-      : []),
+    [0, -1, "ns-resize"],
+    [0, 1, "ns-resize"],
+    [-1, 0, "ew-resize"],
+    [1, 0, "ew-resize"],
   ];
   return (
     <>
@@ -717,7 +692,7 @@ function Handles({
           />
         );
       })}
-      {rotatable && onRotate && (
+      {onRotate && (
         <div
           onPointerDown={onRotate}
           title="Rotate (Shift snaps to 15°)"
@@ -869,24 +844,6 @@ function useEditorApi(initial: DeckDesign) {
     setDesign(next);
   }, []);
 
-  /** A change that can be undone. */
-  const commit = useCallback(
-    (update: (current: DeckDesign) => DeckDesign) => {
-      const before = designRef.current;
-      const next = update(before);
-      if (next === before) return;
-      past.current.push(before);
-      if (past.current.length > HISTORY_LIMIT) past.current.shift();
-      future.current = [];
-      apply(next);
-      bump();
-    },
-    [apply]
-  );
-
-  /** A frame of a drag — recorded once, by `commitFrom`, when it ends. */
-  const setLive = useCallback((update: (current: DeckDesign) => DeckDesign) => apply(update(designRef.current)), [apply]);
-
   const commitFrom = useCallback((snapshot: DeckDesign) => {
     if (snapshot === designRef.current) return;
     past.current.push(snapshot);
@@ -894,6 +851,21 @@ function useEditorApi(initial: DeckDesign) {
     future.current = [];
     bump();
   }, []);
+
+  /** A change that can be undone. */
+  const commit = useCallback(
+    (update: (current: DeckDesign) => DeckDesign) => {
+      const before = designRef.current;
+      const next = update(before);
+      if (next === before) return;
+      apply(next);
+      commitFrom(before);
+    },
+    [apply, commitFrom]
+  );
+
+  /** A frame of a drag — recorded once, by `commitFrom`, when it ends. */
+  const setLive = useCallback((update: (current: DeckDesign) => DeckDesign) => apply(update(designRef.current)), [apply]);
 
   const mapSlide = useCallback(
     (current: DeckDesign, index: number, fn: (element: DesignElement) => DesignElement): DeckDesign => ({
@@ -977,8 +949,7 @@ function useEditorApi(initial: DeckDesign) {
   }
 
   function ungroup() {
-    const ids = new Set(selectedElements.map((element) => element.groupId).filter(Boolean));
-    commit((current) => mapSlide(current, activeIndex, (element) => (element.groupId && ids.has(element.groupId) ? { ...element, groupId: undefined } : element)));
+    commit((current) => mapSlide(current, activeIndex, (element) => (element.groupId && groupIds.has(element.groupId) ? { ...element, groupId: undefined } : element)));
   }
 
   function setLocked(locked: boolean) {
@@ -1129,19 +1100,19 @@ function useEditorApi(initial: DeckDesign) {
     return new Set([activeIndex]);
   }
 
+  /** `current` with `change` made to every page in `scope`. */
+  function mapPages(current: DeckDesign, scope: PageScope, change: (slide: DesignSlide) => DesignSlide): DeckDesign {
+    const pages = pagesIn(current, scope);
+    return { ...current, slides: current.slides.map((entry, i) => (pages.has(i) ? change(entry) : entry)) };
+  }
+
   function setBackground(color: string, scope: PageScope = "page") {
-    commit((current) => {
-      const pages = pagesIn(current, scope);
-      return { ...current, slides: current.slides.map((entry, i) => (pages.has(i) ? { ...entry, background: color } : entry)) };
-    });
+    commit((current) => mapPages(current, scope, (entry) => ({ ...entry, background: color })));
   }
 
   /** Sets, changes or (with null) removes the background picture on the pages in `scope`. */
   function setBackgroundImage(image: SlideBackgroundImage | null, scope: PageScope = "page") {
-    commit((current) => {
-      const pages = pagesIn(current, scope);
-      return { ...current, slides: current.slides.map((entry, i) => (pages.has(i) ? { ...entry, backgroundImage: image } : entry)) };
-    });
+    commit((current) => mapPages(current, scope, (entry) => ({ ...entry, backgroundImage: image })));
   }
 
   /* Brand */
@@ -1186,58 +1157,37 @@ function useEditorApi(initial: DeckDesign) {
     const h = Math.round(width / Math.max(aspect, 0.01));
     const x = corner.endsWith("left") ? margin : SLIDE_W - margin - w;
     const y = corner.startsWith("top") ? margin : SLIDE_H - margin - h;
-    (live ? setLive : commit)((current) => {
-      const pages = pagesIn(current, scope);
-      if (onlyExisting) {
-        for (const i of [...pages]) if (!current.slides[i].elements.some((element) => element.name === BRAND_LOGO_NAME)) pages.delete(i);
-      }
-      return {
-        ...current,
-        slides: current.slides.map((entry, i) =>
-          pages.has(i)
-            ? {
-                ...entry,
-                elements: [
-                  ...entry.elements.filter((element) => element.name !== BRAND_LOGO_NAME),
-                  imageElement({ x, y, w, h, src, fit: "contain", opacity, name: BRAND_LOGO_NAME }),
-                ],
-              }
-            : entry
-        ),
-      };
-    });
+    (live ? setLive : commit)((current) =>
+      mapPages(current, scope, (entry) =>
+        onlyExisting && !entry.elements.some((element) => element.name === BRAND_LOGO_NAME)
+          ? entry
+          : {
+              ...entry,
+              elements: [
+                ...entry.elements.filter((element) => element.name !== BRAND_LOGO_NAME),
+                imageElement({ x, y, w, h, src, fit: "contain", opacity, name: BRAND_LOGO_NAME }),
+              ],
+            }
+      )
+    );
   }
 
   function removeLogos(scope: PageScope) {
-    commit((current) => {
-      const pages = pagesIn(current, scope);
-      return {
-        ...current,
-        slides: current.slides.map((entry, i) =>
-          pages.has(i) ? { ...entry, elements: entry.elements.filter((element) => element.name !== BRAND_LOGO_NAME) } : entry
-        ),
-      };
-    });
+    commit((current) =>
+      mapPages(current, scope, (entry) => ({ ...entry, elements: entry.elements.filter((element) => element.name !== BRAND_LOGO_NAME) }))
+    );
   }
 
   /** Brand fonts on every text in `scope`: large type takes the heading font, the rest the body font. */
   function applyFonts(heading: string, body: string, scope: PageScope) {
-    commit((current) => {
-      const pages = pagesIn(current, scope);
-      return {
-        ...current,
-        slides: current.slides.map((entry, i) =>
-          pages.has(i)
-            ? {
-                ...entry,
-                elements: entry.elements.map((element) =>
-                  element.type === "text" ? { ...element, fontFamily: element.fontSize >= 28 ? heading : body } : element
-                ),
-              }
-            : entry
+    commit((current) =>
+      mapPages(current, scope, (entry) => ({
+        ...entry,
+        elements: entry.elements.map((element) =>
+          element.type === "text" ? { ...element, fontFamily: element.fontSize >= 28 ? heading : body } : element
         ),
-      };
-    });
+      }))
+    );
   }
 
   function undo() {
@@ -1278,7 +1228,6 @@ function useEditorApi(initial: DeckDesign) {
     setEditingId,
     canUndo: depth.past > 0,
     canRedo: depth.future > 0,
-    commit,
     setLive,
     commitFrom,
     mapSlide,

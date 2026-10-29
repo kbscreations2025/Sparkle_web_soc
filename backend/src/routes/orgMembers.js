@@ -4,7 +4,7 @@ const { hasPermission } = require("../permissions");
 const { GRANT_GROUPS, ALL_GRANTS, unknownGrants } = require("../grants");
 const { handle, bad, isId, toMember, validateScope } = require("./_shared");
 const { liveSessionCounts, forceLogout } = require("../socket");
-const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const { logRequestAudit } = require("../auditLog");
 const User = require("../models/user");
 const { balancesByUser } = require("../services/credits");
 
@@ -190,9 +190,7 @@ router.patch(
 
     await member.save();
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId,
       action: "member.updated",
       status: "success",

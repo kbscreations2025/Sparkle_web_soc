@@ -1,11 +1,9 @@
 const express = require("express");
-const mongoose = require("mongoose");
-const config = require("../config");
 const loginApi = require("../loginApi");
 const { requireAuth, requireSuperAdmin } = require("../middleware/auth");
 const { liveSessionCounts, forceLogout } = require("../socket");
-const { GRANT_GROUPS, TOOL_KEYS, DEFAULT_MEMBER_GRANTS, unknownGrants } = require("../grants");
-const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const { GRANT_GROUPS, DEFAULT_MEMBER_GRANTS, unknownGrants } = require("../grants");
+const { logRequestAudit } = require("../auditLog");
 const { handle, bad, notFound, isId, toMember, validateScope } = require("./_shared");
 const Tenant = require("../models/tenant");
 const User = require("../models/user");
@@ -210,9 +208,7 @@ router.post(
 
     const tenant = await Tenant.create({ name: name.trim(), slug: derived });
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: tenant._id,
       action: "org.created",
       status: "success",
@@ -251,9 +247,7 @@ router.patch(
     if (timezone !== undefined) tenant.timezone = timezone;
     await tenant.save();
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: tenant._id,
       action: "org.updated",
       status: "success",
@@ -291,9 +285,7 @@ router.delete(
       { $set: { deletedAt: now, status: "removed" } }
     );
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: tenant._id,
       action: "org.deleted",
       status: "success",
@@ -308,6 +300,21 @@ router.delete(
 );
 
 // ── members ─────────────────────────────────────────────────────────────────
+/** Drops a member's live sockets, if they have ever signed in, and records why. */
+function forceLogoutMember(req, member, why, metadata) {
+  if (!member.authUserId) return;
+  forceLogout(member.authUserId);
+  logRequestAudit(req, {
+    tenantId: member.tenantId,
+    action: "auth.force_logout_by_admin",
+    status: "success",
+    targetType: "user",
+    targetId: String(member._id),
+    message: `force-logged-out ${member.email} (${why})`,
+    metadata,
+  });
+}
+
 router.get(
   "/organizations/:id/members",
   handle(async (req, res) => {
@@ -395,9 +402,7 @@ router.post(
       console.error(`admin: could not set ${member.email}'s daily allowance:`, err.message);
     }
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: req.tenant._id,
       action: "member.added",
       status: "success",
@@ -466,9 +471,7 @@ router.patch(
 
     await member.save();
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: member.tenantId,
       action: "member.updated",
       status: "success",
@@ -491,19 +494,8 @@ router.patch(
     // Suspending someone has to reach their open tabs. The socket sweep only
     // checks the central login, which still considers them signed in, so
     // without this they would keep a working page until they reloaded.
-    if (status !== undefined && status !== "active" && member.authUserId) {
-      forceLogout(member.authUserId);
-      logAudit({
-        ...actorFrom(req),
-        ...requestMeta(req),
-        tenantId: member.tenantId,
-        action: "auth.force_logout_by_admin",
-        status: "success",
-        targetType: "user",
-        targetId: String(member._id),
-        message: `force-logged-out ${member.email} (status changed to "${status}")`,
-        metadata: { reason: "status_changed", newStatus: status },
-      });
+    if (status !== undefined && status !== "active") {
+      forceLogoutMember(req, member, `status changed to "${status}"`, { reason: "status_changed", newStatus: status });
     }
 
     res.json({ status: "success", member: toMember(member) });
@@ -527,9 +519,7 @@ router.delete(
     );
     if (!member) return notFound(res, "member");
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: member.tenantId,
       action: "member.removed",
       status: "success",
@@ -541,20 +531,7 @@ router.delete(
 
     // Drop their live sockets now rather than letting them keep a working page
     // until the next revalidation sweep.
-    if (member.authUserId) {
-      forceLogout(member.authUserId);
-      logAudit({
-        ...actorFrom(req),
-        ...requestMeta(req),
-        tenantId: member.tenantId,
-        action: "auth.force_logout_by_admin",
-        status: "success",
-        targetType: "user",
-        targetId: String(member._id),
-        message: `force-logged-out ${member.email} (member removed)`,
-        metadata: { reason: "member_removed" },
-      });
-    }
+    forceLogoutMember(req, member, "member removed", { reason: "member_removed" });
 
     res.json({ status: "success" });
   })
@@ -570,6 +547,13 @@ function invalidPriority(priority) {
   if (!Number.isInteger(priority) || priority < 0) return "priority must be a whole number, 0 or more";
   return null;
 }
+
+const duplicateKey = (res) =>
+  res.status(409).json({
+    status: "error",
+    message: "this organization already has that key — add a different one",
+    code: "duplicate_key",
+  });
 
 /** Shapes a provider entry for the console — the credential itself never leaves the model. */
 const toProvider = (entry) => ({
@@ -608,13 +592,7 @@ router.post(
     const priorityError = invalidPriority(priority);
     if (priorityError) return bad(res, priorityError);
 
-    if (tenant.hasProviderKey(apiKey.trim())) {
-      return res.status(409).json({
-        status: "error",
-        message: "this organization already has that key — add a different one",
-        code: "duplicate_key",
-      });
-    }
+    if (tenant.hasProviderKey(apiKey.trim())) return duplicateKey(res);
 
     const entry = tenant.addProvider({
       provider,
@@ -628,9 +606,7 @@ router.post(
 
     await tenant.save();
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: tenant._id,
       action: "ai_provider.added",
       status: "success",
@@ -660,13 +636,7 @@ router.patch(
 
     // Rotating onto a key another entry already holds would create the
     // duplicate the POST path refuses, so it is refused here too.
-    if (apiKey?.trim() && tenant.hasProviderKey(apiKey.trim(), { exceptId: providerId })) {
-      return res.status(409).json({
-        status: "error",
-        message: "this organization already has that key — add a different one",
-        code: "duplicate_key",
-      });
-    }
+    if (apiKey?.trim() && tenant.hasProviderKey(apiKey.trim(), { exceptId: providerId })) return duplicateKey(res);
 
     const before = { label: entry.label, orgId: entry.orgId, priority: entry.priority, enabled: entry.enabled, keyHint: entry.keyHint };
     const keyRotated = Boolean(apiKey?.trim());
@@ -680,9 +650,7 @@ router.patch(
 
     await tenant.save();
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: tenant._id,
       action: "ai_provider.updated",
       status: "success",
@@ -715,9 +683,7 @@ router.delete(
     entry.deleteOne();
     await tenant.save();
 
-    logAudit({
-      ...actorFrom(req),
-      ...requestMeta(req),
+    logRequestAudit(req, {
       tenantId: tenant._id,
       action: "ai_provider.deleted",
       status: "success",

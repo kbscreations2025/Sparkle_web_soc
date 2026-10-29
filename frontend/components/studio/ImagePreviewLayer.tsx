@@ -31,11 +31,10 @@ export function ImagePreviewLayer({
   // Held as the source being marked up rather than a flag, so closing one
   // preview can never leave the editor armed for whichever is opened next.
   const [annotatingSrc, setAnnotatingSrc] = useState<string | null>(null);
-  const annotating = Boolean(preview) && annotatingSrc === preview?.src;
 
   if (!preview) return null;
 
-  if (annotating) {
+  if (annotatingSrc === preview.src) {
     return (
       <AnnotationOverlay
         fullscreen

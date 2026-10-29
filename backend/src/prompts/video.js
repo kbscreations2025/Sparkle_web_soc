@@ -335,7 +335,6 @@ function buildFullAnimationPrompt({ camera, mood, description, viewCount = 1, de
  * 4–8 seconds as "out of bound" at the time it was tested, so values above
  * that may still be refused server-side depending on model and tier.
  */
-const DURATION_OPTIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const DEFAULT_DURATION = 8;
 const MIN_DURATION = 4;
 const MAX_DURATION = 15;
@@ -463,7 +462,6 @@ module.exports = {
   DEFAULT_NEGATIVE_PROMPT,
   buildImageAnimationPrompt,
   buildDesignSpecPrompt,
-  DURATION_OPTIONS,
   DEFAULT_DURATION,
   MIN_DURATION,
   MAX_DURATION,

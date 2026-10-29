@@ -332,19 +332,6 @@ button, a { transition-property: color, background-color, border-color, opacity,
     background: #fff !important;
   }
 
-  /* The deck scrolls inside a pane on screen; on paper it must be allowed to
-     run to its full height instead of being clipped to one viewport. */
-  #affinity-print-area {
-    overflow: visible !important;
-    max-height: none !important;
-  }
-
-  /* One slide per page, as the deck presents them. */
-  #affinity-print-area > div > div {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-
   /* The deck editor's PDF (components/studio/deck-editor/PrintDeck.tsx): while
      it is on the page, it is the only thing printed — one 13.333×7.5in slide
      per sheet, backgrounds and all, exactly as drawn on screen. */

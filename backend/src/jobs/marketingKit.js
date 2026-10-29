@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const { registerJobHandler } = require("./registry");
-const { runTextJob, ModelRefusedError } = require("./textRunner");
+const { runTextJob, ModelRefusedError, inlineData } = require("./textRunner");
 const { runGenerationJob } = require("./generationRunner");
 const kits = require("../services/marketingKits");
 const gemini = require("../providers/gemini");
@@ -27,8 +27,6 @@ const WRITING_MODEL = "gemini-2.5-pro";
 /** What a kit records about the model that wrote it. */
 const KIT_MODEL = { provider: "google", modelId: WRITING_MODEL, modelLabel: gemini.labelFor(WRITING_MODEL) };
 
-const inlineData = ({ mimeType, base64 }) => ({ inlineData: { mimeType, data: base64 } });
-
 /**
  * A kit's id, minted before either record is written.
  *
@@ -50,6 +48,41 @@ function newKitId() {
 async function saveKit({ kind, kitId, dbUser, generationId, save }) {
   const kit = await kits.saveKitSafely(save, { kind, kitId, dbUser, model: KIT_MODEL, generationId });
   return { kitId: String(kitId), kit, kitSaved: Boolean(kit) };
+}
+
+/**
+ * Files a campaign-shaped kit — Campaign Kit's shots, Festive Poster's
+ * posters — from the image runner's `persist` arguments, once the pictures
+ * are stored. `fields` are what differs by kind: the title, the model photo
+ * and the inputs it was made from.
+ */
+function saveShotsKit({ saved, delivered, data, dbUser, provider, model, modelLabel }, { kind, kitId, ...fields }) {
+  return saveKit({
+    kind,
+    kitId,
+    dbUser,
+    generationId: saved.generationId,
+    save: () =>
+      kits.saveCampaignKit({
+        kind,
+        ...fields,
+        dbUser,
+        kitId,
+        generationId: saved.generationId,
+        model: { provider, modelId: model, modelLabel },
+        // Index-aligned with `delivered`: a shot that failed is
+        // absent from both, so a three-of-four kit is still correct.
+        shots: delivered.map((shot, index) => ({
+          id: shot.id,
+          label: shot.label,
+          assetId: saved.outputs[index]?.assetId ?? null,
+          url: saved.outputs[index]?.url,
+          thumbnailUrl: saved.outputs[index]?.thumbnailUrl ?? null,
+          caption: "",
+        })),
+        options: data.options,
+      }),
+  });
 }
 
 /**
@@ -426,35 +459,9 @@ registerJobHandler(CAMPAIGN_KIT_JOB, (context) => {
      */
     persist: context.data.isRefinement
       ? undefined
-      : ({ saved, delivered, data, dbUser, provider, model, modelLabel }) => {
-          const [modelImage, ...jewelry] = data.sourceImages;
-
-          return saveKit({
-            kind: "campaign",
-            kitId,
-            dbUser,
-            generationId: saved.generationId,
-            save: () =>
-              kits.saveCampaignKit({
-                dbUser,
-                kitId,
-                generationId: saved.generationId,
-                model: { provider, modelId: model, modelLabel },
-                modelImage,
-                sourceImages: jewelry,
-                // Index-aligned with `delivered`: a shot that failed is
-                // absent from both, so a three-of-four kit is still correct.
-                shots: delivered.map((shot, index) => ({
-                  id: shot.id,
-                  label: shot.label,
-                  assetId: saved.outputs[index]?.assetId ?? null,
-                  url: saved.outputs[index]?.url,
-                  thumbnailUrl: saved.outputs[index]?.thumbnailUrl ?? null,
-                  caption: "",
-                })),
-                options: data.options,
-              }),
-          });
+      : (run) => {
+          const [modelImage, ...jewelry] = run.data.sourceImages;
+          return saveShotsKit(run, { kind: "campaign", kitId, modelImage, sourceImages: jewelry });
         },
   });
 });
@@ -485,32 +492,13 @@ registerJobHandler(FESTIVE_POSTER_JOB, (context) => {
     // A retouch edits one poster inside an existing kit — only a first run writes one.
     persist: context.data.isRefinement
       ? undefined
-      : ({ saved, delivered, data, dbUser, provider, model, modelLabel }) =>
-          saveKit({
+      : (run) =>
+          saveShotsKit(run, {
             kind: "festive",
             kitId,
-            dbUser,
-            generationId: saved.generationId,
-            save: () =>
-              kits.saveCampaignKit({
-                kind: "festive",
-                title: `${eventLabel(data.options || {})} poster`,
-                dbUser,
-                kitId,
-                generationId: saved.generationId,
-                model: { provider, modelId: model, modelLabel },
-                modelImage: null,
-                sourceImages: data.sourceImages,
-                shots: delivered.map((shot, index) => ({
-                  id: shot.id,
-                  label: shot.label,
-                  assetId: saved.outputs[index]?.assetId ?? null,
-                  url: saved.outputs[index]?.url,
-                  thumbnailUrl: saved.outputs[index]?.thumbnailUrl ?? null,
-                  caption: "",
-                })),
-                options: data.options,
-              }),
+            title: `${eventLabel(run.data.options || {})} poster`,
+            modelImage: null,
+            sourceImages: run.data.sourceImages,
           }),
   });
 });

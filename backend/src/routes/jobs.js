@@ -2,7 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const { requireAuth } = require("../middleware/auth");
 const { getQueueForType, toPublicJob } = require("../queue");
-const { logAudit, requestMeta, actorFrom } = require("../auditLog");
+const { logRequestAudit } = require("../auditLog");
 const Job = require("../models/job");
 
 const router = express.Router();
@@ -39,14 +39,17 @@ router.get("/", async (req, res) => {
     query.status = { $in: LIVE_STATUSES };
   }
 
-  const jobs = await Job.find(query).sort({ createdAt: -1 }).limit(limit);
+  const [jobs, activeCount] = await Promise.all([
+    Job.find(query).sort({ createdAt: -1 }).limit(limit),
+    Job.countDocuments({ userId: req.dbUser._id, status: { $in: LIVE_STATUSES } }),
+  ]);
 
   res.json({
     status: "success",
     jobs: jobs.map(toPublicJob),
     // Lets the UI say "2 running" without a second request or counting a
     // truncated page.
-    activeCount: await Job.countDocuments({ userId: req.dbUser._id, status: { $in: LIVE_STATUSES } }),
+    activeCount,
   });
 });
 
@@ -109,9 +112,7 @@ router.delete("/:id", async (req, res) => {
   job.finishedAt = new Date();
   await job.save();
 
-  logAudit({
-    ...actorFrom(req),
-    ...requestMeta(req),
+  logRequestAudit(req, {
     tenantId: job.tenantId,
     action: "job.cancelled",
     status: "success",

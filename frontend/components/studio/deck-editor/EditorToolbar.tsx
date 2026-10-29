@@ -38,7 +38,6 @@ import {
   Scan,
   Square,
 } from "lucide-react";
-import type { AffinityPiece } from "@/lib/affinity";
 import { BRAND_COLORS, FONTS, fontStack, type DesignElement, type ShapeElement, type TextElement } from "@/lib/deckDesign";
 import { cn } from "@/lib/utils";
 import type { EditorApi } from "./DeckEditor";
@@ -48,7 +47,7 @@ import type { EditorApi } from "./DeckEditor";
  * controls for text, fill and outline for shapes, fit and corners for
  * images — with arrange, group, lock and delete for anything.
  */
-export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; pieces: AffinityPiece[]; onOpenImages: () => void }) {
+export function EditorToolbar({ api, onOpenImages }: { api: EditorApi; onOpenImages: () => void }) {
   const elements = api.selectedElements;
   const texts = elements.filter((element): element is TextElement => element.type === "text");
   const shapes = elements.filter((element): element is ShapeElement => element.type === "shape");
@@ -322,8 +321,11 @@ function MenuTool({ onClick, icon, label }: { onClick: () => void; icon: ReactNo
   );
 }
 
-/** A button that opens a small panel under it, closed by clicking anywhere else. */
-function Popover({ label, icon, children }: { label: string; icon: ReactNode; children: ReactNode }) {
+/**
+ * A toolbar button's drop-down: whether it is open, closed by a press anywhere
+ * outside `ref`, and a `panelRef` for the panel itself.
+ */
+function useDropdown() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -335,6 +337,20 @@ function Popover({ label, icon, children }: { label: string; icon: ReactNode; ch
     window.addEventListener("pointerdown", close);
     return () => window.removeEventListener("pointerdown", close);
   }, [open]);
+
+  // Shifted left when it would run off the right edge of a narrow screen.
+  const panelRef = (panel: HTMLDivElement | null) => {
+    if (!panel) return;
+    const overflow = panel.getBoundingClientRect().right - (window.innerWidth - 12);
+    if (overflow > 0) panel.style.transform = `translateX(-${overflow}px)`;
+  };
+
+  return { open, setOpen, ref, panelRef };
+}
+
+/** A button that opens a small panel under it, closed by clicking anywhere else. */
+function Popover({ label, icon, children }: { label: string; icon: ReactNode; children: ReactNode }) {
+  const { open, setOpen, ref, panelRef } = useDropdown();
 
   return (
     <div ref={ref} className="relative">
@@ -352,12 +368,7 @@ function Popover({ label, icon, children }: { label: string; icon: ReactNode; ch
       </button>
       {open && (
         <div
-          // Shifted left when it would run off the right edge of a narrow screen.
-          ref={(panel) => {
-            if (!panel) return;
-            const overflow = panel.getBoundingClientRect().right - (window.innerWidth - 12);
-            if (overflow > 0) panel.style.transform = `translateX(-${overflow}px)`;
-          }}
+          ref={panelRef}
           className="absolute left-0 top-full z-50 mt-1 w-[240px] max-w-[calc(100vw-24px)] rounded-lg border border-black/10 bg-white p-3 shadow-xl"
         >
           {children}
@@ -426,18 +437,8 @@ function ColorButton({
   /** The deck's brand colours, offered before the standard palette. */
   brand?: string[];
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const { open, setOpen, ref, panelRef } = useDropdown();
   const none = value === "transparent" || !value;
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
-  }, [open]);
 
   return (
     <div ref={ref} className="relative">
@@ -462,11 +463,7 @@ function ColorButton({
       </button>
       {open && (
         <div
-          ref={(panel) => {
-            if (!panel) return;
-            const overflow = panel.getBoundingClientRect().right - (window.innerWidth - 12);
-            if (overflow > 0) panel.style.transform = `translateX(-${overflow}px)`;
-          }}
+          ref={panelRef}
           className="absolute left-0 top-full z-50 mt-1 w-[212px] rounded-lg border border-black/10 bg-white p-3 shadow-xl">
           <div className="grid grid-cols-6 gap-1.5">
             {allowNone && (

@@ -50,6 +50,8 @@ export function UploadZone({
   max?: number;
 }) {
   const full = max !== undefined && items.length >= max;
+  /** How many more photos it takes — unset when there's no limit. */
+  const room = max === undefined ? undefined : Math.max(0, max - items.length);
   const inputRef = useRef<HTMLInputElement>(null);
   /*
    * A click offers the library as well as the disk — earlier uploads and
@@ -72,8 +74,8 @@ export function UploadZone({
     const images = files.filter((file) =>
       file.type.startsWith("image/"),
     );
-    const room = max === undefined ? images.length : Math.max(0, max - items.length);
-    if (images.length && room) onAdd(images.slice(0, room));
+    const take = room ?? images.length;
+    if (images.length && take) onAdd(images.slice(0, take));
   }
 
   function handleDrop(event: DragEvent) {
@@ -81,6 +83,21 @@ export function UploadZone({
     setDragging(false);
     if (!disabled) accept([...event.dataTransfer.files]);
   }
+
+  /** The drop target's handlers and state classes — the same on the compact "+" tile and the full dropzone. */
+  const dropTarget = {
+    onDrop: handleDrop,
+    onDragOver: (event: DragEvent) => {
+      event.preventDefault();
+      if (!disabled) setDragging(true);
+    },
+    onDragLeave: () => setDragging(false),
+    onClick: () => !disabled && library.show(),
+  };
+  const dropTargetClass = [
+    dragging ? "border-gold/50 bg-gold/[0.06]" : "border-white/15 hover:border-gold/30 hover:bg-white/[0.03]",
+    disabled && "pointer-events-none opacity-50",
+  ];
 
   /*
    * Only for someone without the library — the dialog has its own. Kept out
@@ -106,7 +123,7 @@ export function UploadZone({
       open={library.open}
       onClose={library.close}
       onFiles={accept}
-      room={max === undefined ? undefined : Math.max(0, max - items.length)}
+      room={room}
     />
   );
 
@@ -148,20 +165,11 @@ export function UploadZone({
 
           {!full && <li>
             <div
-              onDrop={handleDrop}
-              onDragOver={(event) => {
-                event.preventDefault();
-                if (!disabled) setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onClick={() => !disabled && library.show()}
+              {...dropTarget}
               title={library.available ? "Add a photo — upload one, or pick from your library" : "Add a photo"}
               className={cn(
                 "flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-dashed transition-colors",
-                dragging
-                  ? "border-gold/50 bg-gold/[0.06]"
-                  : "border-white/15 hover:border-gold/30 hover:bg-white/[0.03]",
-                disabled && "pointer-events-none opacity-50",
+                dropTargetClass,
               )}
             >
               <Plus size={18} className="text-faint" />
@@ -178,19 +186,10 @@ export function UploadZone({
       {input}
       {picker}
       {!full && <div
-        onDrop={handleDrop}
-        onDragOver={(event) => {
-          event.preventDefault();
-          if (!disabled) setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onClick={() => !disabled && library.show()}
+        {...dropTarget}
         className={cn(
           "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center transition-colors",
-          dragging
-            ? "border-gold/50 bg-gold/[0.06]"
-            : "border-white/15 hover:border-gold/30 hover:bg-white/[0.03]",
-          disabled && "pointer-events-none opacity-50",
+          dropTargetClass,
         )}
       >
         <ImagePlus size={22} className="text-faint" />

@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { Lock, Newspaper, Users } from "lucide-react";
-import { CampaignKitDeck } from "@/components/studio/CampaignKitDeck";
+import { Suspense, useCallback, useState } from "react";
+import { Newspaper, Users } from "lucide-react";
+import { CampaignKitDeck, useReopenedCampaignKit } from "@/components/studio/CampaignKitDeck";
+import { FixedNoteChip, withFixedNote } from "@/components/studio/FixedNote";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
 import { ModelLibrary } from "@/components/studio/ModelLibrary";
@@ -15,12 +15,10 @@ import { UploadZone, type UploadItem } from "@/components/studio/UploadZone";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
 import {
   campaignKit,
-  fetchMarketingKit,
   refineCampaignKit,
   IMAGE_EDIT_MODELS,
   DEFAULT_IMAGE_EDIT_MODEL,
   toModelOptions,
-  type MarketingKit,
   type ImageEditModelId,
 } from "@/lib/api";
 import { BOX_STYLE_OPTIONS, POSE_OPTIONS, STUDIO_PROP_OPTIONS, CAMPAIGN_ASPECTS } from "@/lib/campaignOptions";
@@ -35,13 +33,6 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 
 const PERMISSION = "tool.marketing_kit.run";
 const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
-
-/**
- * Sent with every kit, ahead of the user's own notes — the same locked line
- * Lifestyle sends, since it gives the best-sized results. Shown as a locked
- * chip in "Anything else" so it can't be cleared or edited away.
- */
-const FIXED_NOTE = "make the Jewelry very very very small";
 
 const HINTS = [
   "Warm the lighting a little",
@@ -69,32 +60,16 @@ export default function CampaignKitPage() {
 
 function CampaignKitWorkspace() {
   const { user } = useAuth();
-  const searchParams = useSearchParams();
-  const openKitId = searchParams.get("kitId");
 
   /** A saved deck being reopened from the kits rail, rather than a new run. */
-  const [openKit, setOpenKit] = useState<MarketingKit | null>(null);
-
-  useEffect(() => {
-    if (!openKitId) return;
-    let cancelled = false;
-
-    fetchMarketingKit(openKitId).then((res) => {
-      if (!cancelled && res.status === "success" && res.kit?.campaign) setOpenKit(res.kit);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [openKitId]);
+  const openKit = useReopenedCampaignKit();
 
   const library = useModelLibrary();
   const [jewelry, setJewelry] = useState<UploadItem[]>([]);
   /** A jewellery photo opened for a closer look — same affordance Lifestyle's upload gives. */
   const [jewelryPreview, setJewelryPreview] = useState<PreviewImage | null>(null);
   const [description, setDescription] = useState("");
-  // The fixed size note always leads; whatever the user types is added after it.
-  const fullDescription = [FIXED_NOTE, description.trim()].filter(Boolean).join(". ");
+  const fullDescription = withFixedNote(description);
   const [aspect, setAspect] = useState<string>(CAMPAIGN_ASPECTS[0].id);
   const [pose, setPose] = useState<string>(POSE_OPTIONS[0].id);
   const [box, setBox] = useState<string>(BOX_STYLE_OPTIONS[0].id);
@@ -232,14 +207,7 @@ function CampaignKitWorkspace() {
 
             <PromptCard
               label="Anything else"
-              topSlot={
-                <span
-                  title="Always sent — gives the best-sized results"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-gold/25 bg-gold/10 px-2 py-1 text-[12px] text-gold"
-                >
-                  <Lock size={11} /> {FIXED_NOTE}
-                </span>
-              }
+              topSlot={<FixedNoteChip />}
               value={description}
               onChange={setDescription}
               placeholder="Optional — applied to all four shots"

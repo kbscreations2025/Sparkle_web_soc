@@ -48,6 +48,34 @@ function resultReadFilter(user, { toolKey } = {}) {
   return filter;
 }
 
+/**
+ * Whose live rows a History-style list may show, as a Mongo filter on the
+ * caller's own tenant. History and the upload boxes' library both read
+ * through this — one filter, so the two can never disagree about who sees
+ * what.
+ *
+ * Own work only, unless the caller both holds `result.read.others` and asks
+ * for `scope=team` — the permission decides *whether* a "Whole team" toggle
+ * can do anything, `dataScope` decides how far it reaches once it's flipped.
+ */
+function reachFilter(user, wantsTeam) {
+  const filter = { tenantId: user.tenantId, deletedAt: null };
+  if (!wantsTeam || !hasPermission(user, "result.read.others")) {
+    filter.userId = user._id;
+    return filter;
+  }
+
+  const scope = user.dataScope || { kind: "own" };
+  if (scope.kind === "selected") {
+    filter.userId = { $in: [user._id, ...(scope.userIds || [])] };
+  } else if (scope.kind === "own") {
+    filter.userId = user._id;
+  }
+  // kind === "organization" adds no userId clause — the whole tenant is in reach.
+  if (scope.notBefore) filter.createdAt = { $gte: scope.notBefore };
+  return filter;
+}
+
 function canExport(user) {
   // Reading nothing means exporting nothing — checked first, so a suspended
   // user can't fall through the "own data needs no grant" shortcut below.
@@ -59,4 +87,4 @@ function canExport(user) {
   return scope.canExport === true;
 }
 
-module.exports = { grantMatches, hasPermission, resultReadFilter, canExport };
+module.exports = { hasPermission, resultReadFilter, reachFilter, canExport };
