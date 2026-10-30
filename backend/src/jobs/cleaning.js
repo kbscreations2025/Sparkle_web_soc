@@ -15,6 +15,7 @@ const { createLivePreview } = require("../storage/thumbnail");
 const { registerJobHandler } = require("./registry");
 const { loadJobActor } = require("./actor");
 const { detectIntent, intentForTool, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
+const { VIEW_LOCK, VIEW_CHECK, VIEW_KEEP_NOTE, REMOVE_MARKINGS_NOTE, KEEP_MARKINGS_NOTE } = require("../prompts/shared");
 
 const CLEANING_JOB = "cleaning.generate";
 
@@ -79,10 +80,26 @@ function usesGoldSwatch({ isRefinement, customPrompt, variant }) {
  * plays no part here: once a thread exists, a refinement is the same
  * instruction wrapper regardless of which mode started it.
  */
-function buildPrompt({ isRefinement, instruction, customPrompt, variant, extraNotes, referenceCount = 0, swatch = false }) {
+function buildPrompt({
+  isRefinement,
+  instruction,
+  customPrompt,
+  variant,
+  extraNotes,
+  referenceCount = 0,
+  swatch = false,
+  removeMarkings = false,
+}) {
   // The swatch note rides with the built-in prompt it explains, ahead of any
-  // extras, so a user's "make it rose gold" still has the last word.
-  const builtIn = `${BUILT_IN_PROMPTS[variant] || IMAGE_CLEANING_PROMPT}${swatch ? `\n${GOLD_SWATCH_NOTE}` : ""}`;
+  // extras, so a user's "make it rose gold" still has the last word. The view
+  // lock leads and its check closes the prompt: both ends are where a model
+  // weighs an instruction most (see VIEW_LOCK). The markings rule follows the
+  // built-in prompt directly: the form's box picks one, and Cleaning 2's
+  // prompt carries no rule of its own about markings (see imageCleaning.js).
+  const builtIn =
+    `${VIEW_LOCK}\n\n${BUILT_IN_PROMPTS[variant] || IMAGE_CLEANING_PROMPT}${swatch ? `\n${GOLD_SWATCH_NOTE}` : ""}` +
+    `\n\n${removeMarkings ? REMOVE_MARKINGS_NOTE : KEEP_MARKINGS_NOTE}` +
+    `\n\n${VIEW_CHECK}`;
   if (!isRefinement && !customPrompt?.trim() && extraNotes?.trim()) {
     // "Default" plus the user's own extras: the built-in prompt still governs
     // (it is what preserves the design), with their wishes added on top.
@@ -98,7 +115,9 @@ function buildPrompt({ isRefinement, instruction, customPrompt, variant, extraNo
     return (
       `Modify this jewelry photograph (the first image) as follows: ${instruction}. ` +
       "Preserve the pure white studio background, professional lighting, and all other " +
-      "photographic qualities. Only apply the specifically requested changes. " +
+      "photographic qualities. Only apply the specifically requested changes." +
+      VIEW_KEEP_NOTE +
+      " " +
       COLOR_NOTE +
       buildReferenceNote(referenceCount)
     );
@@ -138,6 +157,7 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
     extraNotes,
     referenceCount: references.length,
     swatch,
+    removeMarkings: data.removeMarkings === true,
   });
 
   // A follow-up is shaped by what it asks for — "in rose gold" recolours the

@@ -32,10 +32,10 @@ function setAuthCookies(res, { access_token, refresh_token, device_token, user }
 }
 
 /**
- * Logout revokes the trusted device server-side too, so device_token goes with
- * it by default. `keepDeviceToken` is for the one caller that ends only this
- * browser's session (/session/clear): the device is still trusted upstream, so
- * dropping the cookie would force a needless OTP on the next sign-in.
+ * `device_token` goes with the rest by default. `keepDeviceToken` is for the
+ * callers that end only this browser's session (/logout, /session/clear): the
+ * device is still trusted upstream, so dropping the cookie would force a
+ * needless OTP on the next sign-in.
  */
 function clearAuthCookies(res, { keepDeviceToken = false } = {}) {
   const names = ["access_token", "refresh_token", "user_profile"];

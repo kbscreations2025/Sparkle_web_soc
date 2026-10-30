@@ -952,6 +952,11 @@ export function cleanImage(body: {
    * prompt (unlike `customPrompt`, which replaces it). Ignored with `customPrompt`.
    */
   extraNotes?: string;
+  /**
+   * Take every engraving, hallmark and brand stamp off the piece. Only read
+   * alongside the built-in prompt; left out, they are kept.
+   */
+  removeMarkings?: boolean;
   /** Set to keep a retry in the same thread as the run it follows. */
   conversationId?: string | null;
   /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
@@ -1007,14 +1012,33 @@ export type ChatEditResult = {
 };
 
 /**
+ * What an attached image is for in Chat to Edit — see REFERENCE_ROLES in
+ * backend/src/prompts/chatToEdit.js. "marks" is set by the page for a
+ * marked-up copy of the photo, never picked by hand.
+ */
+export type ReferenceRole = "auto" | "piece" | "stone" | "texture" | "scene" | "inspiration" | "marks";
+
+/** The roles a person can pick for an attachment, in menu order. */
+export const REFERENCE_ROLE_OPTIONS: { value: ReferenceRole; label: string; hint: string }[] = [
+  { value: "auto", label: "Auto", hint: "Decided from your message" },
+  { value: "piece", label: "New piece", hint: "Put this jewellery in — replacing the one in the photo" },
+  { value: "stone", label: "Stone", hint: "Set this stone into the jewellery — any shape" },
+  { value: "texture", label: "Texture", hint: "Give the metal this surface or finish" },
+  { value: "scene", label: "Wear on", hint: "A hand or model photo to wear the piece" },
+  { value: "inspiration", label: "Idea", hint: "Borrow an idea — never copied" },
+];
+
+/**
  * One turn of a chat-style edit. Unlike cleaning there's no "default" prompt
  * mode — `instruction` always drives the edit, so it's required.
  */
 export function chatEdit(body: {
   /** The image being edited this turn, as a data URI. */
   image: string;
-  /** Visual inspiration only — never copied into the result wholesale. */
+  /** Extra images, each used as its `referenceRoles` entry says. */
   referenceImages?: string[];
+  /** One per reference image, in the same order. Missing means "auto". */
+  referenceRoles?: ReferenceRole[];
   /** What's actually sent to the model. */
   instruction: string;
   /** What the UI shows for this turn. Falls back to `instruction` server-side if omitted. */

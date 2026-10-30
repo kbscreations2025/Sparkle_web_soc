@@ -153,9 +153,15 @@ router.post("/", async (req, res) => {
     annotated,
     sourceChecksum,
     extraNotes,
+    removeMarkings: wantsMarkingsRemoved,
   } = req.body || {};
 
   const isRefinement = Boolean(refineImage && instruction);
+  // The form's "Remove engravings, hallmarks & brand stamps" box. A first pass
+  // on the built-in prompt only — "Write my own" says everything itself, and a
+  // refinement only changes what it asks for. Absent means keep them, which is
+  // what every run did before the box existed.
+  const removeMarkings = !isRefinement && !customPrompt?.trim() && wantsMarkingsRemoved === true;
 
   // Only alongside the built-in prompt: "Write my own" replaces it outright,
   // and a refinement carries its own instruction. Bounded so a pasted essay
@@ -202,6 +208,7 @@ router.post("/", async (req, res) => {
       customPrompt: customPrompt?.trim() || null,
       extraNotes: notes || null,
       variant: isRefinement ? null : resolvedVariant,
+      removeMarkings,
       referenceCount: parsedReferences.length,
       conversationId: conversationId || null,
     },
@@ -217,6 +224,7 @@ router.post("/", async (req, res) => {
       customPrompt,
       extraNotes: notes,
       variant: resolvedVariant,
+      removeMarkings,
       conversationId,
       parentGenerationId,
       // Only a well-formed one is kept: it is matched against later, so junk

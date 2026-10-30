@@ -38,6 +38,9 @@ export function useAttachments({
   onError?: (message: string) => void;
 } = {}) {
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
+  // What each reference is for, by index — only Chat to Edit reads these.
+  // Missing entries mean "auto", so a tool that sets images alone needs no roles.
+  const [referenceRoles, setReferenceRoles] = useState<string[]>([]);
   // A marked-up copy of the current result — annotating again replaces this one
   // slot instead of piling up new chips.
   const [annotatedPhoto, setAnnotatedPhoto] = useState<string | null>(null);
@@ -49,8 +52,17 @@ export function useAttachments({
   const attachments: Attachment[] = [
     ...(extra ? [extra] : []),
     ...(annotatedPhoto ? [{ id: "photo", src: annotatedPhoto, label: "Photo" }] : []),
-    ...referenceImages.map((src, index) => ({ id: `ref-${index}`, src, label: "Ref" })),
+    ...referenceImages.map((src, index) => ({ id: `ref-${index}`, src, label: "Ref", role: referenceRoles[index] ?? "auto" })),
   ];
+
+  /** Sets what the reference at `index` is for. */
+  const setReferenceRole = useCallback((index: number, role: string) => {
+    setReferenceRoles((current) => {
+      const next = [...current];
+      next[index] = role;
+      return next;
+    });
+  }, []);
 
   const addReferenceImages = useCallback(
     async (files: File[]) => {
@@ -70,6 +82,8 @@ export function useAttachments({
       if (attachment.id === "photo") return setAnnotatedPhoto(null);
       const index = Number(attachment.id.replace("ref-", ""));
       setReferenceImages((current) => current.filter((_, i) => i !== index));
+      // Removed with its image, so the roles after it stay with their own images.
+      setReferenceRoles((current) => current.filter((_, i) => i !== index));
     },
     [extra, onRemoveExtra]
   );
@@ -112,6 +126,7 @@ export function useAttachments({
 
   const reset = useCallback(() => {
     setReferenceImages([]);
+    setReferenceRoles([]);
     setAnnotatedPhoto(null);
     setPreviewAttachment(null);
     setAnnotating(null);
@@ -121,6 +136,9 @@ export function useAttachments({
     attachments,
     referenceImages,
     setReferenceImages,
+    referenceRoles,
+    setReferenceRoles,
+    setReferenceRole,
     annotatedPhoto,
     setAnnotatedPhoto,
     previewAttachment,

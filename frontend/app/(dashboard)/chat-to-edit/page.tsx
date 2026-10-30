@@ -21,7 +21,9 @@ import {
   IMAGE_EDIT_MODELS,
   DEFAULT_IMAGE_EDIT_MODEL,
   toModelOptions,
+  REFERENCE_ROLE_OPTIONS,
   type ImageEditModelId,
+  type ReferenceRole,
 } from "@/lib/api";
 import { compressImage, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
@@ -41,6 +43,14 @@ const EDIT_HINTS = [
   "Change the background to soft grey",
   "Remove the reflection on the stone",
   "Warm up the lighting",
+];
+
+// Shown once something is attached: what an attachment can do, set on its chip.
+const ATTACHMENT_HINTS = [
+  "Replace the centre stone with this one",
+  "Give the band this texture",
+  "Put this ring on the hand",
+  "Replace the ring with this one",
 ];
 
 export default function ChatToEditPage() {
@@ -176,6 +186,10 @@ export default function ChatToEditPage() {
 
     const instruction = (instructionOverride ?? chatInput).trim() || "Enhance this image.";
     const refsThisTurn = annotatedPhoto ? [annotatedPhoto, ...referenceImages] : referenceImages;
+    // A marked-up copy of the photo only shows where — every other image goes
+    // as its chip says (see REFERENCE_ROLE_OPTIONS).
+    const pickedRoles = referenceImages.map((_, index) => (attach.referenceRoles[index] ?? "auto") as ReferenceRole);
+    const rolesThisTurn: ReferenceRole[] = annotatedPhoto ? ["marks", ...pickedRoles] : pickedRoles;
 
     const userMsg: ChatMsg = {
       id: crypto.randomUUID(),
@@ -190,6 +204,7 @@ export default function ChatToEditPage() {
     setHistory((current) => [...current, userMsg]);
     setChatInput("");
     attach.setReferenceImages([]);
+    attach.setReferenceRoles([]);
     attach.setAnnotatedPhoto(null);
     setSelectedView(null);
     setError("");
@@ -199,6 +214,7 @@ export default function ChatToEditPage() {
       const result = await chatEdit({
         image: baseImage,
         referenceImages: refsThisTurn,
+        referenceRoles: rolesThisTurn,
         instruction,
         displayPrompt: instruction,
         model,
@@ -231,7 +247,10 @@ export default function ChatToEditPage() {
         // the composer — the dialog is the only account of what happened.
         setHistory((current) => current.slice(0, -1));
         setChatInput(instruction);
-        attach.setReferenceImages(refsThisTurn);
+        // Each back in its own slot, with the roles that were picked for it.
+        attach.setReferenceImages(referenceImages);
+        attach.setReferenceRoles(pickedRoles);
+        attach.setAnnotatedPhoto(annotatedPhoto);
       } else {
         pushFailure(result.message || "The model returned no image", { instruction, baseImage, refsThisTurn });
       }
@@ -264,6 +283,7 @@ export default function ChatToEditPage() {
     if (msg.retryInstruction === undefined) return;
     setChatInput(msg.retryInstruction);
     attach.setReferenceImages(msg.retryRefImages ?? []);
+    attach.setReferenceRoles([]);
     // A failed *first* turn never produced a currentImage, so its image has
     // to go back into the pending slot rather than being assumed still current.
     if (!currentImage && msg.retryImage) setPendingImage(msg.retryImage);
@@ -284,7 +304,13 @@ export default function ChatToEditPage() {
               onSelectResult={setSelectedView}
               onRetry={readOnly ? undefined : retry}
               hints={
-                !readOnly && history.length === 0 ? (currentImage || pendingImage ? EDIT_HINTS : START_HINTS) : undefined
+                !readOnly && history.length === 0
+                  ? currentImage || pendingImage
+                    ? referenceImages.length
+                      ? ATTACHMENT_HINTS
+                      : EDIT_HINTS
+                    : START_HINTS
+                  : undefined
               }
               onHint={(hint) => (currentImage || pendingImage ? send(hint) : undefined)}
             />
@@ -301,6 +327,10 @@ export default function ChatToEditPage() {
                 attachments={attach.attachments}
                 onOpenAttachment={attach.setPreviewAttachment}
                 onRemoveAttachment={attach.removeAttachment}
+                roleOptions={REFERENCE_ROLE_OPTIONS}
+                onAttachmentRoleChange={(attachment, role) =>
+                  attach.setReferenceRole(Number(attachment.id.replace("ref-", "")), role)
+                }
                 onAttachFiles={attach.addReferenceImages}
                 onPasteImage={(file) => attach.addReferenceImages([file])}
                 modelOptions={MODEL_OPTIONS}

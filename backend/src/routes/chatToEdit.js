@@ -1,7 +1,9 @@
 const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { buildChatEditPrompt, buildReferenceNote, SCALE_NOTE, ANATOMY_NOTE } = require("../prompts");
+const { resolveReferenceRoles, hasRoleTask, buildRolePrompt, orderImages, describeRoles } = require("../prompts/chatToEdit");
 const { resolveIntent, intentForTool, refineCountFor, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
+const { matchColour, wantsColourChange } = require("../services/colorMatch");
 const { resolveProviderModel, routeProviderCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
 const { recordGeneration, parseDataUri, isOwnConversation } = require("../generationService");
 const { logRequestAudit } = require("../auditLog");
@@ -35,6 +37,8 @@ router.post("/", async (req, res) => {
     const {
       image,
       referenceImages,
+      // One per reference image: what it is for (see REFERENCE_ROLES).
+      referenceRoles,
       instruction,
       displayPrompt,
       model: requestedModel,
@@ -62,36 +66,79 @@ router.post("/", async (req, res) => {
     }
 
     // Invalid entries are dropped rather than rejecting the whole request —
-    // references are inspiration, not required inputs, so one bad one
-    // shouldn't sink an otherwise-good edit.
-    const parsedReferences = Array.isArray(referenceImages) ? referenceImages.map(parseDataUri).filter(Boolean) : [];
+    // one bad attachment shouldn't sink an otherwise-good edit. Each keeps the
+    // role sent for it, so dropping one never shifts the roles of the rest.
+    const references = (Array.isArray(referenceImages) ? referenceImages : [])
+      .map((value, index) => ({ image: parseDataUri(value), role: Array.isArray(referenceRoles) ? referenceRoles[index] : null }))
+      .filter((entry) => entry.image);
+    const parsedReferences = references.map((entry) => entry.image);
+    const roles = resolveReferenceRoles(
+      references.map((entry) => entry.role),
+      references.length,
+      instruction.trim()
+    );
 
     const { provider, model, quality, modelLabel } = resolveProviderModel(requestedModel, requestedQuality);
     resolvedProvider = provider;
 
     const tenant = await loadTenantOrThrow(dbUser);
 
-    /*
-     * What the turn asks for (see prompts/intent.js): "more designs" makes
-     * several images, each told to differ from the rest; "make it a pendant"
-     * or "in rose gold" reshape the prompt. A plain edit is unchanged.
-     */
-    const intent = intentForTool(await resolveIntent(instruction.trim(), { tenant }), "chat_to_edit");
-    const count = refineCountFor(intent, "chat_to_edit");
-    const basePrompt = buildChatEditPrompt(instruction.trim(), parsedReferences.length);
-    const prompts = Array.from({ length: count }, (_, index) =>
-      applyIntentToPrompt({
-        basePrompt,
-        instruction: instruction.trim(),
-        intent,
-        tool: "chat_to_edit",
-        referenceNote: [buildReferenceNote(parsedReferences.length).trim(), SCALE_NOTE, ANATOMY_NOTE].filter(Boolean).join(" "),
-        variationIndex: index,
-        variationTotal: count,
-      })
-    );
+    let prompts;
+    let images;
+    let intentLabel;
+    /** The image each result's colour is pulled back to, or null where matching would undo the request. */
+    let colourAnchor = null;
+
+    if (hasRoleTask(roles)) {
+      /*
+       * An attachment with a job — a piece to put in, a stone to set, a
+       * texture, a person to wear it (see prompts/chatToEdit.js). One image:
+       * these are precise edits, not a spread of options. The intent reader
+       * is skipped; the roles already say what the turn is.
+       */
+      const { order, colourAnchor: anchor } = orderImages(roles);
+      images = order.map((slot) => (slot.role === "base" ? parsedBase : parsedReferences[slot.ref]));
+      prompts = [buildRolePrompt({ instruction: instruction.trim(), roles })];
+      intentLabel = describeRoles(roles);
+      // Worn on a scene: the scene's own colours are the truth. A stone swap
+      // barely moves the photo's colours, so the base anchors it. A new
+      // piece or a texture can change the metal itself — matching the whole
+      // frame back would pull the new metal towards the old one.
+      const changesMetal = roles.some((role) => role === "piece" || role === "texture" || role === "wear");
+      if (anchor.ref !== null) colourAnchor = parsedReferences[anchor.ref];
+      else if (!changesMetal && !wantsColourChange(instruction)) colourAnchor = parsedBase;
+    } else {
+      /*
+       * What the turn asks for (see prompts/intent.js): "more designs" makes
+       * several images, each told to differ from the rest; "make it a pendant"
+       * or "in rose gold" reshape the prompt. A plain edit is unchanged.
+       */
+      const intent = intentForTool(await resolveIntent(instruction.trim(), { tenant }), "chat_to_edit");
+      const count = refineCountFor(intent, "chat_to_edit");
+      const basePrompt = buildChatEditPrompt(instruction.trim(), parsedReferences.length);
+      prompts = Array.from({ length: count }, (_, index) =>
+        applyIntentToPrompt({
+          basePrompt,
+          instruction: instruction.trim(),
+          intent,
+          tool: "chat_to_edit",
+          referenceNote: [buildReferenceNote(parsedReferences.length).trim(), SCALE_NOTE, ANATOMY_NOTE].filter(Boolean).join(" "),
+          variationIndex: index,
+          variationTotal: count,
+        })
+      );
+      images = [parsedBase, ...parsedReferences];
+      intentLabel = describeIntent(intent, "chat_to_edit", count);
+      // Each edit is a full redraw, and the redraw drifts warm and pink turn
+      // after turn — the prompt alone never stopped it (see colorMatch.js).
+      // Not where the turn means to change colour, metal, background or the
+      // design itself: there the shift is the request.
+      const intended = ["metal", "background", "explore", "type_change"].some((kind) => intent.kinds.includes(kind));
+      if (!intended && !wantsColourChange(instruction)) colourAnchor = parsedBase;
+    }
+
+    const count = prompts.length;
     const prompt = prompts.length === 1 ? prompts[0] : prompts.join("\n\n─────\n\n");
-    const intentLabel = describeIntent(intent, "chat_to_edit", count);
 
     /*
      * Charged like every other tool.
@@ -139,18 +186,23 @@ router.post("/", async (req, res) => {
     let outputs;
     let providerId;
     try {
-      const images = [
-        { mimeType: parsedBase.mimeType, base64: parsedBase.base64 },
-        ...parsedReferences.map((ref) => ({ mimeType: ref.mimeType, base64: ref.base64 })),
-      ];
       const settled = await Promise.allSettled(
         prompts.map((variationPrompt) =>
-          routeProviderCall({ tenant, provider, modelId: model, prompt: variationPrompt, quality, images })
+          routeProviderCall({
+            tenant,
+            provider,
+            modelId: model,
+            prompt: variationPrompt,
+            quality,
+            images: images.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
+          })
         )
       );
       const successes = settled.filter((entry) => entry.status === "fulfilled").map((entry) => entry.value);
       if (successes.length === 0) throw settled[0].reason;
-      outputs = successes.map((entry) => entry.output);
+      outputs = await Promise.all(
+        successes.map((entry) => (colourAnchor ? matchColour(entry.output, colourAnchor) : entry.output))
+      );
       providerId = successes[0].providerId;
     } catch (err) {
       // Nothing was produced, so nothing is owed.
@@ -185,6 +237,9 @@ router.post("/", async (req, res) => {
           ...parsedReferences.map((ref) => ({ image: ref, role: "reference" })),
         ],
         outputImages: outputs.map((output) => ({ image: output, role: "generated" })),
+        // What each reference was used as — "stone", "texture", "scene"… —
+        // in the same order as the references above.
+        params: references.length ? { referenceRoles: roles } : undefined,
         providerId,
         provider,
       });

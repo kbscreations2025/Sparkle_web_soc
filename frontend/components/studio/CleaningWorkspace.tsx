@@ -97,8 +97,10 @@ type ModelOption = { id: string; label: string; quality: string; description: st
  * The changes asked for on almost every photo, filled into the "Changes" box
  * on the pages that pass it as `defaultNotes`, so they needn't be retyped.
  */
+// Stamps are the "Remove engravings, hallmarks & brand stamps" box's job now —
+// left in here too, unticking the box would change nothing.
 export const DEFAULT_CLEANING_NOTES =
-  "High resolution image with white background And diamond make it Sharp & diamond yellow tone remove & metal more shine & make it stamp remove & add Shadow";
+  "High resolution image with white background And diamond make it Sharp & diamond yellow tone remove & metal more shine & add Shadow";
 
 /**
  * The Image Cleaning workspace: upload, clean, then refine in chat. Shared by
@@ -142,6 +144,8 @@ export function CleaningWorkspace<TModel extends string>({
    * instructions rather than replacing them, unlike "Write my own".
    */
   const [extraNotes, setExtraNotes] = useState(defaultNotes);
+  /** Engravings, hallmarks and brand stamps come off unless this is unticked. */
+  const [removeMarkings, setRemoveMarkings] = useState(true);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
@@ -465,7 +469,9 @@ export function CleaningWorkspace<TModel extends string>({
           // Stored with the upload, so the next time this photo is dropped
           // here it is recognised — see handleAdd.
           sourceChecksum: item.sourceChecksum,
-          ...(custom ? { customPrompt: custom } : { variant: promptVariant, ...(notes ? { extraNotes: notes } : {}) }),
+          ...(custom
+            ? { customPrompt: custom }
+            : { variant: promptVariant, removeMarkings, ...(notes ? { extraNotes: notes } : {}) }),
         });
 
         if (result.status === "queued" && result.job) {
@@ -667,6 +673,21 @@ export function CleaningWorkspace<TModel extends string>({
                 onPasteImage={running ? undefined : (file) => handleAdd([file])}
                 footerEnd={<InlineModelSelect models={modelOptions} value={model} onChange={setModel} showQuality align="right" />}
               />
+
+              {/* Part of the built-in prompt, so hidden for "Write my own",
+                  where the person's own words decide. */}
+              {!useCustomPrompt && (
+                <label className="flex w-fit cursor-pointer items-center gap-2 text-[11px] text-muted transition-colors hover:text-cream">
+                  <input
+                    type="checkbox"
+                    checked={removeMarkings}
+                    onChange={(event) => setRemoveMarkings(event.target.checked)}
+                    disabled={running}
+                    className="h-3.5 w-3.5 cursor-pointer accent-gold"
+                  />
+                  Remove engravings, hallmarks &amp; brand stamps
+                </label>
+              )}
             </section>
 
             <button

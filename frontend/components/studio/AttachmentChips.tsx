@@ -2,30 +2,41 @@
 
 import Image from "next/image";
 import { X } from "lucide-react";
+import { InlineDropdown } from "./InlineDropdown";
 
-export type Attachment = { id: string; src: string; label: string };
+/** `role` is set only on a reference whose job can be chosen — see `roleOptions`. */
+export type Attachment = { id: string; src: string; label: string; role?: string };
+
+export type RoleOption = { value: string; label: string; hint: string };
 
 /**
  * The row of small thumbnails above a chat input — whatever is staged for
  * the next send. Each chip is just a labelled, removable, clickable image;
  * what the label means (a staged first photo vs. a reference) is entirely up
  * to the caller.
+ *
+ * With `roleOptions`, a chip that carries a `role` also gets a small picker
+ * under it for what that image is for (Chat to Edit's "Stone", "Texture"…).
  */
 export function AttachmentChips({
   attachments,
   onOpen,
   onRemove,
+  roleOptions,
+  onRoleChange,
 }: {
   attachments: Attachment[];
   onOpen: (attachment: Attachment) => void;
   onRemove: (attachment: Attachment) => void;
+  roleOptions?: RoleOption[];
+  onRoleChange?: (attachment: Attachment, role: string) => void;
 }) {
   if (attachments.length === 0) return null;
 
   return (
     <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
       {attachments.map((attachment) => (
-        <div key={attachment.id} className="group relative">
+        <div key={attachment.id} className="group relative flex flex-col items-center gap-1">
           <button
             type="button"
             onClick={() => onOpen(attachment)}
@@ -44,6 +55,19 @@ export function AttachmentChips({
           >
             <X size={10} />
           </button>
+          {roleOptions && onRoleChange && attachment.role !== undefined && (
+            // The composer's own picker, like Model and Quality beside it — a
+            // native select opened an OS-drawn menu that matched nothing here.
+            <InlineDropdown
+              label="Use as"
+              value={attachment.role}
+              options={roleOptions}
+              onChange={(role) => onRoleChange(attachment, role)}
+              compact
+              triggerClassName="w-auto whitespace-nowrap"
+              panelClassName="w-44"
+            />
+          )}
         </div>
       ))}
     </div>

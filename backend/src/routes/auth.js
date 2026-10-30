@@ -204,18 +204,19 @@ router.post("/session/clear", (req, res) => {
   res.json({ status: "success" });
 });
 
+/**
+ * Ends this browser's session but keeps the device trusted, so signing back in
+ * from here takes the password alone — no OTP.
+ *
+ * Deliberately does NOT call the central logout, for the reason given on
+ * /session/clear: that revokes every trusted device for the user. The
+ * `device_token` cookie stays, and verify-login sends it on the next sign-in.
+ * The cost is that this browser's refresh token is not revoked upstream; it is
+ * only dropped here.
+ */
 router.post("/logout", async (req, res) => {
   const meta = requestMeta(req);
-  const { refresh_token: refreshTokenValue, access_token: accessTokenValue } = req.cookies;
-
-  try {
-    if (refreshTokenValue) {
-      await loginApi.logout(refreshTokenValue);
-    }
-  } catch (err) {
-    // Clear cookies regardless — the client shouldn't stay "logged in" locally
-    // just because the upstream call failed.
-  }
+  const { access_token: accessTokenValue } = req.cookies;
 
   // Best-effort: disconnect the live socket now instead of waiting for its
   // periodic revalidation sweep. Cache-only — logging out shouldn't spend an
@@ -235,7 +236,7 @@ router.post("/logout", async (req, res) => {
     ...meta,
   });
 
-  clearAuthCookies(res);
+  clearAuthCookies(res, { keepDeviceToken: true });
   res.json({ status: "success" });
 });
 

@@ -6,6 +6,16 @@
  *
  * Safe to edit the wording directly — nothing here is interpolated, and the
  * text reaches the model exactly as written.
+ *
+ * Says nothing about hallmarks, engravings or brand stamps on purpose: the
+ * form's "Remove engravings, hallmarks & brand stamps" box decides, and adds
+ * one rule either way (see REMOVE_MARKINGS_NOTE / KEEP_MARKINGS_NOTE in
+ * prompts/shared.js). With "keep them" written eight times in here, the
+ * remove rule was fighting the prompt it was added to.
+ *
+ * The background comes first and is checked last: with "faithful to the
+ * original photograph" up front and the backdrop rule buried mid-prompt, runs
+ * came back on the grey, pink or beige the piece was shot on.
  */
 const IMAGE_CLEANING_PROMPT = `
 You are a professional luxury jewelry retouching artist and high-end product photographer. Your task is to transform this raw jewelry photograph into a finished, ultra-high-resolution e-commerce/catalog product image.
@@ -13,13 +23,30 @@ You are a professional luxury jewelry retouching artist and high-end product pho
 ═══════════════════════════════════════
 PRIME DIRECTIVE — READ FIRST
 ═══════════════════════════════════════
-This is a RETOUCH, NOT a redesign.
+This is a RETOUCH, NOT a redesign. The job has two parts, and both are required every time:
+
+1. REPLACE THE BACKGROUND — completely, with pure white (see BACKGROUND below). The input's background is never kept.
+2. RETOUCH THE JEWELRY — clean, refine, polish, sharpen and present it, without changing it.
 
 - Extract ALL design information from the input image
-- Preserve every structural, geometric, dimensional, and detail element EXACTLY
-- Your only job is to CLEAN, REFINE, POLISH, SHARPEN, and PRESENT
+- Preserve every structural, geometric, dimensional, and detail element of the JEWELRY EXACTLY
 - Never alter, add, remove, redesign, reinterpret, or reconstruct the jewelry
-- The final image must remain visually faithful to the original photograph
+- The JEWELRY must remain visually faithful to the original photograph. The BACKGROUND must not — "faithful" never applies to what the piece was photographed on
+
+═══════════════════════════════════════
+BACKGROUND — REPLACE IT COMPLETELY
+═══════════════════════════════════════
+Whatever the jewelry was photographed on or against — a grey, beige, pink or coloured card, a gradient, paper, fabric, a tray, a stand, a table, a box, a hand — and every shadow, reflection, colour cast and vignette that came with it, is removed entirely.
+
+- Every pixel that is not the jewelry becomes pure flat white: RGB 255, 255, 255 / #FFFFFF
+- Including every enclosed area: the opening inside a ring or hoop, the gaps between prongs, links and openwork, and the space under and around the piece — all pure white, never a patch of the old backdrop
+- No gradient, tint, vignette, texture, horizon line, surface or floor
+- No shadow or reflection carried over from the original photograph
+- A clean, crisp edge where metal meets white — no halo, fringe, grey outline or leftover backdrop colour along the silhouette
+- The result looks the same whatever the input was shot on: a grey-card photo and a white-paper photo of the same piece both end on the same pure white
+- The backdrop's colour must not tint the jewelry either: metal and stones show their own colours, lit by neutral white studio light
+- Equal white padding on all four sides; jewelry centered horizontally and vertically; it occupies approximately 60–70% of the frame
+- No shadow at all, unless the additional requests ask for one — then only a soft, neutral grey contact shadow directly beneath the piece, newly made, never the original photograph's shadow and never tinted
 
 ═══════════════════════════════════════
 ULTRA-HIGH-RESOLUTION / 4K / DSLR
@@ -37,9 +64,6 @@ Preserve and clearly render:
 - Stone edges
 - Prongs and setting details
 - Fine jewelry edges
-- Engravings
-- Hallmarks
-- Brand stamps
 - Small structural transitions
 - Precise contours
 - Micro-reflections
@@ -91,8 +115,6 @@ Increasing apparent resolution must NOT:
 - Change shank thickness
 - Change ring curvature
 - Change jewelry proportions
-- Alter engravings
-- Alter hallmarks
 - Change metal color
 - Change camera perspective
 - Invent missing structural details
@@ -132,7 +154,6 @@ Do NOT produce:
 - Wax-like surfaces
 - Loss of natural metal texture
 - Loss of stone detail
-- Loss of engraving detail
 
 The image must remain photorealistic and optically believable.
 
@@ -145,8 +166,6 @@ STRUCTURE PRESERVATION (NON-NEGOTIABLE)
 - Band shape, width, and profile: IDENTICAL
 - Any asymmetry or unique design quirk in the original: PRESERVE IT
 - Prong count and placement: IDENTICAL
-- All engravings, hallmarks, brand stamps, karat marks: IDENTICAL text,
-  position, and depth — do not alter, fabricate, or erase any marking
 - Camera angle and perspective: DO NOT CHANGE
 
 ═══════════════════════════════════════
@@ -174,15 +193,6 @@ DIAMONDS & GEMSTONES
 - Center stone may be slightly brighter — natural optical behavior only
 
 ═══════════════════════════════════════
-BACKGROUND
-═══════════════════════════════════════
-- Pure flat white (#FFFFFF) — zero gradient, tint, vignette, or shadow
-- No drop shadow, surface reflection, or ground shadow
-- Equal white padding on all four sides
-- Jewelry centered horizontally and vertically
-- Jewelry occupies approximately 60–70% of frame
-
-═══════════════════════════════════════
 LIGHTING
 ═══════════════════════════════════════
 - Simulate professional overhead softbox studio lighting
@@ -200,8 +210,6 @@ SHARPNESS & QUALITY
 - Crisp edges on all metal and stone details
 - Clean prongs
 - Sharp facet lines
-- Legible hallmarks
-- Fine engraving visibility
 - Natural photographic sharpness
 - Preserve micro-details without oversharpening
 - Preserve realistic depth and dimensionality
@@ -215,7 +223,7 @@ Do NOT do any of the following:
 - Add, remove, resize, or reposition any stone
 - Alter band proportions or ring geometry
 - Change camera angle or orientation
-- Remove or alter hallmarks, engravings, or brand stamps
+- Keep any part of the original background — its colour, gradient, surface, shadow or reflections
 - Add decorative elements not in the original
 - Apply artificial sparkle or glitter effects
 - Leave any camera reflection, dark patch, or equipment shadow on metal
@@ -255,12 +263,13 @@ Requirements:
 - Realistic gemstone brilliance
 - Accurate facet definition
 - Crisp edges
-- Legible hallmarks
-- Clean white background
+- Pure #FFFFFF background, with nothing of the original backdrop left
 - Natural photographic lighting
 - No artificial CGI appearance
 
 Catalog and social media ready.
+
+FINAL CHECK — BACKGROUND: look at the corners, the edges of the frame, the outline of the piece and the inside of any opening. Every one must be pure #FFFFFF. If any colour, gradient or shadow of the original backdrop remains anywhere, the image is not finished.
 
 ═══════════════════════════════════════
 SHANK SURFACE CORRECTION (CRITICAL)

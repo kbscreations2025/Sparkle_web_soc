@@ -48,6 +48,7 @@ export function InlineDropdown<T extends string>({
   align = "left",
   triggerClassName,
   panelClassName,
+  compact = false,
 }: {
   label: string;
   value: T;
@@ -58,6 +59,8 @@ export function InlineDropdown<T extends string>({
   align?: "left" | "right";
   triggerClassName?: string;
   panelClassName?: string;
+  /** One line, no visible caption — `label` stays as the accessible name. For tight spots like a chip. */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   /** The hovered option's hint, drawn beside the cursor. */
@@ -94,14 +97,15 @@ export function InlineDropdown<T extends string>({
         aria-expanded={open}
         aria-label={label}
         className={cn(
-          "flex w-full min-w-0 flex-col items-start gap-0.5 rounded-lg border px-2 py-1 text-left transition-colors disabled:opacity-40",
+          "flex w-full min-w-0 flex-col items-start gap-0.5 border text-left transition-colors disabled:opacity-40",
+          compact ? "rounded-md px-1.5 py-0.5" : "rounded-lg px-2 py-1",
           open ? "border-gold/30 bg-white/[0.06]" : "border-white/[0.07] bg-white/[0.04] hover:border-white/[0.14]",
           triggerClassName
         )}
       >
-        <span className="text-[8px] font-semibold uppercase leading-none tracking-wide text-faint">{label}</span>
+        {!compact && <span className="text-[8px] font-semibold uppercase leading-none tracking-wide text-faint">{label}</span>}
         <span className="flex w-full items-center gap-1">
-          <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-cream">
+          <span className={cn("min-w-0 flex-1 truncate font-medium text-cream", compact ? "text-[9px]" : "text-[10px]")}>
             {selected?.label ?? value}
           </span>
           <ChevronDown

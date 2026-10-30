@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { ImagePlus, Send, Loader2 } from "lucide-react";
-import { AttachmentChips, type Attachment } from "./AttachmentChips";
+import { AttachmentChips, type Attachment, type RoleOption } from "./AttachmentChips";
 import { SpellCheckedTextarea } from "./SpellCheckedTextarea";
 import { InlineDropdown } from "./InlineDropdown";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,8 @@ export function ChatInputBar<TModel extends string>({
   attachments,
   onOpenAttachment,
   onRemoveAttachment,
+  roleOptions,
+  onAttachmentRoleChange,
   onAttachFiles,
   onPasteImage,
   modelOptions,
@@ -38,6 +40,9 @@ export function ChatInputBar<TModel extends string>({
   attachments: Attachment[];
   onOpenAttachment: (attachment: Attachment) => void;
   onRemoveAttachment: (attachment: Attachment) => void;
+  /** A picker for what each reference is for — see AttachmentChips. Omitted by tools without roles. */
+  roleOptions?: RoleOption[];
+  onAttachmentRoleChange?: (attachment: Attachment, role: string) => void;
   /** Files picked via the attach button — always treated as reference images. */
   onAttachFiles: (files: File[]) => void;
   /** An image pasted straight into the textarea. */
@@ -70,7 +75,13 @@ export function ChatInputBar<TModel extends string>({
 
   return (
     <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] transition-colors focus-within:border-gold/30">
-      <AttachmentChips attachments={attachments} onOpen={onOpenAttachment} onRemove={onRemoveAttachment} />
+      <AttachmentChips
+        attachments={attachments}
+        onOpen={onOpenAttachment}
+        onRemove={onRemoveAttachment}
+        roleOptions={roleOptions}
+        onRoleChange={onAttachmentRoleChange}
+      />
 
       <SpellCheckedTextarea
         value={value}
