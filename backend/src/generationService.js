@@ -79,6 +79,12 @@ async function recordGeneration({
   providerId,
   /** Which AI provider actually served this run — "gemini" by default, since every call site predates multi-provider routing except the ones that now pass it explicitly. */
   provider,
+  /**
+   * The labels the person gave a new thread to find it by — see details.js.
+   * Only read when this run starts the conversation; a later turn is in a
+   * thread that already has its own, and History edits them separately.
+   */
+  details = null,
 }) {
   const userName = user.name || user.email;
 
@@ -94,6 +100,7 @@ async function recordGeneration({
         userName,
         tool,
         title: (userPrompt || prompt).slice(0, 80),
+        ...(details ? { details } : {}),
       });
   if (!conversation) throw new Error("conversation not found");
 
@@ -175,6 +182,7 @@ async function recordGeneration({
     quality: quality || null,
     isOwn: true,
     userName,
+    designNo: conversation.details?.designNo || null,
     createdAt: new Date().toISOString(),
     // Same shaper the REST route uses, so a result that arrives live and one
     // that arrives on the next fetch are indistinguishable to the client.

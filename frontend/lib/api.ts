@@ -957,6 +957,11 @@ export function cleanImage(body: {
    * alongside the built-in prompt; left out, they are kept.
    */
   removeMarkings?: boolean;
+  /**
+   * Optional label for finding this run again in History — stored on the
+   * thread it starts, and searchable there. Up to `DESIGN_NO_MAX` characters.
+   */
+  designNo?: string;
   /** Set to keep a retry in the same thread as the run it follows. */
   conversationId?: string | null;
   /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
@@ -1936,7 +1941,23 @@ export type HistoryItem = {
   kitKind?: MarketingKitKind | null;
   /** A tool's sub-mode with a page of its own — Image Cleaning's "product_views". */
   mode?: string | null;
+  /** The design number the thread was labelled with, if any. Shared by every turn of it. */
+  designNo?: string | null;
 };
+
+/** The longest design number the server keeps — see backend/src/details.js. */
+export const DESIGN_NO_MAX = 50;
+
+/**
+ * Sets or clears a thread's design number — the owner's own threads only.
+ * An empty string clears it. Answers with the number as stored.
+ */
+export function updateConversationDetails(conversationId: string, details: { designNo: string }) {
+  return apiRequest<{ designNo: string | null }>(`/api/history/conversations/${conversationId}/details`, {
+    method: "PATCH",
+    body: JSON.stringify(details),
+  });
+}
 
 export type ConversationAsset = { url: string; thumbnailUrl: string; role: string };
 export type ConversationTurn = {
@@ -1979,6 +2000,8 @@ export function fetchConversation(conversationId: string) {
     readOnly?: boolean;
     /** Who the thread belongs to, when it is not the viewer's. */
     ownerName?: string | null;
+    /** The design number the thread was labelled with, if any. */
+    designNo?: string | null;
     generations: ConversationTurn[];
   }>(`/api/history/conversations/${conversationId}`);
 }
@@ -2043,10 +2066,20 @@ export function fetchHistory(
     after?: string;
     limit?: number;
     scope?: "own" | "team";
+    /**
+     * The search box: runs whose thread's design number starts with this
+     * ("r-12" finds "R1203"), or whose typed prompt contains every word of it,
+     * in any order, partial last words included ("center sto").
+     */
+    search?: string;
+    /** Search for exactly what was typed — no correcting a misspelt word. */
+    exact?: boolean;
   } = {}
 ) {
   const query = new URLSearchParams();
   if (params.after) query.set("after", params.after);
+  if (params.search) query.set("q", params.search);
+  if (params.search && params.exact) query.set("exact", "1");
   params.tools?.forEach((value) => query.append("tool", value));
   params.members?.forEach((value) => query.append("member", value));
   params.qualities?.forEach((value) => query.append("quality", value));
@@ -2057,8 +2090,18 @@ export function fetchHistory(
   if (params.limit) query.set("limit", String(params.limit));
   if (params.scope === "team") query.set("scope", "team");
   const qs = query.toString();
-  /** `totalImages`: every image the filters match, sent with page one only. */
-  return apiRequest<{ items: HistoryItem[]; nextCursor: string | null; canReadTeam: boolean; totalImages?: number }>(
+  /**
+   * `totalImages`: every image the filters match, sent with page one only.
+   * `correctedSearch`: the search as actually run, where a misspelt word was
+   * corrected ("diamnd" → "diamond"); null when it ran as typed.
+   */
+  return apiRequest<{
+    items: HistoryItem[];
+    nextCursor: string | null;
+    canReadTeam: boolean;
+    totalImages?: number;
+    correctedSearch?: string | null;
+  }>(
     `/api/history${qs ? `?${qs}` : ""}`
   );
 }

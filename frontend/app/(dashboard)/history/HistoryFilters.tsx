@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarRange,
   ChevronDown,
   Film,
-  Gauge,
+  Loader2,
   type LucideIcon,
   MoreHorizontal,
   Search,
   SlidersHorizontal,
   Users,
+  X,
 } from "lucide-react";
 import { TOOLS } from "@/lib/nav";
 import { KIT_LABEL } from "@/lib/marketingKits";
@@ -371,6 +372,90 @@ function CountBadge({ count, label }: { count: number; label?: string }) {
   );
 }
 
+/**
+ * One search over History: a design number ("r-12" finds "R-1203"), or words
+ * from what was asked for ("center stone" finds a cleaning request that said
+ * "please add center stone diamond") — matched by the server.
+ *
+ * Asks once typing pauses, so "center stone" is one request rather than
+ * twelve; Enter asks straight away, Escape clears. While an answer is on its
+ * way the icon turns to a spinner and the results already shown stay put.
+ */
+export function HistorySearch({
+  value,
+  onChange,
+  busy = false,
+  compact = false,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  busy?: boolean;
+  compact?: boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  // Latest handler for the timer below, which shouldn't restart because the
+  // parent re-rendered with a new function.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+
+  useEffect(() => {
+    const next = draft.trim();
+    if (next === value) return;
+    const timer = setTimeout(() => onChangeRef.current(next), 350);
+    return () => clearTimeout(timer);
+  }, [draft, value]);
+
+  const clear = () => {
+    setDraft("");
+    if (value) onChange("");
+  };
+
+  return (
+    <div
+      title="Search by design number, or by words from the prompt"
+      className={cn(
+        "flex items-center gap-2 rounded-full border bg-surface-raised pl-3 pr-2 transition-colors focus-within:border-gold/40",
+        value ? "border-gold/30" : "border-white/10 hover:border-white/20",
+        compact ? "h-7 md:h-8" : "h-8"
+      )}
+    >
+      {busy ? (
+        <Loader2 size={14} className="shrink-0 animate-spin text-gold" />
+      ) : (
+        <Search size={14} className="shrink-0 text-faint" />
+      )}
+      <input
+        type="search"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && draft.trim() !== value) onChange(draft.trim());
+          if (event.key === "Escape") clear();
+        }}
+        maxLength={100}
+        placeholder="Search design no. or prompt…"
+        aria-label="Search by design number or prompt words"
+        className={cn(
+          "min-w-0 bg-transparent text-[13px] text-cream outline-none placeholder:text-faint [&::-webkit-search-cancel-button]:hidden",
+          compact ? "w-44" : "w-56"
+        )}
+      />
+      {draft && (
+        <button
+          type="button"
+          onClick={clear}
+          aria-label="Clear search"
+          className="shrink-0 rounded-full p-0.5 text-faint transition-colors hover:text-cream"
+        >
+          <X size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** When to show results from — presets, or an exact pair of dates. */
 export function DateFilter({
   range,
@@ -481,57 +566,121 @@ const TYPE_OPTIONS: FilterOption[] = [
   { id: "text", label: "Text" },
 ];
 
-export function QualityFilter({
-  options,
-  selected,
-  onChange,
-  compact,
-}: {
-  options: string[];
-  selected: string[];
-  onChange: (next: string[]) => void;
-  compact?: boolean;
-}) {
-  const choices = useMemo(() => options.map((value) => ({ id: value, label: value })), [options]);
-  return (
-    <CheckboxFilter
-      icon={Gauge}
-      label="Quality"
-      emptyLabel="No resolutions to filter by yet."
-      options={choices}
-      selected={selected}
-      onChange={onChange}
-      compact={compact}
-    />
-  );
-}
-
 /**
- * What a run produced — not which tool made it.
- *
- * "Find that video" is one question; answering it through the Tools list
- * means knowing that Image to Video is the only tool that makes them, and a
- * text answer comes from several tools at once.
+ * What a run produced and at what size, under one button: Type (images,
+ * video, text — not which tool made it: "find that video" is one question,
+ * and a text answer comes from several tools) over Quality (the resolution
+ * badge on every tile). Two small lists that were two buttons in a crowded
+ * header; one panel shows both, each still its own filter, and the badge
+ * counts everything ticked across the two.
  */
-export function TypeFilter({
-  selected,
-  onChange,
-  compact,
+export function OutputFilter({
+  qualities,
+  selectedQualities,
+  onQualitiesChange,
+  selectedTypes,
+  onTypesChange,
+  compact = false,
 }: {
-  selected: string[];
-  onChange: (next: string[]) => void;
+  /** The resolutions the library has, from the facets call. */
+  qualities: string[];
+  selectedQualities: string[];
+  onQualitiesChange: (next: string[]) => void;
+  selectedTypes: string[];
+  onTypesChange: (next: string[]) => void;
   compact?: boolean;
 }) {
+  const { open, side, toggle: togglePanel, containerRef } = usePopover();
+  const qualityOptions = useMemo(() => qualities.map((value) => ({ id: value, label: value })), [qualities]);
+  const count = selectedTypes.length + selectedQualities.length;
+  const label = "Type & quality";
+
+  const toggleIn = (list: string[], id: string, onChange: (next: string[]) => void) =>
+    onChange(list.includes(id) ? list.filter((value) => value !== id) : [...list, id]);
+
+  const section = (
+    heading: string,
+    options: FilterOption[],
+    selected: string[],
+    onChange: (next: string[]) => void,
+    emptyLabel: string
+  ) => (
+    <div className="py-1">
+      <p className="px-3 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-faint">{heading}</p>
+      {options.length === 0 ? (
+        <p className="px-3 py-1.5 text-[11px] text-faint">{emptyLabel}</p>
+      ) : (
+        options.map((option) => (
+          <label
+            key={option.id}
+            className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-cream hover:bg-white/[0.05]"
+          >
+            <input
+              type="checkbox"
+              checked={selected.includes(option.id)}
+              onChange={() => toggleIn(selected, option.id, onChange)}
+              style={{ accentColor: "var(--color-gold)" }}
+            />
+            <span className="truncate">{option.label}</span>
+          </label>
+        ))
+      )}
+    </div>
+  );
+
   return (
-    <CheckboxFilter
-      icon={Film}
-      label="Type"
-      emptyLabel="Nothing to filter by."
-      options={TYPE_OPTIONS}
-      selected={selected}
-      onChange={onChange}
-      compact={compact}
-    />
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        onClick={togglePanel}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={label}
+        title={label}
+        className={cn(
+          "flex items-center rounded-full border border-white/10 bg-surface-raised font-medium text-cream transition-colors hover:border-white/20",
+          compact ? "h-7 w-7 justify-center md:h-8 md:w-8" : "gap-1.5 py-1.5 pl-3 pr-2.5 text-xs"
+        )}
+      >
+        <Film size={compact ? 14 : 12} className="text-faint" />
+        {!compact && (
+          <>
+            <span>{label}</span>
+            <ChevronDown size={13} className="text-faint" />
+          </>
+        )}
+      </button>
+
+      <CountBadge count={count} />
+
+      {open && (
+        <div
+          role="listbox"
+          aria-multiselectable="true"
+          className={cn("absolute top-full z-50 mt-2 w-48 overflow-hidden rounded-lg border border-white/10 bg-surface-raised shadow-lg", side)}
+        >
+          <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
+            <span className="flex-1 text-[10px] text-faint">{count ? `${count} selected` : "All types & qualities"}</span>
+            {count > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  onTypesChange([]);
+                  onQualitiesChange([]);
+                }}
+                className="shrink-0 text-[11px] font-medium text-gold transition-colors hover:text-cream"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="thin-scrollbar max-h-80 divide-y divide-white/5 overflow-y-auto">
+            {section("Type", TYPE_OPTIONS, selectedTypes, onTypesChange, "Nothing to filter by.")}
+            {section("Quality", qualityOptions, selectedQualities, onQualitiesChange, "No resolutions to filter by yet.")}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

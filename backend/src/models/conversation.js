@@ -19,6 +19,17 @@ const conversationSchema = new mongoose.Schema(
     // Cut from the prompt at creation. Only a caption for the history list.
     title: { type: String, trim: true, maxlength: 200, default: "" },
 
+    /**
+     * Optional labels the person put on the thread to find it again — see
+     * details.js. `designNo` is shown as typed; `designNoKey` is the same code
+     * upper-cased with spaces and punctuation stripped, which is what History
+     * search matches on.
+     */
+    details: {
+      designNo: { type: String, trim: true, maxlength: 50, default: null },
+      designNoKey: { type: String, default: null },
+    },
+
     /** First output image of the thread — the thumbnail in the history list. */
     previewUrl: { type: String, default: null },
 
@@ -34,5 +45,11 @@ const conversationSchema = new mongoose.Schema(
 // The history list: this person's threads, newest work first.
 conversationSchema.index({ tenantId: 1, userId: 1, lastGenerationAt: -1 });
 conversationSchema.index({ tenantId: 1, tool: 1, lastGenerationAt: -1 });
+// History's design-number search: a prefix match within the organization.
+// Partial, so the many threads with no design number cost the index nothing.
+conversationSchema.index(
+  { tenantId: 1, "details.designNoKey": 1 },
+  { partialFilterExpression: { "details.designNoKey": { $type: "string" } } }
+);
 
 module.exports = mongoose.model("Conversation", conversationSchema);

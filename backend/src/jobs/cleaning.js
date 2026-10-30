@@ -222,6 +222,8 @@ async function runCleaningJob({ job, data, setProgress, withProgress }) {
     outputImages: [{ image: output, role: "generated" }],
     providerId,
     provider,
+    // Read only when this run starts the thread — see recordGeneration.
+    details: data.details ?? null,
   });
 
   // Deliberately small, and deliberately a url rather than the image itself:

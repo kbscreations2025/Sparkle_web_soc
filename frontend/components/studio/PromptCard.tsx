@@ -61,7 +61,8 @@ export function PromptCard({
 }) {
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2">
+      {/* Wraps on a narrow screen rather than squeezing a busy heading and its aside into one line. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-cream">{label}</p>
         {aside}
       </div>

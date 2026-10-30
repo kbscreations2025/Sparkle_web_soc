@@ -6,6 +6,9 @@ const { requireAuth, requirePermission } = require("../middleware/auth");
 const { hasPermission, reachFilter } = require("../permissions");
 const Generation = require("../models/generation");
 const Asset = require("../models/asset");
+const Conversation = require("../models/conversation");
+const { designNoKey, readDetails, publicDetails } = require("../details");
+const { correctTerms } = require("../services/promptVocabulary");
 const { GENERATION_TOOLS, toPublicAsset } = require("../generations");
 const { deleteObject } = require("../storage/r2");
 const { logRequestAudit } = require("../auditLog");
@@ -142,6 +145,126 @@ const DEFAULT_LIMIT = 24;
 const MAX_LIMIT = 60;
 
 /**
+ * How many threads one design-number search may match. A prefix as short as
+ * "R" could match most of an organization's labelled work, and the grid only
+ * ever needs enough to page through — a search that broad is refined, not
+ * scrolled.
+ */
+const MAX_DESIGN_MATCHES = 2000;
+
+/**
+ * The changes text the Cleaning pages fill in for you — today's, and the one
+ * used before the "remove stamps" box existed (the most common prompt in the
+ * library). A run sent with it untouched says nothing about that photo, and
+ * would otherwise match every search for "white", "sharp" or "shadow", so it
+ * is left out of word searches. Any edit to it, however small, makes the run
+ * searchable again. Keep in step with DEFAULT_CLEANING_NOTES in the
+ * frontend's CleaningWorkspace.
+ */
+const PREFILLED_PROMPTS = [
+  "High resolution image with white background And diamond make it Sharp & diamond yellow tone remove & metal more shine & add Shadow",
+  "High resolution image with white background And diamond make it Sharp & diamond yellow tone remove & metal more shine & make it stamp remove & add Shadow",
+];
+
+/** Words too common in a request to narrow anything down; dropped unless they are all that was typed. */
+const FILLER_WORDS = new Set(["a", "an", "and", "the", "it", "is", "of", "to", "in", "on", "for", "with", "make", "please", "&"]);
+const MAX_SEARCH_WORDS = 8;
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * What the History search box matches, as a filter to add to the grid's own
+ * query — so reach, filters and paging are unchanged. A result matches when
+ * either:
+ *  - its thread's design number starts with what was typed, compared in the
+ *    stored stripped, upper-case form ("r-12" finds "R1203"); or
+ *  - what the person typed for the run (a Cleaning changes box, a Chat to
+ *    Edit instruction, a Text to Image prompt…) contains every word, in any
+ *    order. Each word matches the start of a word, so a half-typed "cent"
+ *    already finds "center", and a plural finds its singular too.
+ *
+ * Matched directly on the stored text rather than through a text index: the
+ * library is a few thousand runs, where this answers in milliseconds, and a
+ * text index matches whole words only — no results until a word is finished.
+ * Worth revisiting with an index (or Atlas Search) past a few hundred
+ * thousand runs.
+ *
+ * A misspelt word is searched as the closest word the library actually uses
+ * ("diamnd" as "diamond" — see services/promptVocabulary.js), and the
+ * corrected search is handed back so the page can say so. `exact` turns that
+ * off, for "search for what I typed instead".
+ */
+async function searchClause(raw, tenantId, { exact = false } = {}) {
+  const text = String(raw ?? "").trim().slice(0, 100);
+  if (!text) return { filter: null, corrected: null };
+  const branches = [];
+
+  const designKey = designNoKey(text);
+  if (designKey) {
+    // Letters and digits only, so safe inside the pattern as is.
+    const matches = await Conversation.find({
+      tenantId,
+      deletedAt: null,
+      "details.designNoKey": { $regex: `^${designKey}` },
+    })
+      .select("_id")
+      .limit(MAX_DESIGN_MATCHES)
+      .lean();
+    if (matches.length) branches.push({ conversationId: { $in: matches.map((row) => row._id) } });
+  }
+
+  const words = text
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, ""))
+    .filter(Boolean);
+  const meaningful = words.filter((word) => !FILLER_WORDS.has(word));
+  let terms = [...new Set(meaningful.length ? meaningful : words)].slice(0, MAX_SEARCH_WORDS);
+
+  let corrected = null;
+  if (terms.length && !exact) {
+    const fixed = await correctTerms(tenantId, terms);
+    if (fixed.some((term, i) => term !== terms[i])) {
+      const swap = new Map(terms.map((term, i) => [term, fixed[i]]));
+      // The search as typed, with only the misspelt words replaced.
+      corrected = text
+        .split(/\s+/)
+        .map((word) => swap.get(word.toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "")) ?? word)
+        .join(" ");
+      terms = fixed;
+    }
+  }
+
+  if (terms.length) {
+    branches.push({
+      $and: [
+        { "request.userPrompt": { $nin: PREFILLED_PROMPTS } },
+        ...terms.map((term) => {
+          // "stamps" and "stamp" both match "stamp", "stamps", "stamped".
+          const stem = term.length > 4 ? term.replace(/(es|s)$/, "") : term;
+          return { "request.userPrompt": { $regex: `(^|[^a-z0-9])${escapeRegex(stem)}`, $options: "i" } };
+        }),
+      ],
+    });
+  }
+
+  // Something was typed but nothing can match it: an empty result, not the whole grid.
+  return { filter: branches.length ? { $or: branches } : { _id: null }, corrected };
+}
+
+/**
+ * Each item's design number, from its conversation — the one place it is
+ * stored, so editing it later changes every turn of the thread at once.
+ * One query for the whole page, however many tiles are on it.
+ */
+async function attachDetails(items) {
+  const ids = [...new Set(items.map((item) => item.conversationId).filter(Boolean))];
+  if (!ids.length) return items;
+  const conversations = await Conversation.find({ _id: { $in: ids } }).select("details").lean();
+  const byId = new Map(conversations.map((row) => [String(row._id), publicDetails(row.details)]));
+  return items.map((item) => ({ ...item, designNo: byId.get(item.conversationId)?.designNo ?? null }));
+}
+
+/**
  * Re-fetches a past result as a data URI, for a tool page that's resuming a
  * conversation: the stage can display an R2 URL directly, but the cleaning
  * and chat-to-edit routes only ever accept a data URI as the image to edit,
@@ -172,7 +295,8 @@ function buildScopeFilter(dbUser, wantsTeam) {
  * generations land while someone is scrolling, a `before` cursor doesn't.
  */
 router.get("/", async (req, res) => {
-  const { tool, member, before, after, scope, from, to } = req.query;
+  // `designNo` is the search's older name, still accepted from a page loaded before the rename.
+  const { tool, member, before, after, scope, from, to, q, designNo } = req.query;
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
 
   const query = buildScopeFilter(req.dbUser, scope === "team");
@@ -252,6 +376,13 @@ router.get("/", async (req, res) => {
     else if (clauses.length > 1) query.$or = clauses;
   }
 
+  // The search box: design number or the words of what was asked for — see searchClause.
+  const search = typeof q === "string" ? q : typeof designNo === "string" ? designNo : "";
+  const { filter: searchFilter, corrected } = await searchClause(search, req.dbUser.tenantId, {
+    exact: req.query.exact === "1",
+  });
+  if (searchFilter) query.$and = [...(query.$and ?? []), searchFilter];
+
   if (before) {
     const cursor = new Date(before);
     if (Number.isNaN(cursor.getTime())) {
@@ -317,10 +448,12 @@ router.get("/", async (req, res) => {
 
   res.json({
     status: "success",
-    items: page.map((generation) => toHistoryItem(generation, req.dbUser)),
+    items: await attachDetails(page.map((generation) => toHistoryItem(generation, req.dbUser))),
     ...(totalImages === null ? {} : { totalImages }),
     nextCursor: hasMore ? page[page.length - 1].createdAt.toISOString() : null,
     canReadTeam: hasPermission(req.dbUser, "result.read.others"),
+    // The search as it was actually run, where a misspelt word was corrected.
+    correctedSearch: corrected,
   });
 });
 
@@ -335,7 +468,8 @@ router.get("/item/:id", async (req, res) => {
   if (!mongoose.Types.ObjectId.isValid(req.params.id)) return notFound(res);
   const generation = await Generation.findOne({ ...buildScopeFilter(req.dbUser, true), _id: req.params.id }).lean();
   if (!generation) return notFound(res);
-  res.json({ status: "success", item: toHistoryItem(generation, req.dbUser) });
+  const [item] = await attachDetails([toHistoryItem(generation, req.dbUser)]);
+  res.json({ status: "success", item });
 });
 
 /**
@@ -451,11 +585,14 @@ router.get("/conversations/:id", async (req, res) => {
     });
   }
 
+  const conversation = await Conversation.findById(req.params.id).select("details").lean();
+
   res.json({
     status: "success",
     tool: owner.tool,
     readOnly: !isOwn,
     ownerName: isOwn ? null : owner.userName || null,
+    ...publicDetails(conversation?.details),
     generations: generations.map((g) => ({
       id: String(g._id),
       sequence: g.sequence,
@@ -492,6 +629,36 @@ router.get("/conversations/:id", async (req, res) => {
         : {}),
     })),
   });
+});
+
+/**
+ * Sets or clears a thread's design number after the fact — for a run started
+ * without one, or one typed wrong. The owner's own threads only: it is their
+ * label on their work, and a colleague reading it has no business renaming it.
+ * Anything else is a 404, as with deleting.
+ *
+ * An empty value clears it. Stored on the conversation, so every turn of the
+ * thread shows the new number at once.
+ */
+router.patch("/conversations/:id/details", async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) return notFound(res);
+
+  const details = readDetails(req.body);
+  const conversation = await Conversation.findOneAndUpdate(
+    { _id: req.params.id, tenantId: req.dbUser.tenantId, userId: req.dbUser._id, deletedAt: null },
+    {
+      $set: {
+        "details.designNo": details?.designNo ?? null,
+        "details.designNoKey": details?.designNoKey ?? null,
+      },
+    },
+    { new: true }
+  )
+    .select("details")
+    .lean();
+  if (!conversation) return notFound(res);
+
+  res.json({ status: "success", ...publicDetails(conversation.details) });
 });
 
 /**

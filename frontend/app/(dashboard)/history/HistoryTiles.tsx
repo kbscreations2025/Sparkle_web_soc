@@ -469,9 +469,21 @@ export const HistoryTile = memo(
         </div>
 
         <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
-          <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]">
-            {item.userName}
-          </span>
+          <div className="flex min-w-0 flex-col items-start gap-0.5">
+            {/* The label this was searched by — on the tile so a page of
+                matches can be told apart without opening each one. */}
+            {item.designNo && (
+              <span
+                title={`Design no. ${item.designNo}`}
+                className="max-w-full truncate rounded-full bg-gold/80 px-1.5 py-0.5 text-[7px] font-semibold text-black backdrop-blur-sm md:text-[9px]"
+              >
+                #{item.designNo}
+              </span>
+            )}
+            <span className="max-w-full truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]">
+              {item.userName}
+            </span>
+          </div>
 
           {/* How many images this run produced. Down here rather than up with
               the actions: it is information about the tile, not a control, and

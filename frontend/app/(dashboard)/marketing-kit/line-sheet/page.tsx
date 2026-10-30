@@ -39,7 +39,7 @@ export default function LineSheetPage() {
    * workbook starts a fresh layout.
    */
   const pieces = useMemo(() => (sheet ? lineSheetPieces(sheet.rows) : []), [sheet]);
-  const built = useMemo(() => (sheet ? buildLineSheetDesign(sheet.rows) : null), [sheet]);
+  const built = useMemo(() => (sheet ? buildLineSheetDesign(sheet) : null), [sheet]);
   const [edited, setEdited] = useState<DeckDesign | null>(null);
   const latestDesign = useRef<DeckDesign | null>(null);
   const design = edited ?? built;
@@ -84,8 +84,8 @@ export default function LineSheetPage() {
 
   async function read(file: File | undefined) {
     if (!file) return;
-    if (!/\.xlsx$/i.test(file.name)) {
-      setError("Please choose an Excel .xlsx file.");
+    if (!/\.xls[xm]$/i.test(file.name)) {
+      setError("Please choose an Excel .xlsx or .xlsm file.");
       return;
     }
     setError("");
@@ -96,7 +96,7 @@ export default function LineSheetPage() {
       setGenerated(false);
       setEdited(null);
       latestDesign.current = null;
-      setFileName(file.name.replace(/\.xlsx$/i, ""));
+      setFileName(file.name.replace(/\.xls[xm]$/i, ""));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't read that workbook.");
     } finally {
@@ -104,7 +104,9 @@ export default function LineSheetPage() {
     }
   }
 
-  const slides = sheet ? Math.ceil(sheet.rows.length / 4) : 0;
+  // From the layout itself: a sheet with many columns goes two cards a slide.
+  const slides = built?.slides.length ?? 0;
+  const photoCount = sheet ? sheet.rows.reduce((sum, row) => sum + row.images.length, 0) : 0;
 
   // Generated: Collection Story's editor takes the whole page, as it does there.
   if (generated && sheet && design) {
@@ -125,7 +127,7 @@ export default function LineSheetPage() {
         <input
           ref={input}
           type="file"
-          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           hidden
           onChange={(event) => {
             read(event.target.files?.[0]);
@@ -148,7 +150,7 @@ export default function LineSheetPage() {
                 setDragging(false);
                 read(event.dataTransfer.files?.[0]);
               }}
-              title="Excel .xlsx with a photo in each row"
+              title="Any Excel .xlsx with photos in its rows — the columns are worked out for you"
               className={cn(
                 "flex min-h-11 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-dashed px-3.5 text-left transition-colors",
                 dragging ? "border-gold/60 bg-gold/[0.08]" : "border-white/15 hover:border-gold/30 hover:bg-white/[0.03]"
@@ -178,7 +180,9 @@ export default function LineSheetPage() {
           {/* What was read, right under the bar. */}
           {sheet && (
             <p className="px-1 text-[11px] text-faint">
-              <span className="font-medium text-cream">{sheet.rows.length} products</span> · {slides} slide{slides === 1 ? "" : "s"} ·{" "}
+              <span className="font-medium text-cream">{sheet.rows.length} products</span> · {photoCount} photo
+              {photoCount === 1 ? "" : "s"} · {slides} slide{slides === 1 ? "" : "s"} · {sheet.fields.length + 1} columns
+              {sheet.sheetName && <> · from “{sheet.sheetName}”</>} ·{" "}
               {sheet.missingImages.length === 0 ? (
                 "all photos found"
               ) : (
@@ -197,41 +201,47 @@ export default function LineSheetPage() {
 
         {sheet && (
           <section className="space-y-3">
-            {/* The workbook as it reads in Excel: same columns, same order, raw values. */}
+            {/* The workbook as it was read: the style number first, then every
+                other column in the sheet's own order and wording, values as
+                Excel shows them — what the cards will carry. */}
             <div className="thin-scrollbar overflow-x-auto rounded-lg border border-white/[0.08] bg-surface-raised">
               <table className="w-full min-w-[760px] border-collapse text-[11px] text-cream">
                 <thead>
                   <tr className="bg-white/[0.04] text-left text-[10px] font-semibold uppercase tracking-wide text-muted">
-                    {["SR.NO.", "Image", "Style No.", "Category", "Dia. Combination", "Center Shape", "Center Wt.", "Dia wt", "Selling Price"].map(
-                      (heading) => (
-                        <th key={heading} className="whitespace-nowrap border-b border-white/[0.08] px-2.5 py-2">
-                          {heading}
-                        </th>
-                      )
-                    )}
+                    {[...(sheet.hasSerial ? ["Sr. No."] : []), "Image", sheet.idHeading, ...sheet.fields].map((heading, index) => (
+                      <th key={index} className="whitespace-pre-line border-b border-white/[0.08] px-2.5 py-2 align-bottom">
+                        {heading}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {sheet.rows.map((row) => (
                     <tr key={row.row} className="border-b border-white/[0.05] align-middle last:border-0">
-                      <td className="px-2.5 py-1.5 text-faint">{row.excel.srNo}</td>
+                      {sheet.hasSerial && <td className="px-2.5 py-1.5 text-faint">{row.excel.serial}</td>}
                       <td className="px-2.5 py-1.5">
-                        <div className="flex h-14 w-20 items-center justify-center bg-white">
-                          {row.image ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- a local data URI, not a remote image
-                            <img src={row.image} alt="" className="max-h-full max-w-full object-contain" />
+                        {/* Side by side, as they will sit on the card. */}
+                        <div className="flex h-14 items-center gap-1">
+                          {row.images.length ? (
+                            row.images.map((image, index) => (
+                              <div key={index} className="flex h-14 w-20 items-center justify-center bg-white">
+                                {/* eslint-disable-next-line @next/next/no-img-element -- a local data URI, not a remote image */}
+                                <img src={image} alt="" className="max-h-full max-w-full object-contain" />
+                              </div>
+                            ))
                           ) : (
-                            <Upload size={14} className="text-faint" />
+                            <div className="flex h-14 w-20 items-center justify-center bg-white">
+                              <Upload size={14} className="text-faint" />
+                            </div>
                           )}
                         </div>
                       </td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 font-medium">{row.excel.styleNo}</td>
-                      <td className="px-2.5 py-1.5">{row.category}</td>
-                      <td className="whitespace-pre-line px-2.5 py-1.5">{row.diaCombination}</td>
-                      <td className="px-2.5 py-1.5">{row.centerShape}</td>
-                      <td className="px-2.5 py-1.5">{row.excel.centerWt}</td>
-                      <td className="px-2.5 py-1.5">{row.excel.diaWt}</td>
-                      <td className="px-2.5 py-1.5">{row.excel.price}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 font-medium">{row.excel.id}</td>
+                      {row.excel.values.map((value, index) => (
+                        <td key={index} className="whitespace-pre-line px-2.5 py-1.5">
+                          {value}
+                        </td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>

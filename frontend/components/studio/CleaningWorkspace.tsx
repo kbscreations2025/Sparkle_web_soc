@@ -24,6 +24,7 @@ import {
   fetchConversationForTool,
   resolveModelId,
   toModelOptions,
+  DESIGN_NO_MAX,
   type CleaningDuplicate,
 } from "@/lib/api";
 import { fingerprintDataUrl, fingerprintFile } from "@/lib/fingerprint";
@@ -146,6 +147,8 @@ export function CleaningWorkspace<TModel extends string>({
   const [extraNotes, setExtraNotes] = useState(defaultNotes);
   /** Engravings, hallmarks and brand stamps come off unless this is unticked. */
   const [removeMarkings, setRemoveMarkings] = useState(true);
+  /** Optional — labels every photo in this run so History can find them by it. */
+  const [designNo, setDesignNo] = useState("");
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
@@ -443,6 +446,7 @@ export function CleaningWorkspace<TModel extends string>({
     setError("");
     const custom = useCustomPrompt ? customPrompt.trim() : "";
     const notes = extraNotes.trim();
+    const label = designNo.trim();
 
     const queued: Job[] = items.map((item) => ({
       id: item.id,
@@ -469,6 +473,8 @@ export function CleaningWorkspace<TModel extends string>({
           // Stored with the upload, so the next time this photo is dropped
           // here it is recognised — see handleAdd.
           sourceChecksum: item.sourceChecksum,
+          // Either prompt mode — it labels the run, it isn't part of the prompt.
+          ...(label ? { designNo: label } : {}),
           ...(custom
             ? { customPrompt: custom }
             : { variant: promptVariant, removeMarkings, ...(notes ? { extraNotes: notes } : {}) }),
@@ -608,6 +614,8 @@ export function CleaningWorkspace<TModel extends string>({
     setSelectedId(null);
     setSelectedView(null);
     setChatInput("");
+    // The next batch is most likely another design.
+    setDesignNo("");
     attach.reset();
   }
 
@@ -620,6 +628,28 @@ export function CleaningWorkspace<TModel extends string>({
    * speaks of adding the photo, since nothing is being uploaded.
    */
   const duplicatesPicked = Boolean(duplicates?.added.every((item) => item.fromLibrary));
+
+  // Not part of the prompt — a label for History search, so it shows in both
+  // prompt modes. Sits at the right end of the changes box's heading row.
+  const designNoField = (
+    <label className="flex flex-wrap items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-faint">
+        Design no. <span className="font-normal normal-case tracking-normal">(optional)</span>
+      </span>
+      <input
+        type="text"
+        value={designNo}
+        onChange={(event) => setDesignNo(event.target.value)}
+        maxLength={DESIGN_NO_MAX}
+        disabled={running}
+        placeholder="e.g. R-1203"
+        className="w-44 rounded-lg border border-white/10 bg-surface-raised px-2.5 py-1.5 text-xs text-cream outline-none transition-colors placeholder:text-faint focus:border-gold/40 disabled:opacity-50"
+      />
+      {items.length > 1 && designNo.trim() && (
+        <span className="text-[11px] text-faint">Applies to all {items.length} photos</span>
+      )}
+    </label>
+  );
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
@@ -639,29 +669,27 @@ export function CleaningWorkspace<TModel extends string>({
             />
 
             <section className="space-y-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <h2 className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">
-                  Instructions
-                </h2>
-                <PromptModeButton active={!useCustomPrompt} onClick={() => setUseCustomPrompt(false)} icon={Sparkles}>
-                  Default
-                </PromptModeButton>
-                <PromptModeButton active={useCustomPrompt} onClick={() => setUseCustomPrompt(true)} icon={PenLine}>
-                  Write my own
-                </PromptModeButton>
-              </div>
-
-              <p className="text-[11px] text-faint">
-                {useCustomPrompt
-                  ? "Your own prompt from scratch — the built-in retouch prompt is not used at all."
-                  : "The built-in retouch prompt, plus any small changes you add below (optional)."}
-              </p>
-
               {/* The same description card the other tools use, model picker in
                   its footer. Default: optional extras added to the built-in
-                  instructions. Write my own: the whole instruction. */}
+                  instructions. Write my own: the whole instruction. Its
+                  heading row carries the two choices that shape it — which
+                  instructions, right by the box they change — and the design
+                  number at the far end. */}
               <PromptCard
-                label={useCustomPrompt ? "Your prompt" : "Changes (optional)"}
+                label={
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    {useCustomPrompt ? "Your prompt" : "Changes (optional)"}
+                    <span className="flex items-center gap-1.5 font-normal normal-case tracking-normal">
+                      <PromptModeButton active={!useCustomPrompt} onClick={() => setUseCustomPrompt(false)} icon={Sparkles}>
+                        Default
+                      </PromptModeButton>
+                      <PromptModeButton active={useCustomPrompt} onClick={() => setUseCustomPrompt(true)} icon={PenLine}>
+                        Write my own
+                      </PromptModeButton>
+                    </span>
+                  </span>
+                }
+                aside={designNoField}
                 value={useCustomPrompt ? customPrompt : extraNotes}
                 onChange={useCustomPrompt ? setCustomPrompt : setExtraNotes}
                 rows={4}
@@ -673,6 +701,12 @@ export function CleaningWorkspace<TModel extends string>({
                 onPasteImage={running ? undefined : (file) => handleAdd([file])}
                 footerEnd={<InlineModelSelect models={modelOptions} value={model} onChange={setModel} showQuality align="right" />}
               />
+
+              <p className="text-[11px] text-faint">
+                {useCustomPrompt
+                  ? "Your own prompt from scratch — the built-in retouch prompt is not used at all."
+                  : "The built-in retouch prompt, plus any small changes you add above (optional)."}
+              </p>
 
               {/* Part of the built-in prompt, so hidden for "Write my own",
                   where the person's own words decide. */}

@@ -6,6 +6,7 @@ const { queueGeneration, parseImages } = require("./queueGeneration");
 const { CLEANING_JOB } = require("../jobs/cleaning");
 const { hasPermission } = require("../permissions");
 const Asset = require("../models/asset");
+const { readDetails } = require("../details");
 
 const router = express.Router();
 
@@ -154,6 +155,7 @@ router.post("/", async (req, res) => {
     sourceChecksum,
     extraNotes,
     removeMarkings: wantsMarkingsRemoved,
+    designNo,
   } = req.body || {};
 
   const isRefinement = Boolean(refineImage && instruction);
@@ -167,6 +169,9 @@ router.post("/", async (req, res) => {
   // and a refinement carries its own instruction. Bounded so a pasted essay
   // can't crowd out the instructions it is added to.
   const notes = !isRefinement && !customPrompt?.trim() && typeof extraNotes === "string" ? extraNotes.trim().slice(0, 2000) : "";
+  // The optional design number, for finding this thread again in History.
+  // Labels the thread, so only a first pass sets it — see details.js.
+  const details = isRefinement ? null : readDetails({ designNo });
   const sourceImage = isRefinement ? refineImage : image;
   // Unknown or absent falls back to "default" rather than refusing the
   // request — the same behaviour as the job's own BUILT_IN_PROMPTS lookup.
@@ -209,6 +214,7 @@ router.post("/", async (req, res) => {
       extraNotes: notes || null,
       variant: isRefinement ? null : resolvedVariant,
       removeMarkings,
+      designNo: details?.designNo ?? null,
       referenceCount: parsedReferences.length,
       conversationId: conversationId || null,
     },
@@ -225,6 +231,7 @@ router.post("/", async (req, res) => {
       extraNotes: notes,
       variant: resolvedVariant,
       removeMarkings,
+      details,
       conversationId,
       parentGenerationId,
       // Only a well-formed one is kept: it is matched against later, so junk

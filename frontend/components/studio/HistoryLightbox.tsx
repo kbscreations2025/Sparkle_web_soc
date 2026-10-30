@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { Download, Eye, Loader2, MessageCircle, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
-import type { HistoryItem, HistoryOutput } from "@/lib/api";
+import { Check, Download, Eye, Loader2, MessageCircle, Pencil, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { DESIGN_NO_MAX, type HistoryItem, type HistoryOutput } from "@/lib/api";
 import { downloadImage, downloadName } from "@/lib/image";
 import { useEscapeKey } from "@/lib/useEscapeKey";
 import { useImageZoom } from "@/lib/useImageZoom";
@@ -42,6 +42,7 @@ export function HistoryLightbox({
   onClose,
   onDelete,
   onContinue,
+  onDesignNoSave,
 }: {
   item: HistoryItem | null;
   toolLabel: string;
@@ -57,6 +58,12 @@ export function HistoryLightbox({
   onClose: () => void;
   onDelete: (item: HistoryItem) => void;
   onContinue?: () => void;
+  /**
+   * Saves a new design number for this result's thread — given only where the
+   * viewer may change it (their own). Resolves to the number as stored, or
+   * throws with the reason it wasn't. Without it the number is read-only.
+   */
+  onDesignNoSave?: (next: string) => Promise<string | null>;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   /**
@@ -137,6 +144,9 @@ export function HistoryLightbox({
                   {[modelLabel, item.quality].filter(Boolean).join(" · ")}
                 </span>
               )}
+              {/* Keyed by thread, so opening another result starts a fresh
+                  editor rather than carrying over a half-typed value. */}
+              <DesignNoChip key={item.conversationId} value={item.designNo ?? null} onSave={onDesignNoSave} />
             </div>
 
             <button
@@ -445,6 +455,105 @@ export function HistoryLightbox({
       )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The result's design number in the header — and, on the viewer's own work,
+ * the place to add, fix or clear it. Click to edit; Enter saves, Escape backs
+ * out without closing the viewer. A colleague's result shows the number, or
+ * nothing at all when it has none.
+ */
+function DesignNoChip({ value, onSave }: { value: string | null; onSave?: (next: string) => Promise<string | null> }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  if (!onSave && !value) return null;
+
+  const chip =
+    "flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold md:px-2.5 md:py-1 md:text-[11px]";
+
+  if (!editing) {
+    const label = value ? `#${value}` : "+ Design no.";
+    return onSave ? (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(value ?? "");
+          setError("");
+          setEditing(true);
+        }}
+        title={value ? "Edit design number" : "Add a design number"}
+        className={cn(
+          chip,
+          "flex items-center gap-1 transition-colors",
+          value ? "bg-gold/80 text-black hover:bg-gold" : "border border-dashed border-white/20 text-faint hover:text-cream"
+        )}
+      >
+        {label}
+        {value && <Pencil size={10} />}
+      </button>
+    ) : (
+      <span className={cn(chip, "bg-gold/80 text-black")}>{label}</span>
+    );
+  }
+
+  async function save() {
+    if (!onSave || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(draft.trim());
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="flex flex-shrink-0 items-center gap-1">
+      <input
+        autoFocus
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") save();
+          if (event.key === "Escape") {
+            // Only the editor — not the whole viewer, whose Escape listens on window.
+            event.stopPropagation();
+            setEditing(false);
+          }
+        }}
+        maxLength={DESIGN_NO_MAX}
+        placeholder="Design no."
+        aria-label="Design number"
+        className="w-28 rounded-full border border-gold/40 bg-white/[0.05] px-2.5 py-0.5 text-[11px] text-cream outline-none placeholder:text-faint md:py-1"
+      />
+      <button
+        type="button"
+        onClick={save}
+        disabled={saving}
+        aria-label="Save design number"
+        title="Save"
+        className="flex h-6 w-6 items-center justify-center rounded-full text-gold transition-colors hover:bg-white/[0.10] disabled:opacity-50"
+      >
+        {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+      </button>
+      <button
+        type="button"
+        onClick={() => setEditing(false)}
+        aria-label="Cancel"
+        title="Cancel"
+        className="flex h-6 w-6 items-center justify-center rounded-full text-faint transition-colors hover:bg-white/[0.10] hover:text-cream"
+      >
+        <X size={12} />
+      </button>
+      {error && <span className="text-[10px] text-error">{error}</span>}
+    </span>
   );
 }
 

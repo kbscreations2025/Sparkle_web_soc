@@ -14,6 +14,7 @@ import {
   fetchHistoryItem,
   listMarketingKits,
   MODEL_LABELS,
+  updateConversationDetails,
   type HistoryItem,
   type MarketingKitSummary,
 } from "@/lib/api";
@@ -27,12 +28,12 @@ import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 import { ScrollEnds } from "@/components/admin/ScrollEnds";
 import {
   DateFilter,
+  HistorySearch,
   KindFilter,
   MemberFilter,
   MoreFilters,
-  QualityFilter,
+  OutputFilter,
   ToolFilter,
-  TypeFilter,
   ViewTab,
   withinRange,
   type DateRange,
@@ -110,10 +111,14 @@ function buildHistoryQuery(
   members: string[],
   qualities: string[],
   types: string[],
-  range: DateRange
+  range: DateRange,
+  search: string,
+  exact = false
 ) {
   return {
     scope: "team" as const,
+    search: search || undefined,
+    exact: search && exact ? true : undefined,
     tools: tools.length ? tools : undefined,
     members: members.length ? members : undefined,
     qualities: qualities.length ? qualities : undefined,
@@ -139,6 +144,7 @@ type HistorySnapshot = {
   nextCursor: string | null;
   serverTotal: number | null;
   canReadTeam: boolean;
+  correctedSearch?: string | null;
 };
 
 /** A comma-separated filter from the query string — empty when it is absent. */
@@ -183,6 +189,17 @@ export default function HistoryPage() {
    */
   const [selectedTypes, setSelectedTypes] = useState<string[]>(() => listParam(searchParams, "types"));
 
+  /**
+   * The search box: a design number, or words from what was asked for —
+   * matched by the server. Empty means no search. `design` is the parameter's
+   * name in links made before it searched prompts too.
+   */
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? searchParams.get("design") ?? "");
+  /** "Search for what I typed instead" — the server's spelling correction off for this search. */
+  const [exactSearch, setExactSearch] = useState(false);
+  /** The search as the server ran it, where it corrected a misspelt word. */
+  const [correctedSearch, setCorrectedSearch] = useState<string | null>(null);
+
   /** When to show results from. Empty strings mean open-ended. */
   const [dateRange, setDateRange] = useState<DateRange>(() => ({
     from: searchParams.get("from") ?? "",
@@ -211,7 +228,7 @@ export default function HistoryPage() {
    * onto the grid instead of a skeleton; the fetch below then refreshes it.
    */
   const [initialKey] = useState(() =>
-    historyKey(buildHistoryQuery(selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange))
+    historyKey(buildHistoryQuery(selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange, search))
   );
   const [initial] = useState(() => getPageCache<HistorySnapshot>(initialKey));
   /** The query the rows on screen were fetched for — see the cache write below. */
@@ -225,6 +242,8 @@ export default function HistoryPage() {
    */
   const [pendingNew, setPendingNew] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(!initial);
+  /** A new search is being answered while the previous results stay on screen. */
+  const [searching, setSearching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(initial?.nextCursor ?? null);
   const [serverTotal, setServerTotal] = useState<number | null>(initial?.serverTotal ?? null);
@@ -271,6 +290,7 @@ export default function HistoryPage() {
       kinds?: string[];
       qualities?: string[];
       types?: string[];
+      search?: string;
     }) => {
       const params = new URLSearchParams(searchParams.toString());
       // Untouched when not passed; an empty list drops the key.
@@ -285,6 +305,11 @@ export default function HistoryPage() {
       setList("types", next.types);
       setList("members", next.members);
       setList("kinds", next.kinds);
+      if (next.search !== undefined) {
+        params.delete("design");
+        if (next.search) params.set("q", next.search);
+        else params.delete("q");
+      }
       if (next.range) {
         for (const key of ["from", "to"] as const) {
           if (next.range[key]) params.set(key, next.range[key]);
@@ -314,8 +339,8 @@ export default function HistoryPage() {
   }
 
   const historyQuery = useMemo(
-    () => buildHistoryQuery(selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange),
-    [selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange]
+    () => buildHistoryQuery(selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange, search, exactSearch),
+    [selectedTools, selectedMembers, selectedQualities, selectedTypes, dateRange, search, exactSearch]
   );
 
   /*
@@ -324,10 +349,15 @@ export default function HistoryPage() {
    * one, and they do not come back in order.
    */
   const requestId = useRef(0);
+  /** The filters, less the search text, of the last request — to tell a new search from a new filter. */
+  const lastFiltersRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = ++requestId.current;
     const key = historyKey(historyQuery);
+    const filters = JSON.stringify({ ...historyQuery, search: undefined, exact: undefined });
+    const onlySearchChanged = lastFiltersRef.current === filters;
+    lastFiltersRef.current = filters;
     // Seen this exact question before: show that answer now and refresh it
     // quietly, rather than blanking the grid to a skeleton.
     const cached = getPageCache<HistorySnapshot>(key);
@@ -337,7 +367,14 @@ export default function HistoryPage() {
       setNextCursor(cached.nextCursor);
       setServerTotal(cached.serverTotal);
       setCanReadTeam(cached.canReadTeam);
+      setCorrectedSearch(cached.correctedSearch ?? null);
       setLoading(false);
+      setSearching(false);
+    } else if (onlySearchChanged) {
+      // A new search keeps the current results on screen until the answer is
+      // in — blanking the grid at every pause in typing makes it flicker.
+      // The search box shows it is working meanwhile.
+      setSearching(true);
     } else {
       setLoading(true);
     }
@@ -394,8 +431,10 @@ export default function HistoryPage() {
         setNextCursor(cursor);
         setServerTotal(res.totalImages ?? null);
         setCanReadTeam(Boolean(res.canReadTeam));
+        setCorrectedSearch(res.correctedSearch ?? null);
       }
       setLoading(false);
+      setSearching(false);
     })();
   }, [historyQuery, historyKey]);
 
@@ -408,8 +447,8 @@ export default function HistoryPage() {
    */
   useEffect(() => {
     if (loading || !dataKeyRef.current) return;
-    setPageCache<HistorySnapshot>(dataKeyRef.current, { items, nextCursor, serverTotal, canReadTeam });
-  }, [loading, items, nextCursor, serverTotal, canReadTeam]);
+    setPageCache<HistorySnapshot>(dataKeyRef.current, { items, nextCursor, serverTotal, canReadTeam, correctedSearch });
+  }, [loading, items, nextCursor, serverTotal, canReadTeam, correctedSearch]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
@@ -715,6 +754,22 @@ export default function HistoryPage() {
 
   const openItem = useCallback((item: HistoryItem) => setSelected(item), []);
 
+  /**
+   * Sets a thread's design number from the viewer. It lives on the thread, so
+   * every tile from that thread — not just the one opened — takes the new
+   * value. Throws the server's reason, which the viewer shows beside the field.
+   */
+  const saveDesignNo = useCallback(async (conversationId: string, next: string) => {
+    const res = await updateConversationDetails(conversationId, { designNo: next });
+    if (res.status !== "success") throw new Error(res.message || "Could not save the design number");
+    const stored = res.designNo ?? null;
+    const relabel = (row: HistoryItem) => (row.conversationId === conversationId ? { ...row, designNo: stored } : row);
+    setItems((current) => current.map(relabel));
+    setPendingNew((current) => current.map(relabel));
+    setSelected((current) => (current ? relabel(current) : current));
+    return stored;
+  }, []);
+
   // Live updates: the same generation-complete event that lets a tool page
   // skip a manual refresh also lets History prepend a brand-new result the
   // instant it's ready, with no poll and no page reload.
@@ -723,6 +778,9 @@ export default function HistoryPage() {
 
     const socket = io(BACKEND_URL, { withCredentials: true });
     socket.on("history:generation", (item: HistoryItem) => {
+      // A design-number search is the server's to match — the tenant ping
+      // that comes with this result fetches it if it belongs.
+      if (queryRef.current.search) return;
       // Always prepended to the one dataset — whether it's currently *shown*
       // is up to `visibleItems`, which reacts to it the moment it lands.
       setItems((current) => (current.some((row) => row.id === item.id) ? current : [item, ...current]));
@@ -939,14 +997,17 @@ export default function HistoryPage() {
         {renderViewTabs(compact)}
         {renderSecondaryFilters(compact)}
       </div>
-      {renderToolFilter(compact)}
+      <div className="flex items-center gap-2">
+        {renderToolFilter(compact)}
+        {renderSearch(compact)}
+      </div>
     </>
   );
 
   /** How many of the filters folded into the phone's "more" menu are set — its badge. */
   const moreActiveCount =
     selectedMembers.length +
-    (view === "history" ? selectedQualities.length + selectedTypes.length : 0) +
+    (view === "history" ? selectedQualities.length + selectedTypes.length + (search ? 1 : 0) : 0) +
     (dateRange.from || dateRange.to ? 1 : 0);
 
   /*
@@ -958,7 +1019,10 @@ export default function HistoryPage() {
     <div className="flex min-w-0 flex-1 items-center justify-between gap-1.5">
       <div className="flex items-center gap-1.5">
         {renderViewTabs(true)}
-        <MoreFilters activeCount={moreActiveCount}>{renderSecondaryFilters(false)}</MoreFilters>
+        <MoreFilters activeCount={moreActiveCount}>
+          {renderSecondaryFilters(false)}
+          {renderSearch(false)}
+        </MoreFilters>
       </div>
       {renderToolFilter(true)}
     </div>
@@ -1012,28 +1076,45 @@ export default function HistoryPage() {
 
       {/* History only — a kit has no resolution and is never a video. */}
       {view === "history" && (
-        <>
-          <QualityFilter
-            options={facetQualities}
-            selected={selectedQualities}
-            onChange={(next) => {
-              setSelectedQualities(next);
-              syncUrl({ qualities: next });
-            }}
-            compact={compact}
-          />
-          <TypeFilter
-            selected={selectedTypes}
-            onChange={(next) => {
-              setSelectedTypes(next);
-              syncUrl({ types: next });
-            }}
-            compact={compact}
-          />
-        </>
+        <OutputFilter
+          qualities={facetQualities}
+          selectedQualities={selectedQualities}
+          onQualitiesChange={(next) => {
+            setSelectedQualities(next);
+            syncUrl({ qualities: next });
+          }}
+          selectedTypes={selectedTypes}
+          onTypesChange={(next) => {
+            setSelectedTypes(next);
+            syncUrl({ types: next });
+          }}
+          compact={compact}
+        />
       )}
     </>
   );
+
+  /*
+   * The search box, last in the row — after every filter, where the eye ends
+   * up — and wider than the pills before it, since it is typed into. History
+   * only: a kit carries no design number or prompt.
+   */
+  const renderSearch = (compact: boolean) =>
+    view === "history" ? (
+      <HistorySearch
+        value={search}
+        busy={searching}
+        onChange={(next) => {
+          setSearch(next);
+          // A new search gets corrected again, whatever the last one asked.
+          setExactSearch(false);
+          syncUrl({ search: next });
+          // New results start at the top, not wherever the last ones were scrolled to.
+          scrollRef.current?.scrollTo({ top: 0 });
+        }}
+        compact={compact}
+      />
+    ) : null;
 
   /* The same control in the same place on both tabs, over whichever
      dimension actually separates the rows there: which tool made a result,
@@ -1112,6 +1193,21 @@ export default function HistoryPage() {
           </button>
         )}
         <div ref={scrollRef} className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3 lg:p-4">
+          {/* A misspelt word was searched as the word the library uses — said
+              plainly, with a way back to exactly what was typed. */}
+          {view === "history" && search && correctedSearch && !loading && (
+            <p className="mb-3 px-1 text-xs text-muted">
+              Showing results for <span className="font-semibold text-cream">{correctedSearch}</span>
+              <span className="mx-1.5 text-faint">·</span>
+              <button
+                type="button"
+                onClick={() => setExactSearch(true)}
+                className="text-gold underline-offset-2 hover:underline"
+              >
+                Search for “{search}” instead
+              </button>
+            </p>
+          )}
           {view === "kits" ? (
             <KitsGrid
               kits={visibleKits}
@@ -1127,7 +1223,9 @@ export default function HistoryPage() {
           ) : loading ? (
             <SkeletonGrid rows={3} />
           ) : visibleItems.length === 0 ? (
-            <p className="px-2 py-10 text-center text-sm text-faint">Nothing generated yet.</p>
+            <p className="px-2 py-10 text-center text-sm text-faint">
+              {search ? `No results for “${correctedSearch ?? search}”.` : "Nothing generated yet."}
+            </p>
           ) : (
             <div style={{ position: "relative", height: rowVirtualizer.getTotalSize() }}>
               {virtualRows.map((virtualRow) => (
@@ -1181,6 +1279,7 @@ export default function HistoryPage() {
         onClose={() => setSelected(null)}
         onDelete={requestDelete}
         onContinue={() => selected && handleContinue(selected)}
+        onDesignNoSave={selected?.isOwn ? (next) => saveDesignNo(selected.conversationId, next) : undefined}
       />
 
       <ConfirmDialog
