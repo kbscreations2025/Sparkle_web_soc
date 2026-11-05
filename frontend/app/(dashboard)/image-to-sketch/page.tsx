@@ -118,7 +118,7 @@ export default function ImageToSketchPage() {
                 className="group relative block h-40 w-40"
               >
                 <Image src={photo} alt="Photo to sketch" fill sizes="160px" className="object-contain" />
-                <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-md border border-white/15 bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white/85 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-md border border-white/15 bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white/85 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 touch:opacity-100">
                   <Maximize2 size={10} /> Preview
                 </span>
               </button>

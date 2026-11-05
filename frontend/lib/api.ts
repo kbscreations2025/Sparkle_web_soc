@@ -674,6 +674,7 @@ export function qualitiesFor(modelId: string): readonly string[] {
   // miss the rest.
   return (
     IMAGE_EDIT_MODELS.find((m) => m.id === modelId)?.qualities ??
+    SKETCH_TO_IMAGE_MODELS.find((m) => m.id === modelId)?.qualities ??
     OPTIONAL_IMAGE_MODELS.find((m) => m.id === modelId)?.qualities ??
     TESTING_CLEANING_MODELS.find((m) => m.id === modelId)?.qualities ??
     LIFESTYLE_MODELS.find((m) => m.id === modelId)?.qualities ??
@@ -751,6 +752,58 @@ export const IMAGE_EDIT_MODELS = [
 ] as const;
 export type ImageEditModelId = (typeof IMAGE_EDIT_MODELS)[number]["id"];
 export const DEFAULT_IMAGE_EDIT_MODEL: ImageEditModelId = DEFAULT_CLEANING_MODEL;
+
+/**
+ * Sketch to Image's models, from a side-by-side test (Nov 2026) on two
+ * coloured two-view band sheets (face + profile) and three pencil pendants,
+ * two renders each. GPT Image 2 matched every sketch both times; Nano Banana
+ * 2.1 missed once (a pencil pendant in rose gold); Sparkle 3 Pro got each
+ * band right once and then swapped a ribbed centre for baguettes and round
+ * stones for square ones. 3.1 Flash, Seedream, Qwen and Hy swapped the ribs
+ * too, and GPT 2.5 Flare/Sunburst drew the sheet's two views side by side.
+ *
+ * No native "gpt-image-1" here: with only an OpenRouter key it is routed to
+ * openai/gpt-image-1, which OpenAI no longer serves ("model does not exist").
+ */
+export const SKETCH_TO_IMAGE_MODELS = [
+  {
+    id: "openai/gpt-image-2",
+    label: "Sparkle GPT Image 2",
+    provider: "OpenAI",
+    quality: "high",
+    qualities: GPT_TIERS,
+    description: "Most faithful to the sketch",
+    badge: "Recommended",
+  },
+  {
+    id: "google/gemini-nano-banana-2.1",
+    label: "Nano Banana 2.1",
+    provider: "Google",
+    quality: "4K",
+    qualities: EDIT_4K_TIERS,
+    description: "Faithful · up to 4K",
+    badge: "Backup",
+  },
+  {
+    id: "gemini-3-pro-image",
+    label: "Sparkle 3 Pro Image",
+    provider: "Gemini",
+    quality: "4K",
+    qualities: ["4K", "2K", "1K"],
+    description: "Crisp detail · may reinterpret busy sheets",
+  },
+  {
+    id: "gemini-3.1-flash-image",
+    label: "Sparkle 3.1 Flash Image",
+    provider: "Gemini",
+    quality: "4K",
+    qualities: ["4K", "2K", "1K"],
+    description: "Fastest · simple sketches",
+    badge: "Fast",
+  },
+] as const;
+export type SketchToImageModelId = (typeof SKETCH_TO_IMAGE_MODELS)[number]["id"];
+export const DEFAULT_SKETCH_TO_IMAGE_MODEL: SketchToImageModelId = "openai/gpt-image-2";
 
 /**
  * The model list for tools whose input photo is optional or absent — Text to
@@ -1006,16 +1059,6 @@ export function checkCleaningDuplicates(checks: { id: string; sourceChecksum: st
 
 // ── chat to edit ─────────────────────────────────────────────────────────────
 
-export type ChatEditResult = {
-  /** The results as data URIs — one for an edit, several for "more designs". */
-  images?: string[];
-  model?: string;
-  conversationId?: string | null;
-  generationId?: string | null;
-  /** How the instruction was read — "Metal → rose gold". Null for a plain edit. */
-  intentLabel?: string | null;
-};
-
 /**
  * What an attached image is for in Chat to Edit — see REFERENCE_ROLES in
  * backend/src/prompts/chatToEdit.js. "marks" is set by the page for a
@@ -1036,6 +1079,10 @@ export const REFERENCE_ROLE_OPTIONS: { value: ReferenceRole; label: string; hint
 /**
  * One turn of a chat-style edit. Unlike cleaning there's no "default" prompt
  * mode — `instruction` always drives the edit, so it's required.
+ *
+ * Queued like every other image tool: answers at once with the job, which
+ * shows in the queue rail, and the results arrive on it as stored urls —
+ * `result.outputUrls`, several when the turn asked for more designs.
  */
 export function chatEdit(body: {
   /** The image being edited this turn, as a data URI. */
@@ -1054,8 +1101,10 @@ export function chatEdit(body: {
   quality?: string;
   conversationId?: string | null;
   parentGenerationId?: string | null;
+  /** Tiny thumbnail for the queue rail — see `makeThumbnail`. Dropped if oversized. */
+  preview?: string | null;
 }) {
-  return apiRequest<ChatEditResult>("/api/chat-to-edit", {
+  return apiRequest<QueuedResult>("/api/chat-to-edit", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -1592,7 +1641,7 @@ export function imageToVideo(body: {
  * `collection_story` is an Affinity deck under its own name, and `festive` a
  * set of event posters — they arrive in the `affinity` and `campaign` fields.
  */
-export type MarketingKitKind = "brand_story" | "affinity" | "campaign" | "collection_story" | "festive";
+export type MarketingKitKind = "brand_story" | "affinity" | "campaign" | "collection_story" | "festive" | "presentation";
 
 /** One entry in the saved-kits rail. Summaries only — a full kit is large. */
 export type MarketingKitSummary = {
@@ -1622,7 +1671,7 @@ export type MarketingKitImage = {
   url: string;
   /** The grid-sized copy. Falls back to `url` server-side, so never empty. */
   thumbnailUrl: string;
-  role: "product" | "sheet" | "model";
+  role: "product" | "sheet" | "model" | "upload";
   width: number | null;
   height: number | null;
   fileName: string | null;
@@ -1680,6 +1729,20 @@ export type MarketingKit = MarketingKitSummary & {
     originalShots: CampaignShot[];
     options: Record<string, unknown>;
   } | null;
+  /** Presentation: the pictures the deck places, its outline, its laid-out slides and the edit thread. */
+  presentation?: {
+    images: MarketingKitImage[];
+    imageNotes: string[];
+    sources: { name: string; kind: string }[];
+    brief: string;
+    style: string;
+    length: string;
+    /** The model's outline — see lib/presentation.ts. */
+    outline: unknown;
+    /** The editor's layout; null until first saved. */
+    design: unknown;
+    messages: { role: "user" | "assistant"; text: string; at: string }[];
+  } | null;
 };
 
 /** One of a Campaign Kit's four shots (or a Festive kit's posters). Points at an Asset, not its own copy. */
@@ -1729,6 +1792,26 @@ export function affinity(
 ) {
   const path = kind === "collection_story" ? "/api/marketing-kit/collection-story" : "/api/marketing-kit/affinity";
   return apiRequest<QueuedResult>(path, { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * Presentation: whatever was dropped in, already read in the browser to text
+ * and pictures (lib/presentationFiles.ts), written up into a deck outline.
+ */
+export function buildPresentation(body: {
+  sources: { name: string; kind: string; text: string }[];
+  images: { src: string; label: string }[];
+  brief: string;
+  style: string;
+  length: string;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/marketing-kit/presentation", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** One chat edit to a saved presentation — the server edits its own stored outline. */
+export function editPresentation(body: { kitId: string; instruction: string; conversationId?: string | null }) {
+  return apiRequest<QueuedResult>("/api/marketing-kit/presentation/edit", { method: "POST", body: JSON.stringify(body) });
 }
 
 /** Up to six pieces together in one event-themed poster, optionally in several variations. */

@@ -57,4 +57,35 @@ const REMOVE_MARKINGS_NOTE = `MARKINGS — THIS OVERRIDES every instruction abov
 const KEEP_MARKINGS_NOTE =
   "MARKINGS: keep every engraving, hallmark, purity or karat stamp, maker's mark, logo and brand stamp exactly as it is — the same text, position, size and depth, crisp and legible. Never alter, invent or erase one.";
 
-module.exports = { buildReferenceNote, VIEW_LOCK, VIEW_CHECK, VIEW_KEEP_NOTE, REMOVE_MARKINGS_NOTE, KEEP_MARKINGS_NOTE };
+/**
+ * A white background means #FFFFFF. Models asked for "a white background"
+ * hand back off-white, cream or a pale grey gradient often enough to notice
+ * beside a true-white catalogue page — so every product-shot prompt says it
+ * in numbers. Only where the background is, or is asked to be, plain white:
+ * a scene, a hand or a coloured backdrop is left alone. Saved results are
+ * also corrected afterwards (see storage/whiteBackground.js); this is what
+ * keeps that correction small.
+ */
+const PURE_WHITE_NOTE =
+  "WHITE BACKGROUND: wherever the background is plain white, or the request asks for a white or studio background, make it pure #FFFFFF (RGB 255, 255, 255), flat and even from edge to edge — never off-white, ivory, cream, beige or light grey, and no gradient, vignette or tint. A scene, skin or a coloured backdrop stays as it is.";
+
+/**
+ * For a run that makes several design options, said on every one of them.
+ * Each option is its own image, but a request like "2 different ring designs"
+ * travels with every image's prompt — and read alone, each image drew both
+ * rings side by side (four rings in two pictures). A matching pair stays one
+ * piece.
+ */
+const ONE_OPTION_NOTE =
+  "ONE DESIGN PER IMAGE: this image shows only this one option — a single piece (a pair of earrings or cufflinks counts as one). Where the request asks for several options or designs, each of them is its own separate image: never show two or more pieces, or the options side by side, in this image.";
+
+module.exports = {
+  buildReferenceNote,
+  ONE_OPTION_NOTE,
+  VIEW_LOCK,
+  VIEW_CHECK,
+  VIEW_KEEP_NOTE,
+  REMOVE_MARKINGS_NOTE,
+  KEEP_MARKINGS_NOTE,
+  PURE_WHITE_NOTE,
+};

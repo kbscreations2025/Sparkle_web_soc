@@ -790,7 +790,7 @@ export function BulkPieceUpload({
                           onClick={() => removeCategory(category.id)}
                           title="Remove the category — its pieces move to the first one"
                           aria-label={`Remove category ${category.label}`}
-                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-faint opacity-0 transition hover:bg-error/10 hover:text-error group-hover/cat:opacity-100"
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-faint opacity-0 transition hover:bg-error/10 hover:text-error group-hover/cat:opacity-100 touch:opacity-100"
                         >
                           <X size={11} />
                         </button>
@@ -869,7 +869,7 @@ export function BulkPieceUpload({
                           alt=""
                           className="h-full w-full object-contain"
                         />
-                        <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white opacity-0 transition-opacity group-hover/thumb:opacity-100">
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white opacity-0 transition-opacity group-hover/thumb:opacity-100 touch:inset-auto touch:bottom-0.5 touch:right-0.5 touch:h-5 touch:w-5 touch:rounded-full touch:bg-black/55 touch:opacity-100">
                           <Eye size={13} />
                         </span>
                       </button>

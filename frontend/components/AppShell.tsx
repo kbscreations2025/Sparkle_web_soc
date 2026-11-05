@@ -35,7 +35,12 @@ export function AppShell({
     // Framer animates via rAF, so the reduced-motion CSS in globals.css can't
     // reach it — this is what honours the OS setting for every motion element.
     <MotionConfig reducedMotion="user">
-      <div className="flex h-screen min-h-0 bg-void">
+      {/* `h-dvh`, not `h-screen`: on phones and tablets 100vh counts the
+          space behind the browser's address bar, so the frame came out
+          taller than the screen and the whole page — header included —
+          scrolled by that much. The visible height keeps the header pinned
+          and lets only the content column scroll. */}
+      <div className="flex h-dvh min-h-0 overflow-hidden bg-void">
         {sidebar}
         {/* `min-w-0`: without it a wide child (a results grid, a long row of
             model cards) stretches this column and pushes the sidebar off. */}

@@ -266,6 +266,66 @@ async function saveKitSafely(save, { kind, kitId, dbUser, model, generationId = 
 }
 
 /**
+ * A Presentation kit: the pictures the deck may place (stored, so the deck
+ * reopens without the original files), what was read out of every document,
+ * and the outline the model wrote.
+ */
+async function savePresentationKit({ dbUser, kitId, model, generationId = null, images, imageNotes, sources, brief, style, length, outline }) {
+  const common = { tenantId: dbUser.tenantId, userId: dbUser._id, kitId };
+  const storedImages = await Promise.all(
+    images.map((image) => storeImage({ ...common, role: "upload", image, fileName: String(image.label || "").slice(0, 300) || null }))
+  );
+
+  const kit = await createKit(dbUser, kitId, {
+    kind: "presentation",
+    title: String(outline.title || "Presentation").slice(0, 300),
+    status: "ready",
+    model,
+    generationId,
+    presentation: {
+      images: storedImages,
+      imageNotes: imageNotes.slice(0, storedImages.length),
+      sources: sources.map((source) => ({
+        name: String(source.name || "").slice(0, 300),
+        kind: String(source.kind || "").slice(0, 40),
+        text: String(source.text || "").slice(0, 60_000),
+      })),
+      brief: String(brief || "").slice(0, 4000),
+      style,
+      length,
+      outline,
+      originalOutline: outline,
+      design: null,
+      slideCount: outline.slides.length,
+      messages: [],
+    },
+  });
+
+  return toPublicKit(kit);
+}
+
+/**
+ * A chat edit's result: the new outline, and both sides of the exchange for
+ * the thread. The design is the client's to lay out and save — it knows which
+ * slides the person has rearranged by hand.
+ */
+async function savePresentationEdit({ dbUser, kitId, outline, instruction, reply }) {
+  const kit = await MarketingKit.findOne({ _id: kitId, tenantId: dbUser.tenantId, userId: dbUser._id, deletedAt: null });
+  if (!kit?.presentation) return null;
+
+  kit.presentation.outline = outline;
+  kit.presentation.slideCount = outline.slides.length;
+  kit.markModified("presentation.outline");
+  kit.presentation.messages.push(
+    { role: "user", text: String(instruction).slice(0, 4000) },
+    { role: "assistant", text: String(reply || "Done.").slice(0, 4000) }
+  );
+  if (outline.title) kit.title = String(outline.title).slice(0, 300);
+  await kit.save();
+  return toPublicKit(kit);
+}
+
+/**
  * Summaries only — a listing needs a name, a date and one thumbnail.
  *
  * The preview is the grid-sized copy wherever there is one: the rail
@@ -279,8 +339,10 @@ function toKitSummary(kit) {
     ? kit.brandStory.images?.[0]
     : kit.affinity
       ? kit.affinity.pieces?.find((piece) => piece.productImage)?.productImage
-      : // A campaign-shaped kit leads with what it produced, not what went in.
-        kit.campaign?.shots?.[0] ?? kit.campaign?.sourceImages?.[0];
+      : kit.presentation
+        ? kit.presentation.images?.[0]
+        : // A campaign-shaped kit leads with what it produced, not what went in.
+          kit.campaign?.shots?.[0] ?? kit.campaign?.sourceImages?.[0];
 
   return {
     id: String(kit._id),
@@ -302,6 +364,7 @@ function toKitSummary(kit) {
 function countFor(kit) {
   if (kit.affinity) return kit.affinity.pieces?.length ?? 0;
   if (kit.campaign) return kit.campaign.shots?.length ?? 0;
+  if (kit.presentation) return kit.presentation.slideCount ?? 0;
   return kit.brandStory?.images?.length ?? 0;
 }
 
@@ -349,6 +412,20 @@ function toPublicKit(kit) {
           options: kit.campaign.options || {},
         }
       : null,
+    presentation: kit.presentation
+      ? {
+          images: kit.presentation.images.map(toPublicImage),
+          imageNotes: kit.presentation.imageNotes ?? [],
+          // Names only — the extracted text is up to 60KB a file and only the model needed it.
+          sources: (kit.presentation.sources ?? []).map((source) => ({ name: source.name, kind: source.kind })),
+          brief: kit.presentation.brief,
+          style: kit.presentation.style,
+          length: kit.presentation.length,
+          outline: kit.presentation.outline ?? null,
+          design: kit.presentation.design ?? null,
+          messages: (kit.presentation.messages ?? []).map((message) => ({ role: message.role, text: message.text, at: message.at })),
+        }
+      : null,
   };
 }
 
@@ -380,6 +457,12 @@ const LIST_EXCLUDED_FIELDS = [
   "-brandStory.originalAnalysis",
   "-campaign.originalShots",
   "-campaign.options",
+  "-presentation.outline",
+  "-presentation.originalOutline",
+  "-presentation.design",
+  "-presentation.sources",
+  "-presentation.messages",
+  "-presentation.imageNotes",
 ].join(" ");
 
 /**
@@ -491,6 +574,21 @@ async function updateKit({ dbUser, id, changes }) {
     }
   }
 
+  /*
+   * Presentation: the laid-out slides only. The outline is the model's and
+   * changes through a chat edit, which records what was asked; letting a
+   * client rewrite it here would bypass that.
+   */
+  if (kit.presentation && changes.design && typeof changes.design === "object" && changes.design.version === 1 && Array.isArray(changes.design.slides)) {
+    if (JSON.stringify(changes.design).length > MAX_DESIGN_BYTES) {
+      const error = new Error("This deck is too large to save — remove some uploaded images");
+      error.code = "design_too_large";
+      throw error;
+    }
+    kit.presentation.design = changes.design;
+    kit.markModified("presentation.design");
+  }
+
   if (kit.campaign && Array.isArray(changes.shots)) {
     /*
      * Captions only. A shot's id, label and url are what the run produced
@@ -522,6 +620,8 @@ module.exports = {
   saveBrandStoryKit,
   saveAffinityKit,
   saveCampaignKit,
+  savePresentationKit,
+  savePresentationEdit,
   saveKitSafely,
   listKits,
   getKit,

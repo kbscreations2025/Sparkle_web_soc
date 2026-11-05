@@ -1,13 +1,12 @@
 const express = require("express");
 const { requireAuth, requirePermission } = require("../middleware/auth");
-const { buildChatEditPrompt, buildReferenceNote, SCALE_NOTE, ANATOMY_NOTE } = require("../prompts");
-const { resolveReferenceRoles, hasRoleTask, buildRolePrompt, orderImages, describeRoles } = require("../prompts/chatToEdit");
-const { resolveIntent, intentForTool, refineCountFor, applyIntentToPrompt, describeIntent } = require("../prompts/intent");
-const { matchColour, wantsColourChange } = require("../services/colorMatch");
-const { resolveProviderModel, routeProviderCall, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
-const { recordGeneration, parseDataUri, isOwnConversation } = require("../generationService");
+const { resolveReferenceRoles, hasRoleTask, describeRoles } = require("../prompts/chatToEdit");
+const { resolveIntent, intentForTool, refineCountFor, describeIntent } = require("../prompts/intent");
+const { resolveProviderModel, loadTenantOrThrow, sendGenerationError } = require("../aiRouting");
+const { parseDataUri } = require("../generationService");
 const { logRequestAudit } = require("../auditLog");
-const credit = require("../services/credits");
+const { queueGeneration } = require("./queueGeneration");
+const { CHAT_TO_EDIT_JOB } = require("../jobs/chatToEdit");
 
 const router = express.Router();
 
@@ -25,6 +24,14 @@ router.use(requireAuth, requirePermission("tool.chat_to_edit.run"));
  * "Sparkle 2.5 Flash" meaning the same real model everywhere it's offered.
  * `resolveProviderModel` is what tells a Gemini id from an OpenAI one; this
  * route no longer assumes every request is Gemini's.
+ *
+ * Queued like every other image tool (see jobs/chatToEdit.js): this checks
+ * the request, reads what the turn asks for — "more designs" is several
+ * images and is priced as several — and answers at once with the job. The
+ * edit itself runs in the worker, so it shows in the queue rail with progress
+ * and survives a reload. It used to run here while the browser waited, the
+ * one image route that did. Ownership of the conversation and the credit
+ * hold are queueGeneration's, as for every other tool.
  */
 router.post("/", async (req, res) => {
   // Read in the catch's audit log below — declared here, not destructured
@@ -45,19 +52,12 @@ router.post("/", async (req, res) => {
       quality: requestedQuality,
       conversationId: requestedConversationId,
       parentGenerationId,
+      // Small thumbnail for the queue rail — see queueGeneration's safePreview.
+      preview,
     } = req.body || {};
 
     if (!instruction?.trim()) {
       return res.status(400).json({ status: "error", message: "instruction is required", code: "invalid" });
-    }
-
-    // Before anything is charged — see isOwnConversation.
-    if (!(await isOwnConversation(dbUser, requestedConversationId))) {
-      return res.status(403).json({
-        status: "error",
-        message: "This chat belongs to someone else — you can view it but not continue it.",
-        code: "forbidden",
-      });
     }
 
     const parsedBase = parseDataUri(image);
@@ -68,203 +68,72 @@ router.post("/", async (req, res) => {
     // Invalid entries are dropped rather than rejecting the whole request —
     // one bad attachment shouldn't sink an otherwise-good edit. Each keeps the
     // role sent for it, so dropping one never shifts the roles of the rest.
-    const references = (Array.isArray(referenceImages) ? referenceImages : [])
+    const attached = (Array.isArray(referenceImages) ? referenceImages : [])
       .map((value, index) => ({ image: parseDataUri(value), role: Array.isArray(referenceRoles) ? referenceRoles[index] : null }))
       .filter((entry) => entry.image);
-    const parsedReferences = references.map((entry) => entry.image);
     const roles = resolveReferenceRoles(
-      references.map((entry) => entry.role),
-      references.length,
+      attached.map((entry) => entry.role),
+      attached.length,
       instruction.trim()
     );
+    const references = attached.map((entry, index) => ({ image: entry.image, role: roles[index] }));
 
     const { provider, model, quality, modelLabel } = resolveProviderModel(requestedModel, requestedQuality);
     resolvedProvider = provider;
 
-    const tenant = await loadTenantOrThrow(dbUser);
-
-    let prompts;
-    let images;
-    let intentLabel;
-    /** The image each result's colour is pulled back to, or null where matching would undo the request. */
-    let colourAnchor = null;
-
-    if (hasRoleTask(roles)) {
-      /*
-       * An attachment with a job — a piece to put in, a stone to set, a
-       * texture, a person to wear it (see prompts/chatToEdit.js). One image:
-       * these are precise edits, not a spread of options. The intent reader
-       * is skipped; the roles already say what the turn is.
-       */
-      const { order, colourAnchor: anchor } = orderImages(roles);
-      images = order.map((slot) => (slot.role === "base" ? parsedBase : parsedReferences[slot.ref]));
-      prompts = [buildRolePrompt({ instruction: instruction.trim(), roles })];
-      intentLabel = describeRoles(roles);
-      // Worn on a scene: the scene's own colours are the truth. A stone swap
-      // barely moves the photo's colours, so the base anchors it. A new
-      // piece or a texture can change the metal itself — matching the whole
-      // frame back would pull the new metal towards the old one.
-      const changesMetal = roles.some((role) => role === "piece" || role === "texture" || role === "wear");
-      if (anchor.ref !== null) colourAnchor = parsedReferences[anchor.ref];
-      else if (!changesMetal && !wantsColourChange(instruction)) colourAnchor = parsedBase;
-    } else {
-      /*
-       * What the turn asks for (see prompts/intent.js): "more designs" makes
-       * several images, each told to differ from the rest; "make it a pendant"
-       * or "in rose gold" reshape the prompt. A plain edit is unchanged.
-       */
-      const intent = intentForTool(await resolveIntent(instruction.trim(), { tenant }), "chat_to_edit");
-      const count = refineCountFor(intent, "chat_to_edit");
-      const basePrompt = buildChatEditPrompt(instruction.trim(), parsedReferences.length);
-      prompts = Array.from({ length: count }, (_, index) =>
-        applyIntentToPrompt({
-          basePrompt,
-          instruction: instruction.trim(),
-          intent,
-          tool: "chat_to_edit",
-          referenceNote: [buildReferenceNote(parsedReferences.length).trim(), SCALE_NOTE, ANATOMY_NOTE].filter(Boolean).join(" "),
-          variationIndex: index,
-          variationTotal: count,
-        })
-      );
-      images = [parsedBase, ...parsedReferences];
-      intentLabel = describeIntent(intent, "chat_to_edit", count);
-      // Each edit is a full redraw, and the redraw drifts warm and pink turn
-      // after turn — the prompt alone never stopped it (see colorMatch.js).
-      // Not where the turn means to change colour, metal, background or the
-      // design itself: there the shift is the request.
-      const intended = ["metal", "background", "explore", "type_change"].some((kind) => intent.kinds.includes(kind));
-      if (!intended && !wantsColourChange(instruction)) colourAnchor = parsedBase;
-    }
-
-    const count = prompts.length;
-    const prompt = prompts.length === 1 ? prompts[0] : prompts.join("\n\n─────\n\n");
-
     /*
-     * Charged like every other tool.
-     *
-     * This is the one generation route that answers synchronously and never
-     * goes through queueGeneration, which is where the credit hold lives —
-     * so it was producing images for free while the same Gemini models cost
-     * credits through Image Cleaning. Held here, then settled or released
-     * around the provider call.
+     * What the turn asks for, read now because it sets the price: "more
+     * designs" makes several images. A turn whose attachments have a job is
+     * one precise edit, and its roles already say what it is. Failing to read
+     * it is never a reason to refuse the edit — it runs as a plain one.
      */
-    const priced = await credit.quote({
-      tenantId: dbUser.tenantId,
-      tool: "chat_to_edit",
-      modelId: model,
-      quality,
-      count,
-    });
-
-    let held = null;
-    if (priced) {
+    let intent = null;
+    let count = 1;
+    let intentLabel = null;
+    if (hasRoleTask(roles)) {
+      intentLabel = describeRoles(roles);
+    } else {
       try {
-        held = await credit.holdForRun({
-          tenantId: dbUser.tenantId,
-          userId: dbUser._id,
-          userName: dbUser.name || dbUser.email,
-          tool: "chat_to_edit",
-          priced,
-          jobHint: `sync-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        });
-        held = { ...held, tenantId: dbUser.tenantId, userId: dbUser._id, tool: "chat_to_edit" };
+        const tenant = await loadTenantOrThrow(dbUser);
+        intent = intentForTool(await resolveIntent(instruction.trim(), { tenant }), "chat_to_edit");
+        count = refineCountFor(intent, "chat_to_edit");
+        intentLabel = describeIntent(intent, "chat_to_edit", count);
       } catch (err) {
-        if (err.code === "insufficient_credits") {
-          return res.status(402).json({
-            status: "error",
-            message: `This edit costs ${err.required} credits and you have ${err.available}.`,
-            code: "insufficient_credits",
-            required: err.required,
-            available: err.available,
-          });
-        }
-        throw err;
+        console.warn("chat-to-edit: could not read the turn's intent — running it as a plain edit:", err.message);
       }
     }
 
-    let outputs;
-    let providerId;
-    try {
-      const settled = await Promise.allSettled(
-        prompts.map((variationPrompt) =>
-          routeProviderCall({
-            tenant,
-            provider,
-            modelId: model,
-            prompt: variationPrompt,
-            quality,
-            images: images.map(({ mimeType, base64 }) => ({ mimeType, base64 })),
-          })
-        )
-      );
-      const successes = settled.filter((entry) => entry.status === "fulfilled").map((entry) => entry.value);
-      if (successes.length === 0) throw settled[0].reason;
-      outputs = await Promise.all(
-        successes.map((entry) => (colourAnchor ? matchColour(entry.output, colourAnchor) : entry.output))
-      );
-      providerId = successes[0].providerId;
-    } catch (err) {
-      // Nothing was produced, so nothing is owed.
-      if (held?.held) {
-        await credit
-          .refundRun({ credits: held, jobId: null, reason: "chat-to-edit failed" })
-          .catch((e) => console.error("chat-to-edit: could not release the hold:", e.message));
-      }
-      throw err;
-    }
-
-    let conversationId = null;
-    let generationId = null;
-    try {
-      const saved = await recordGeneration({
-        tenant,
-        user: dbUser,
-        tool: "chat_to_edit",
-        conversationId: requestedConversationId,
-        parentGenerationId,
+    return queueGeneration(req, res, {
+      type: CHAT_TO_EDIT_JOB,
+      tool: "chat_to_edit",
+      preview,
+      // Display/audit description of the run. No image bytes.
+      request: {
+        provider,
         model,
         modelLabel,
         quality,
-        prompt,
-        // Shown in the UI/history, kept separate from `prompt` so the
-        // anatomy/scale boilerplate never leaks into what the user sees.
-        userPrompt: displayPrompt?.trim() || instruction.trim(),
-        inputImages: [
-          // A base image on a follow-up turn is a prior result being edited
-          // again, not a fresh upload — the role records which happened.
-          { image: parsedBase, role: parentGenerationId ? "edited" : "uploaded" },
-          ...parsedReferences.map((ref) => ({ image: ref, role: "reference" })),
-        ],
-        outputImages: outputs.map((output) => ({ image: output, role: "generated" })),
-        // What each reference was used as — "stone", "texture", "scene"… —
-        // in the same order as the references above.
-        params: references.length ? { referenceRoles: roles } : undefined,
-        providerId,
-        provider,
-      });
-      conversationId = saved.conversationId;
-      generationId = saved.generationId;
-    } catch (err) {
-      console.error("chat-to-edit: could not record generation history:", err);
-    }
-
-    // Charged for what was delivered. Settled after the call rather than
-    // before, so a provider failure costs nothing — and outside the history
-    // try/catch, because the images exist whether or not the record was written.
-    if (held?.held) {
-      await credit
-        .settleRun({ credits: held, jobId: null, generationId, deliveredUnits: outputs.length })
-        .catch((err) => console.error("chat-to-edit: could not settle credits:", err.message));
-    }
-
-    res.json({
-      status: "success",
-      images: outputs.map((output) => `data:${output.mimeType};base64,${output.base64}`),
-      model,
-      conversationId,
-      generationId,
-      intentLabel,
+        instruction: (displayPrompt || instruction).trim(),
+        referenceCount: references.length,
+        count,
+        intentLabel,
+        conversationId: requestedConversationId || null,
+      },
+      // What the worker needs, images included.
+      payload: {
+        image: parsedBase,
+        references,
+        instruction: instruction.trim(),
+        displayPrompt,
+        requestedModel,
+        requestedQuality,
+        conversationId: requestedConversationId || null,
+        parentGenerationId: parentGenerationId || null,
+        intent,
+        count,
+        intentLabel,
+      },
+      message: `queued a chat-to-edit turn on ${modelLabel}`,
     });
   } catch (err) {
     logRequestAudit(req, {

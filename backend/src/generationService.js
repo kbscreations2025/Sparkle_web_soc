@@ -6,6 +6,7 @@ const Generation = require("./models/generation");
 const Asset = require("./models/asset");
 const { uploadObject, buildAssetKey, variantKeyFor, publicUrlFor } = require("./storage/r2");
 const { createThumbnail, THUMB_EXTENSION } = require("./storage/thumbnail");
+const { purifyWhiteBackground } = require("./storage/whiteBackground");
 const { toPublicAsset } = require("./generations");
 const { emitToUser, emitToTenant } = require("./socket");
 const { logAudit } = require("./auditLog");
@@ -26,6 +27,30 @@ function extensionFor(mimeType) {
 /** Which of ASSET_TYPES this mime belongs to. */
 function assetTypeFor(mimeType) {
   return String(mimeType || "").startsWith("video/") ? "video" : "image";
+}
+
+/**
+ * The tools whose results are product shots, where a white background has to
+ * be exact #FFFFFF. Not Product Background, where an ivory or cream backdrop
+ * is a choice; the sketch tools' paper isn't a background at all; and the
+ * rest put jewellery on people or in scenes.
+ */
+const WHITE_BACKGROUND_TOOLS = new Set(["cleaning", "chat_to_edit", "sketch_to_image", "text_to_image"]);
+
+/**
+ * One output with its near-white background made pure white — see
+ * storage/whiteBackground.js. Anything that doesn't qualify comes back as it
+ * was, and so does anything that fails: a result is never lost over this.
+ */
+async function withPureWhiteBackground(entry) {
+  if (!String(entry.image?.mimeType || "").startsWith("image/")) return entry;
+  try {
+    const out = await purifyWhiteBackground(Buffer.from(entry.image.base64, "base64"), entry.image.mimeType);
+    return out ? { ...entry, image: { mimeType: out.mimeType, base64: out.buffer.toString("base64") } } : entry;
+  } catch (err) {
+    console.warn("[recordGeneration] white background clean-up failed, keeping the original:", err.message);
+    return entry;
+  }
 }
 
 /**
@@ -128,8 +153,15 @@ async function recordGeneration({
    */
   const posterSource = inputAssets[0]?.buffer ?? null;
 
+  // One at a time: each is a full-resolution decode, and a batch of four 4K
+  // results in parallel is a lot of memory for a small instance.
+  const finishedOutputs = [];
+  for (const entry of outputImages) {
+    finishedOutputs.push(WHITE_BACKGROUND_TOOLS.has(tool) ? await withPureWhiteBackground(entry) : entry);
+  }
+
   const outputAssets = await Promise.all(
-    outputImages.map(({ image, role }) =>
+    finishedOutputs.map(({ image, role }) =>
       createAsset({ ...commonAssetFields, role, kind: "output", image, posterSource, durationMs })
     )
   );

@@ -1,9 +1,10 @@
-const { buildReferenceNote } = require("./shared");
+const { buildReferenceNote, ONE_OPTION_NOTE } = require("./shared");
 
 /** Maps the Visual Style chip to a prompt fragment describing that look. */
 const STYLE_GUIDE = {
   photorealistic: "photorealistic, professional product photography, ultra-sharp",
-  "product-studio": "clean white studio background, soft box lighting, luxury product shot",
+  // "White" alone came back off-white or a pale grey gradient often enough to show — see PURE_WHITE_NOTE.
+  "product-studio": "pure flat #FFFFFF white studio background — never off-white, cream or grey, no gradient — soft box lighting, luxury product shot",
   "luxury-campaign": "luxury brand campaign, editorial lighting, high fashion, cinematic",
   "dark-velvet": "dark velvet background, dramatic moody lighting, deep shadows",
 };
@@ -49,7 +50,7 @@ const ASPECT_TEXT = {
  */
 function variationNote(count) {
   if (count <= 1) return "";
-  return " Generate a single distinct hero shot for this variation — vary the framing or angle subtly from the other variations while keeping the same jewelry design.";
+  return ` Generate a single distinct hero shot for this variation — vary the framing or angle subtly from the other variations while keeping the same jewelry design. ${ONE_OPTION_NOTE}`;
 }
 
 /**
@@ -60,7 +61,7 @@ function variationNote(count) {
 function referenceNote(count) {
   const n = Number(count) || 1;
   if (n <= 1) {
-    return "A reference jewellery photo is attached — keep that exact design (its jewelry type, silhouette, stones, setting and details) and change only what the design brief below asks for. Where the brief specifies something, it wins over the reference; everything it does not mention stays as in the photo.";
+    return "A reference jewellery photo is attached — keep that exact design (its jewelry type, silhouette, stones, setting and details) and change only what the design brief below asks for. Where the brief specifies something, it wins over the reference; everything it does not mention stays as in the photo — including the side motifs and accent stones: the same shapes, number, arrangement and colours.";
   }
   return `${n} reference jewellery photos are attached. If they show the same piece (different angles or details), treat them together as one design and use every view to get its true shape, stones, setting and details right. If they show different pieces, combine elements from them into ONE single new design, as the brief below directs. Keep what the references show and change only what the brief asks for; where the brief specifies something, it wins over the references. Draw one piece only — never several pieces side by side.`;
 }
@@ -114,6 +115,7 @@ function buildTextToImageVariationPrompt({ description, style, aspect, index = 0
     brief ? `Design brief to apply on top: ${brief}.` : "",
     `${styleGuideFor(style)}. Fine jewellery photography, high resolution. Image orientation: ${aspectNote}.`,
     "Show the complete piece from a single, standard elegant hero angle similar to the reference, fully framed with nothing cropped.",
+    ONE_OPTION_NOTE,
   ]
     .filter(Boolean)
     .join("\n");

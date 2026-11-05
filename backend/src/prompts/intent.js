@@ -1,3 +1,4 @@
+const { ONE_OPTION_NOTE } = require("./shared");
 /**
  * What a follow-up message is actually asking for.
  *
@@ -311,7 +312,11 @@ const CLASSIFIER_SCHEMA = {
       description: "metal the user wants the piece changed to, or none",
     },
     stone: { type: "STRING", description: "the stone/gem or cut the user wants instead, or empty" },
-    finish: { type: "BOOLEAN" },
+    finish: {
+      type: "BOOLEAN",
+      description:
+        "user wants the METAL's surface finish or texture changed (matte, brushed, satin, hammered, polished, sandblasted, engraved). Changing how stones are set — higher, lower, flush, deeper, a different setting — is NOT a finish.",
+    },
     view: { type: "BOOLEAN", description: "user wants a different camera angle of the same piece" },
     background: { type: "BOOLEAN", description: "user wants the background, lighting or presentation changed" },
   },
@@ -324,7 +329,8 @@ const CLASSIFIER_PROMPT = `You classify one follow-up message a user typed under
 - targetType: the jewellery type they want the design turned into (ring, pendant, earrings...), else "none". Mentioning a type while editing it ("make the ring band thinner") is "none".
 - metal: the metal they want it changed to, else "none". A colour for the background is not a metal. A coloured stone is not a metal.
 - stone: the gem or cut they want instead, else "".
-- finish / view / background: true if they ask to change the surface finish / camera angle / background, lighting or presentation.
+- finish: true only if they ask to change the metal's surface finish or texture (matte, brushed, satin, hammered, polished, engraved). Setting stones higher, lower, flush or level with the metal, or changing a setting, is a design edit — finish false. Mentioning "the metal surface" as a reference point is not a finish change either.
+- view / background: true if they ask to change the camera angle / background, lighting or presentation.
 
 Messages may be in English, Hindi or Hinglish. Message:
 `;
@@ -693,7 +699,8 @@ function applyIntentToPrompt({ basePrompt, instruction, intent, tool, referenceN
   const directions = !designTool ? SHOT_DIRECTIONS : relatedExplore ? RELATED_DIRECTIONS : EXPLORE_DIRECTIONS;
   const variationNote =
     variationTotal > 1
-      ? ` This is option ${variationIndex + 1} of ${variationTotal}; it must be clearly different from the other options. ${directions[variationIndex % directions.length]}`
+      ? ` This is option ${variationIndex + 1} of ${variationTotal}; it must be clearly different from the other options. ${directions[variationIndex % directions.length]}` +
+        (designTool ? ` ${ONE_OPTION_NOTE}` : "")
       : "";
   /** A prompt that replaces the tool's own: these lines, then what the result must stay. */
   const replacing = (...lines) => [...lines, mediumKeep(medium), referenceNote].filter(Boolean).join("\n\n");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
  */
 export function HoverInfo({ text, className }: { text: string; className?: string }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const wasOpenRef = useRef(false);
 
   const style = at
     ? {
@@ -37,6 +38,18 @@ export function HoverInfo({ text, className }: { text: string; className?: strin
           setAt({ x: box.right, y: box.bottom });
         }}
         onBlur={() => setAt(null)}
+        // A tap on a touch screen toggles the tip — there is no hover to show
+        // it and no mouse leaving to hide it. Whether it was open is read
+        // before the tap's own focus opens it, or a second tap could never
+        // close it. A mouse click is left to hover and focus as before.
+        onPointerDown={(event) => {
+          if (event.pointerType !== "mouse") wasOpenRef.current = at !== null;
+        }}
+        onClick={(event) => {
+          if ((event.nativeEvent as PointerEvent).pointerType === "mouse") return;
+          const box = event.currentTarget.getBoundingClientRect();
+          setAt(wasOpenRef.current ? null : { x: box.right, y: box.bottom });
+        }}
         className={cn(
           "inline-flex shrink-0 cursor-help items-center text-faint outline-none transition-colors hover:text-gold focus-visible:text-gold",
           className

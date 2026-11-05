@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Screens with no hover — phones, tablets. Tailwind's `hover:` / `group-hover:`
+   never fire there, so anything a hover reveals needs a `touch:` twin that
+   shows it outright (e.g. `opacity-0 group-hover:opacity-100 touch:opacity-100`). */
+@custom-variant touch (@media (hover: none));
+
 @theme {
   /* ---------- Backgrounds ---------- */
   --color-void:           #060608;
@@ -369,4 +374,12 @@ button, a { transition-property: color, background-color, border-color, opacity,
   position: fixed;
   left: -100000px;
   top: 0;
+}
+
+/* The dashboard frame is exactly the screen tall and only its content column
+   scrolls, so the page itself must not: without this, a phone's rubber-band
+   pull drags the whole frame — header and all — down with the finger. */
+html,
+body {
+  overscroll-behavior: none;
 }

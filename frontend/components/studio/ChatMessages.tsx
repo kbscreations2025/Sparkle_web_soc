@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { Download, RotateCcw } from "lucide-react";
 import type { ChatMsg } from "./chat";
+import { Lightbox } from "./Lightbox";
+import { doubleTap } from "@/lib/doubleTap";
 import { downloadAllImages, downloadImage } from "@/lib/image";
 import { cn } from "@/lib/utils";
 
@@ -49,20 +52,28 @@ export function ChatMessages({
   hintsLabel?: string;
   onHint?: (hint: string) => void;
 }) {
+  // Double-click or double-tap a thumbnail to see it full size — a single
+  // click still puts it on the stage.
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+
   // A visible scrollbar: a long run of edits is otherwise hard to tell is scrollable.
   return (
     <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2.5">
+      {/* Portalled: a blurred panel up the tree would otherwise trap the
+          full-screen viewer inside this column. */}
+      {previewSrc && createPortal(<Lightbox src={previewSrc} onClose={() => setPreviewSrc(null)} />, document.body)}
+
       {history.map((msg) =>
         msg.role === "user" ? (
-          <UserBubble key={msg.id} msg={msg} onOpen={onSelectResult} />
+          <UserBubble key={msg.id} msg={msg} onOpen={onSelectResult} onPreview={setPreviewSrc} />
         ) : msg.retryInstruction !== undefined ? (
           <ErrorBubble key={msg.id} msg={msg} onRetry={onRetry} />
         ) : (
-          <AssistantBubble key={msg.id} msg={msg} onOpen={onSelectResult} selectedSrc={selectedSrc} />
+          <AssistantBubble key={msg.id} msg={msg} onOpen={onSelectResult} onPreview={setPreviewSrc} selectedSrc={selectedSrc} />
         )
       )}
 
-      {busy && <SkeletonBubble count={busyCount} arrived={busyImages} onOpen={onSelectResult} />}
+      {busy && <SkeletonBubble count={busyCount} arrived={busyImages} onOpen={onSelectResult} onPreview={setPreviewSrc} />}
 
       {/* After the thread, not before it: these are what to say next. Whether
           they still apply is the caller's call — it passes none once they
@@ -118,17 +129,20 @@ function ThumbTile({
   filename,
   selected = false,
   onOpen,
+  onPreview,
 }: {
   src: string;
   filename: string;
   selected?: boolean;
   onOpen: (src: string) => void;
+  onPreview: (src: string) => void;
 }) {
   return (
     <div className="group/tile relative">
       <button
         type="button"
         onClick={() => onOpen(src)}
+        {...doubleTap(src, () => onPreview(src))}
         className={cn(
           "block overflow-hidden rounded-md border transition-colors",
           selected ? "border-gold/60" : "border-transparent hover:border-gold/30"
@@ -141,7 +155,7 @@ function ThumbTile({
         onClick={() => downloadImage(src, filename)}
         title="Download"
         aria-label="Download"
-        className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white/[0.12] bg-surface-float text-faint opacity-0 transition-opacity hover:text-gold focus-visible:opacity-100 group-hover/tile:opacity-100"
+        className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white/[0.12] bg-surface-float text-faint opacity-0 transition-opacity hover:text-gold focus-visible:opacity-100 group-hover/tile:opacity-100 touch:opacity-100"
       >
         <Download size={9} />
       </button>
@@ -149,7 +163,15 @@ function ThumbTile({
   );
 }
 
-function UserBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) => void }) {
+function UserBubble({
+  msg,
+  onOpen,
+  onPreview,
+}: {
+  msg: ChatMsg;
+  onOpen: (src: string) => void;
+  onPreview: (src: string) => void;
+}) {
   const images = [...(msg.image ? [msg.image] : []), ...(msg.refImages ?? [])];
 
   return (
@@ -163,6 +185,7 @@ function UserBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) => vo
                 src={src}
                 filename={i === 0 && msg.image ? "input.jpg" : `reference-${i + (msg.image ? 0 : 1)}.jpg`}
                 onOpen={onOpen}
+                onPreview={onPreview}
               />
             ))}
           </div>
@@ -181,10 +204,12 @@ function UserBubble({ msg, onOpen }: { msg: ChatMsg; onOpen: (src: string) => vo
 function AssistantBubble({
   msg,
   onOpen,
+  onPreview,
   selectedSrc,
 }: {
   msg: ChatMsg;
   onOpen: (src: string) => void;
+  onPreview: (src: string) => void;
   selectedSrc?: string | null;
 }) {
   const [savingAll, setSavingAll] = useState(false);
@@ -202,6 +227,7 @@ function AssistantBubble({
               filename={`result-${index + 1}.jpg`}
               selected={src === selectedSrc}
               onOpen={onOpen}
+              onPreview={onPreview}
             />
           ))}
         </div>
@@ -244,10 +270,12 @@ function SkeletonBubble({
   count,
   arrived = [],
   onOpen,
+  onPreview,
 }: {
   count: number;
   arrived?: string[];
   onOpen?: (src: string) => void;
+  onPreview?: (src: string) => void;
 }) {
   // A run can deliver more than it promised only if the caller's count is
   // stale; trust what actually arrived over the prediction.
@@ -266,6 +294,7 @@ function SkeletonBubble({
                 key={index}
                 type="button"
                 onClick={() => onOpen?.(src)}
+                {...doubleTap(src, () => onPreview?.(src))}
                 className="block overflow-hidden rounded-md border border-transparent transition-colors hover:border-gold/30"
               >
                 <Thumb src={src} className={TILE} sizes={TILE_SIZES} />

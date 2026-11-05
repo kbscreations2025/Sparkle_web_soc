@@ -6,7 +6,7 @@
  * they're easy to find and adjust without hunting through request-handling
  * code.
  */
-const { buildReferenceNote } = require("./shared");
+const { buildReferenceNote, PURE_WHITE_NOTE } = require("./shared");
 
 const SCALE_NOTE =
   "SCALE: if the image contains jewelry, keep it rendered at true-to-life scale — small and " +
@@ -24,13 +24,14 @@ const ANATOMY_NOTE =
  * turn after turn — in practice a warm, reddish/pink cast creeping into the
  * metal, the white background and skin. Spelled out on every edit; a request
  * that does change a colour ("in rose gold") still wins for that one thing.
+ * A white background is held to exact #FFFFFF as well — see PURE_WHITE_NOTE.
  */
 const COLOR_NOTE =
   "COLOUR: keep every colour exactly as it is in the first image — the same white balance, colour " +
   "temperature, exposure and saturation; the metal's exact tone (yellow gold stays the same yellow, " +
-  "white metal stays neutral); the stones' colours; a white background pure neutral white; skin tones " +
-  "unchanged. Do NOT add any warm, red, pink, magenta or orange tint or colour cast anywhere. Only " +
-  "change a colour if the instruction explicitly asks for it.";
+  "white metal stays neutral); the stones' colours; skin tones unchanged. Do NOT add any warm, red, " +
+  "pink, magenta or orange tint or colour cast anywhere. Only change a colour if the instruction " +
+  `explicitly asks for it. ${PURE_WHITE_NOTE}`;
 
 /**
  * Builds one turn's prompt. `instruction` is whatever the user typed (already
@@ -131,7 +132,8 @@ function describe(numbers, single, several) {
  * what it replaces. The photo keeps its colours; what is new keeps its own.
  */
 const ROLE_COLOR_NOTE =
-  "COLOUR: keep the photo's own colours exactly — the same white balance, colour temperature, exposure and saturation; skin tones and a white background unchanged. Do NOT add any warm, red, pink, magenta or orange tint or colour cast anywhere. Anything new keeps its OWN colours exactly as in its reference — the new piece's metal and stones, the new stone's colour — never shifted towards what it replaces or towards the photo's light. Everything else keeps the colour it has now unless the request asks otherwise.";
+  "COLOUR: keep the photo's own colours exactly — the same white balance, colour temperature, exposure and saturation; skin tones unchanged. Do NOT add any warm, red, pink, magenta or orange tint or colour cast anywhere. Anything new keeps its OWN colours exactly as in its reference — the new piece's metal and stones, the new stone's colour — never shifted towards what it replaces or towards the photo's light. Everything else keeps the colour it has now unless the request asks otherwise. " +
+  PURE_WHITE_NOTE;
 
 const REAL_SIZE =
   "REAL SIZE: real jewellery is small. An adult finger is about 17 mm across, an earlobe about 18 mm tall, a wrist about 55 mm across seen from above. A ring band is 1.5–4 mm wide; a 1 ct round diamond is about 6.5 mm across — two-fifths of a finger's width. Draw the piece at its true size against what it sits on — never at the size it fills its own product photo, where any piece fills the frame however small it really is.";

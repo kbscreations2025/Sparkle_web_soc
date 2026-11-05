@@ -15,6 +15,7 @@ const KIT_SURFACE: Record<MarketingKitKind, string> = {
   campaign: "/marketing-kit/campaign",
   collection_story: "/marketing-kit/collection-story",
   festive: "/marketing-kit/festive",
+  presentation: "/marketing-kit/presentation",
 };
 
 export const KIT_LABEL: Record<MarketingKitKind, string> = {
@@ -23,6 +24,7 @@ export const KIT_LABEL: Record<MarketingKitKind, string> = {
   campaign: "Campaign Kit",
   collection_story: "Collection Story",
   festive: "Poster",
+  presentation: "Presentation",
 };
 
 /** The link that reopens one kit. */
@@ -41,6 +43,7 @@ const KIT_COLORS: Record<string, string> = {
   collection_story: "265 50% 62%",
   campaign: "150 45% 45%",
   festive: "40 85% 50%",
+  presentation: "330 55% 55%",
 };
 
 export function kitBadgeStyle(kind: string) {
@@ -62,5 +65,6 @@ export function describeKit(kit: Pick<MarketingKitSummary, "kind" | "pieceCount"
   }
   if (kit.kind === "campaign") return `Campaign Kit · ${plural(kit.pieceCount, "shot")}`;
   if (kit.kind === "festive") return `Poster · ${plural(kit.pieceCount, "poster")}`;
+  if (kit.kind === "presentation") return `Presentation · ${plural(kit.pieceCount, "slide")}`;
   return "Brand Story";
 }

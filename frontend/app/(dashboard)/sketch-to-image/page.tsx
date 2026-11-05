@@ -14,10 +14,10 @@ import { SketchPad } from "@/components/studio/SketchPad";
 import {
   sketchToImage,
   refineOn,
-  IMAGE_EDIT_MODELS,
-  DEFAULT_IMAGE_EDIT_MODEL,
+  SKETCH_TO_IMAGE_MODELS,
+  DEFAULT_SKETCH_TO_IMAGE_MODEL,
   toModelOptions,
-  type ImageEditModelId,
+  type SketchToImageModelId,
 } from "@/lib/api";
 import { PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT } from "@/lib/jewelryConfigurator";
 import { useStoredImageCount } from "@/lib/useStoredImageCount";
@@ -31,7 +31,7 @@ import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.sketch_to_image.run";
-const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
+const MODEL_OPTIONS = toModelOptions(SKETCH_TO_IMAGE_MODELS);
 const refineRender = refineOn<string>("/api/sketch-to-image");
 
 /** Several views of one piece go to the model together, so it sees the whole design. */
@@ -61,7 +61,7 @@ export default function SketchToImagePage() {
 
   const [sketches, setSketches] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
-  const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
+  const [model, setModel] = useState<SketchToImageModelId>(DEFAULT_SKETCH_TO_IMAGE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
   // Shared with the other photo tools — see useStoredImageCount.
   const [count, setCount] = useStoredImageCount("photo", PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT);
@@ -130,7 +130,7 @@ export default function SketchToImagePage() {
         busyLabel={`Rendering ${count > 1 ? `${count} images` : "your sketch"}…`}
         resetLabel="New render"
         downloadName="render.png"
-        modelLabel={IMAGE_EDIT_MODELS.find((entry) => entry.id === model)?.label}
+        modelLabel={SKETCH_TO_IMAGE_MODELS.find((entry) => entry.id === model)?.label}
       />
     );
   }
@@ -232,7 +232,7 @@ export default function SketchToImagePage() {
                           sizes="120px"
                           className="rounded-lg border border-white/10 bg-white object-cover transition-colors group-hover:border-gold/40"
                         />
-                        <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                        <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 touch:inset-auto touch:bottom-1 touch:right-1 touch:h-6 touch:w-6 touch:rounded-full touch:bg-black/55 touch:opacity-100">
                           <Pencil size={13} className="text-white" />
                         </span>
                       </button>
@@ -290,7 +290,7 @@ export default function SketchToImagePage() {
               // dropping it on the uploader, just without leaving the keyboard.
               onPasteImage={(file) => accept([file])}
               footerStart={<ImageCountSelector count={count} onChange={setCount} options={PHOTO_COUNT_OPTIONS} />}
-              footerEnd={<InlineModelSelect models={IMAGE_EDIT_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
+              footerEnd={<InlineModelSelect models={SKETCH_TO_IMAGE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
             <RunButton onClick={handleGenerate} disabled={sketches.length === 0} icon={<Sparkles size={14} />}>

@@ -8,11 +8,38 @@ import { Chip } from "./OptionChips";
 import { Lightbox } from "./Lightbox";
 import { ConfirmDialog } from "./ToolChrome";
 import { useAuth } from "@/lib/auth-context";
+import { doubleTap } from "@/lib/doubleTap";
 import { LIFESTYLE_PRESETS, type LifestyleModel } from "@/lib/api";
 import { MODEL_ATTRS, outfitsFor } from "@/lib/lifestyleOptions";
 import type { ModelLibraryState } from "@/lib/useModelLibrary";
 import { useEscapeKey } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
+
+/**
+ * Tiles in two rows of the grid at each width — it is 3 across on a phone,
+ * 5 from `sm` and 6 from `lg` (see the <ul> below), so the count must follow.
+ */
+const TWO_ROWS = { base: 6, sm: 10, lg: 12 };
+
+/**
+ * The classes that fold a tile away when it falls past the second row — per
+ * breakpoint, since which tiles that is depends on how many fit across.
+ * Spelled out in full so Tailwind sees every class it needs.
+ */
+function beyondTwoRows(position: number) {
+  if (position < TWO_ROWS.base) return undefined;
+  if (position < TWO_ROWS.sm) return "hidden sm:block";
+  if (position < TWO_ROWS.lg) return "hidden lg:block";
+  return "hidden";
+}
+
+/** "See all" only at the widths where tiles are actually folded away. */
+function seeAllVisibility(tileCount: number) {
+  if (tileCount > TWO_ROWS.lg) return undefined;
+  if (tileCount > TWO_ROWS.sm) return "lg:hidden";
+  if (tileCount > TWO_ROWS.base) return "sm:hidden";
+  return "hidden";
+}
 
 /**
  * The model picker: the built-in mannequins, this organization's saved
@@ -43,6 +70,18 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
   const [uploadNotice, setUploadNotice] = useState(false);
 
   const { choice, setChoice, models, generating, pendingJob } = library;
+
+  /*
+   * Two rows until asked for more: the library grows with every model anyone
+   * builds, and a page that opens on four rows of faces pushes the jewellery
+   * and the placement out of sight.
+   */
+  const [showAll, setShowAll] = useState(false);
+  // The add tile, the one being built, the presets, then the saved models.
+  const tileCount = 1 + (generating ? 1 : 0) + LIFESTYLE_PRESETS.length + models.length;
+  const firstModelPosition = 1 + (generating ? 1 : 0) + LIFESTYLE_PRESETS.length;
+  /** Whether a tile at `position` (0-based, in grid order) is folded away right now. */
+  const foldClass = (position: number, active: boolean) => (showAll || active ? undefined : beyondTwoRows(position));
 
   /*
    * Sharing a photograph of a person with everyone in the organization — and
@@ -86,9 +125,13 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
             the queue, so this survives nothing but a page leave. */}
         {generating && <PendingModelTile percent={pendingJob?.progress ?? 0} />}
 
-        {LIFESTYLE_PRESETS.map((preset) => (
+        {LIFESTYLE_PRESETS.map((preset, index) => (
           <ModelTile
             key={`preset-${preset.number}`}
+            className={foldClass(
+              1 + (generating ? 1 : 0) + index,
+              choice?.kind === "preset" && choice.number === preset.number
+            )}
             src={preset.src}
             label={`Model ${preset.number}`}
             active={choice?.kind === "preset" && choice.number === preset.number}
@@ -100,9 +143,11 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
           />
         ))}
 
-        {models.map((model) => (
+        {models.map((model, index) => (
           <ModelTile
             key={model.id}
+            // The picked model stays in view even past the second row.
+            className={foldClass(firstModelPosition + index, choice?.kind === "saved" && choice.id === model.id)}
             src={model.thumbnailUrl}
             label={model.name}
             owner={model.isOwn ? undefined : model.userName}
@@ -132,6 +177,28 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
           <ModelTile src={choice.src} label="Just uploaded" active onSelect={() => undefined} />
         )}
       </ul>
+
+      {/* Shown only at the widths where something is actually folded away. */}
+      {(showAll ? tileCount > TWO_ROWS.base : true) && (
+        <button
+          type="button"
+          onClick={() => setShowAll((open) => !open)}
+          className={cn(
+            "mx-auto flex items-center gap-1 rounded-full border border-white/10 px-3 py-1 text-[11px] font-medium text-muted transition-colors hover:border-gold/30 hover:text-gold",
+            !showAll && seeAllVisibility(tileCount)
+          )}
+        >
+          {showAll ? (
+            <>
+              Show less <ChevronUp size={12} />
+            </>
+          ) : (
+            <>
+              See all {tileCount - 1} models <ChevronDown size={12} />
+            </>
+          )}
+        </button>
+      )}
 
       {building && (
         // Queued is done as far as this drawer goes: the tile in the grid is
@@ -330,6 +397,7 @@ function AddModelAction({
 }
 
 function ModelTile({
+  className,
   src,
   label,
   owner,
@@ -343,6 +411,8 @@ function ModelTile({
   onShare,
   onDelete,
 }: {
+  /** Extra classes for the tile's <li> — how the grid folds it past two rows. */
+  className?: string;
   src: string;
   label: string;
   /** Whose model it is, shown when it isn't the viewer's own. */
@@ -361,15 +431,15 @@ function ModelTile({
   onDelete?: () => void;
 }) {
   return (
-    <li className="group relative">
+    <li className={cn("group relative", className)}>
       <button
         type="button"
         onClick={onSelect}
         // A tile is small, and looking closely at a model is a second thing
         // you do to the same picture — so it is the same target, twice.
-        onDoubleClick={onPreview}
+        {...(onPreview ? doubleTap(src, onPreview) : {})}
         aria-pressed={active}
-        title={onPreview ? `${label} — double-click to enlarge` : label}
+        title={onPreview ? `${label} — double-click or double-tap to enlarge` : label}
         className={cn(
           "relative block aspect-[3/4] w-full overflow-hidden rounded-lg border transition-colors",
           active ? "border-gold/50 ring-1 ring-gold/30" : "border-white/10 hover:border-white/25"

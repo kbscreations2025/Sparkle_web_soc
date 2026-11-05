@@ -374,7 +374,7 @@ function PagesPanel({ api, pieces, open }: { api: EditorApi; pieces: AffinityPie
                 <MoreHorizontal size={14} />
               </button>
             </div>
-            <div className="absolute right-1 top-1 hidden gap-0.5 opacity-0 transition-opacity group-hover/page:opacity-100 lg:flex">
+            <div className="absolute right-1 top-1 hidden gap-0.5 opacity-0 transition-opacity group-hover/page:opacity-100 touch:opacity-100 lg:flex">
               <MiniButton title="Duplicate page" onClick={() => api.duplicateSlide(index)}>
                 <Copy size={11} />
               </MiniButton>
@@ -537,7 +537,7 @@ function LayersPanel({ api, pieces }: { api: EditorApi; pieces: AffinityPiece[] 
                   event.stopPropagation();
                   api.update([element.id], { locked: !element.locked });
                 }}
-                className={cn("text-black/40 hover:text-black", !element.locked && "opacity-0 group-hover/layer:opacity-100")}
+                className={cn("text-black/40 hover:text-black", !element.locked && "opacity-0 group-hover/layer:opacity-100 touch:opacity-100")}
               >
                 {element.locked ? <Lock size={11} /> : <Unlock size={11} />}
               </button>
@@ -548,7 +548,7 @@ function LayersPanel({ api, pieces }: { api: EditorApi; pieces: AffinityPiece[] 
                   event.stopPropagation();
                   api.removeElement(element.id);
                 }}
-                className="text-black/40 opacity-0 hover:text-red-600 group-hover/layer:opacity-100"
+                className="text-black/40 opacity-0 hover:text-red-600 group-hover/layer:opacity-100 touch:opacity-100"
               >
                 <Trash2 size={11} />
               </button>

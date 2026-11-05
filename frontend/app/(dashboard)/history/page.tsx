@@ -23,6 +23,7 @@ import { usePageToolbar } from "@/lib/page-toolbar-context";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { getPageCache, pageCacheKey, setPageCache } from "@/lib/pageCache";
+import { cn } from "@/lib/utils";
 import { HistoryLightbox } from "@/components/studio/HistoryLightbox";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
 import { ScrollEnds } from "@/components/admin/ScrollEnds";
@@ -1007,22 +1008,21 @@ export default function HistoryPage() {
   /** How many of the filters folded into the phone's "more" menu are set — its badge. */
   const moreActiveCount =
     selectedMembers.length +
-    (view === "history" ? selectedQualities.length + selectedTypes.length + (search ? 1 : 0) : 0) +
+    (view === "history" ? selectedQualities.length + selectedTypes.length : 0) +
     (dateRange.from || dateRange.to ? 1 : 0);
 
   /*
    * The phone layout, in the header itself: the view toggle and Tools stay
    * out, everything else folds into one "more" menu. A second bar of
    * filters under the header cost a row of a screen that's short already.
+   * Search is the exception — it sits full width above the results instead
+   * (see below), where it is in reach without opening a menu.
    */
   const renderPhoneFilters = () => (
     <div className="flex min-w-0 flex-1 items-center justify-between gap-1.5">
       <div className="flex items-center gap-1.5">
         {renderViewTabs(true)}
-        <MoreFilters activeCount={moreActiveCount}>
-          {renderSecondaryFilters(false)}
-          {renderSearch(false)}
-        </MoreFilters>
+        <MoreFilters activeCount={moreActiveCount}>{renderSecondaryFilters(false)}</MoreFilters>
       </div>
       {renderToolFilter(true)}
     </div>
@@ -1099,9 +1099,13 @@ export default function HistoryPage() {
    * up — and wider than the pills before it, since it is typed into. History
    * only: a kit carries no design number or prompt.
    */
-  const renderSearch = (compact: boolean) =>
+  /** A phone on the results tab: search floats over the grid rather than sitting in the header. */
+  const phoneSearch = !tabletUp && view === "history";
+
+  const renderSearch = (compact: boolean, fullWidth = false) =>
     view === "history" ? (
       <HistorySearch
+        fullWidth={fullWidth}
         value={search}
         busy={searching}
         onChange={(next) => {
@@ -1181,18 +1185,36 @@ export default function HistoryPage() {
 
       {/* The wrapper holds the jump arrows still while the grid scrolls. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* On a phone the search floats here, full width over the results,
+            and the grid scrolls on underneath it — frosted, so it shows
+            through. Always one tap away. Wider screens keep it at the end of
+            the header's filter row. */}
+        {phoneSearch && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-2">
+            <div className="pointer-events-auto">{renderSearch(false, true)}</div>
+          </div>
+        )}
         {/* Held-back results, offered rather than forced — see pendingNew. */}
         {view === "history" && pendingNew.length > 0 && (
           <button
             type="button"
             onClick={() => showPending(true)}
-            className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-gold/30 bg-surface-raised px-3 py-1.5 text-[11px] font-medium text-gold shadow-lg transition-colors hover:bg-gold/10"
+            className={cn(
+              // Under the phone's floating search bar, not on top of it.
+              phoneSearch ? "top-14" : "top-3",
+              "absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-gold/30 bg-surface-raised px-3 py-1.5 text-[11px] font-medium text-gold shadow-lg transition-colors hover:bg-gold/10"
+            )}
           >
             <ArrowUp size={12} />
             {pendingNew.length} new {pendingNew.length === 1 ? "result" : "results"}
           </button>
         )}
-        <div ref={scrollRef} className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3 lg:p-4">
+        <div
+          ref={scrollRef}
+          // Room for the floating search bar above the first row; the grid
+          // still scrolls up underneath it.
+          className={cn("thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3 lg:p-4", phoneSearch && "pt-14")}
+        >
           {/* A misspelt word was searched as the word the library uses — said
               plainly, with a way back to exactly what was typed. */}
           {view === "history" && search && correctedSearch && !loading && (

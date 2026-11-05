@@ -229,7 +229,7 @@ export function UploadZone({
                 onClick={() => preview(item)}
                 title={`Expand ${item.name}`}
                 aria-label={`Expand ${item.name}`}
-                className="absolute left-1 top-1 rounded-full bg-black/60 p-1 text-white/80 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
+                className="absolute left-1 top-1 rounded-full bg-black/60 p-1 text-white/80 opacity-0 transition-opacity hover:text-white group-hover:opacity-100 touch:opacity-100"
               >
                 <Maximize2 size={12} />
               </button>
@@ -237,7 +237,7 @@ export function UploadZone({
                 onClick={() => onRemove(item.id)}
                 title={`Remove ${item.name}`}
                 aria-label={`Remove ${item.name}`}
-                className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white/80 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
+                className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white/80 opacity-0 transition-opacity hover:text-white group-hover:opacity-100 touch:opacity-100"
               >
                 <X size={12} />
               </button>

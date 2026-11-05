@@ -386,11 +386,18 @@ export function HistorySearch({
   onChange,
   busy = false,
   compact = false,
+  fullWidth = false,
 }: {
   value: string;
   onChange: (next: string) => void;
   busy?: boolean;
   compact?: boolean;
+  /**
+   * The phone's form: a bar across the screen, floating over the results
+   * rather than a pill in the header. Frosted, so the grid shows through as
+   * it scrolls underneath; 16px text so iOS doesn't zoom the page on focus.
+   */
+  fullWidth?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
   // Latest handler for the timer below, which shouldn't restart because the
@@ -416,9 +423,11 @@ export function HistorySearch({
     <div
       title="Search by design number, or by words from the prompt"
       className={cn(
-        "flex items-center gap-2 rounded-full border bg-surface-raised pl-3 pr-2 transition-colors focus-within:border-gold/40",
+        "flex items-center gap-2 rounded-full border pl-3 pr-2 transition-colors focus-within:border-gold/40",
         value ? "border-gold/30" : "border-white/10 hover:border-white/20",
-        compact ? "h-7 md:h-8" : "h-8"
+        fullWidth
+          ? "h-9 w-full bg-surface-raised/70 shadow-sm backdrop-blur-md focus-within:bg-surface-raised/90"
+          : cn("bg-surface-raised", compact ? "h-7 md:h-8" : "h-8")
       )}
     >
       {busy ? (
@@ -438,8 +447,8 @@ export function HistorySearch({
         placeholder="Search design no. or prompt…"
         aria-label="Search by design number or prompt words"
         className={cn(
-          "min-w-0 bg-transparent text-[13px] text-cream outline-none placeholder:text-faint [&::-webkit-search-cancel-button]:hidden",
-          compact ? "w-44" : "w-56"
+          "min-w-0 bg-transparent text-cream outline-none placeholder:text-faint [&::-webkit-search-cancel-button]:hidden",
+          fullWidth ? "flex-1 text-base" : compact ? "w-44 text-[13px]" : "w-56 text-[13px]"
         )}
       />
       {draft && (
@@ -686,7 +695,7 @@ export function OutputFilter({
 
 /** The kit kinds, labelled as the rest of the app labels them. */
 const KIND_OPTIONS: FilterOption[] = (
-  ["brand_story", "collection_story", "campaign", "festive"] as const
+  ["brand_story", "collection_story", "campaign", "festive", "presentation"] as const
 ).map((kind) => ({
   id: kind,
   label: KIT_LABEL[kind],

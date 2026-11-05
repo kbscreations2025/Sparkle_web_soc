@@ -625,11 +625,17 @@ export function summarize(slide: DesignSlide) {
   return parts.join(" · ") || "Empty";
 }
 
-/** A page's title for the pages list — its biggest piece of text. */
+/**
+ * A page's title for the pages list — the text named "Title" where a layout
+ * placed one, otherwise its biggest piece of text. The name comes first
+ * because a big figure ("420" on a stats page) or a decorative quote mark
+ * outsizes the real title.
+ */
 export function slideTitle(slide: DesignSlide) {
-  const texts = slide.elements.filter((element): element is TextElement => element.type === "text" && Boolean(element.text.trim()));
+  const texts = slide.elements.filter((element): element is TextElement => element.type === "text" && element.text.trim().length > 1);
+  const named = texts.find((element) => element.name === "Title");
   texts.sort((a, b) => b.fontSize - a.fontSize);
-  return texts[0]?.text.trim().slice(0, 48) || "Untitled page";
+  return (named ?? texts[0])?.text.trim().slice(0, 48) || "Untitled page";
 }
 
 /** A copy with fresh ids, groups kept together but distinct from the originals'. */

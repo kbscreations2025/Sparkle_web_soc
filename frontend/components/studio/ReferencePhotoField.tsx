@@ -96,7 +96,7 @@ export function ReferencePhotoField({
                 className="group relative block h-16 w-16 overflow-hidden rounded-lg border border-white/10 transition-colors hover:border-gold/40"
               >
                 <Image src={photo} alt={`Reference ${index + 1}`} fill sizes="64px" className="object-cover" />
-                <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
+                <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition-opacity group-hover:opacity-100 touch:inset-auto touch:bottom-1 touch:right-1 touch:h-6 touch:w-6 touch:rounded-full touch:bg-black/55 touch:opacity-100">
                   <Pencil size={13} className="text-white" />
                 </span>
               </button>

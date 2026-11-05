@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, BookOpen, CalendarHeart, FileSpreadsheet, Gem, Newspaper } from "lucide-react";
+import { ArrowRight, BookOpen, CalendarHeart, FileSpreadsheet, Gem, Newspaper, Presentation } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
@@ -13,6 +13,13 @@ const PERMISSION = "tool.marketing_kit.run";
  * rather than a rail here.
  */
 const SURFACES = [
+  {
+    id: "presentation",
+    label: "Presentation",
+    tagline: "Drop anything — Excel, PowerPoint, PDF, Word, photos · a polished deck you refine by chat",
+    href: "/marketing-kit/presentation",
+    Icon: Presentation,
+  },
   {
     id: "brand-story",
     label: "Brand Story",
@@ -52,7 +59,7 @@ const SURFACES = [
 
 /** The page's sections, in order: the presentation-style stories first, then the image kits. */
 const GROUPS = [
-  { title: "PPT", ids: ["brand-story", "collection-story", "line-sheet"] },
+  { title: "PPT", ids: ["presentation", "brand-story", "collection-story", "line-sheet"] },
   { title: "Images", ids: ["campaign", "festive"] },
 ];
 

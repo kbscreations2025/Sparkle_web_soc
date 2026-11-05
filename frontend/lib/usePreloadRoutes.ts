@@ -15,6 +15,7 @@ const EXTRA_ROUTES = [
   "/marketing-kit/affinity",
   "/marketing-kit/campaign",
   "/marketing-kit/collection-story",
+  "/marketing-kit/presentation",
   "/marketing-kit/festive",
   "/credits",
 ];

@@ -511,7 +511,7 @@ function UploadSquare({
                   onClick={() => onRemove(index)}
                   title={`Remove ${thumb.label}`}
                   aria-label={`Remove ${thumb.label}`}
-                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white/85 opacity-0 transition-opacity hover:text-white focus:opacity-100 group-hover:opacity-100"
+                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white/85 opacity-0 transition-opacity hover:text-white focus:opacity-100 group-hover:opacity-100 touch:opacity-100"
                 >
                   <X size={10} />
                 </button>

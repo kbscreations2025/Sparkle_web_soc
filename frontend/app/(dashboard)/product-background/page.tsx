@@ -259,7 +259,7 @@ export default function ProductBackgroundPage() {
                 className="group relative block aspect-[4/3] w-full"
               >
                 <Image src={photo} alt="Your piece" fill sizes="(max-width: 768px) 100vw, 720px" className="object-contain" />
-                <span className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-lg border border-white/15 bg-black/55 px-2 py-1 text-[10px] font-medium text-white/85 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                <span className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-lg border border-white/15 bg-black/55 px-2 py-1 text-[10px] font-medium text-white/85 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 touch:opacity-100">
                   <Maximize2 size={11} /> Preview
                 </span>
               </button>

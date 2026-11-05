@@ -96,7 +96,7 @@ export function CampaignKitDeck({
                 onClick={() => setPreview(shot)}
                 title={`Preview ${shot.label}`}
                 aria-label={`Preview ${shot.label} full size`}
-                className="absolute right-10 top-2 rounded-full bg-black/55 p-1.5 text-white/85 opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/75 group-hover:opacity-100"
+                className="absolute right-10 top-2 rounded-full bg-black/55 p-1.5 text-white/85 opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/75 group-hover:opacity-100 touch:opacity-100"
               >
                 <Maximize2 size={12} />
               </button>
@@ -105,7 +105,7 @@ export function CampaignKitDeck({
                 onClick={() => downloadImage(shot.url, `${shot.id}.jpg`)}
                 title={`Download ${shot.label}`}
                 aria-label={`Download ${shot.label}`}
-                className="absolute right-2 top-2 rounded-full bg-black/55 p-1.5 text-white/85 opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/75 group-hover:opacity-100"
+                className="absolute right-2 top-2 rounded-full bg-black/55 p-1.5 text-white/85 opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/75 group-hover:opacity-100 touch:opacity-100"
               >
                 <Download size={12} />
               </button>

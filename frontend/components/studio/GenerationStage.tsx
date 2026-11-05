@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { Download, Loader2, Maximize2, Pencil } from "lucide-react";
+import { doubleTap } from "@/lib/doubleTap";
 import { downloadImage } from "@/lib/image";
 
 /**
@@ -41,6 +42,9 @@ export function GenerationStage({
 }) {
   return (
     <div
+      // Double-click or double-tap the result to open it full size — the
+      // same gesture as every other picture in the app.
+      {...(src && !busy && onExpand ? doubleTap(src, () => onExpand(src)) : {})}
       className="relative flex h-full min-h-[320px] items-center justify-center overflow-hidden"
       style={
         checkerboard && src

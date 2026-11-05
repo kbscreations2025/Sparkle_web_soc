@@ -27,6 +27,8 @@ const KIT_KIND_BY_JOB_TYPE: Record<string, MarketingKitKind> = {
   "marketingKit.campaign": "campaign",
   "marketingKit.collectionStory": "collection_story",
   "marketingKit.festive": "festive",
+  "marketingKit.presentation": "presentation",
+  "marketingKit.presentationEdit": "presentation",
 };
 
 /**
@@ -272,7 +274,7 @@ const RailRow = memo(function RailRow({
             onClick={handleCancel}
             disabled={cancelling}
             title="Cancel"
-            className="shrink-0 rounded p-0.5 text-faint opacity-0 transition-opacity hover:text-error group-hover:opacity-100 disabled:opacity-40"
+            className="shrink-0 rounded p-0.5 text-faint opacity-0 transition-opacity hover:text-error group-hover:opacity-100 touch:opacity-100 disabled:opacity-40"
           >
             <X size={11} />
           </button>
@@ -282,7 +284,7 @@ const RailRow = memo(function RailRow({
             job, but the conversation is on the server — reopening it is what
             the History "Continue" button already does. */}
         {href && job.status !== "queued" && (
-          <ChevronRight size={12} className="shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+          <ChevronRight size={12} className="shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100 touch:opacity-100" />
         )}
       </RowShell>
     </li>

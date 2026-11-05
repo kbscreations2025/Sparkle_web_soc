@@ -183,7 +183,7 @@ export function BrandPanel({ api }: { api: EditorApi }) {
                     api.setBrand({ ...brand, logos: brand.logos.filter((_, i) => i !== index) });
                     setLogo(0);
                   }}
-                  className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-white text-black/60 shadow group-hover/logo:flex hover:text-red-600"
+                  className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-white text-black/60 shadow group-hover/logo:flex touch:flex hover:text-red-600"
                 >
                   <X size={9} />
                 </button>
@@ -265,7 +265,7 @@ export function BrandPanel({ api }: { api: EditorApi }) {
                 className="group/c relative aspect-square rounded-full border border-black/15"
                 style={{ background: color }}
               >
-                <X size={9} className="absolute inset-0 m-auto hidden text-white mix-blend-difference group-hover/c:block" />
+                <X size={9} className="absolute inset-0 m-auto hidden text-white mix-blend-difference group-hover/c:block touch:block" />
               </button>
             ))}
             <label

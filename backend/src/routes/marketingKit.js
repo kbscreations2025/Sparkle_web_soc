@@ -15,6 +15,10 @@ const { BRAND_STORY_TONES, BRAND_STORY_LENGTHS } = require("../prompts/marketing
 const { FESTIVE_EVENT_IDS, FESTIVE_ASPECT_RATIOS, POSTER_FONT_IDS, eventLabel } = require("../prompts/festivePoster");
 const { clampCount } = require("../jobs/generationRunner");
 const { MARKETING_KIT_TYPES } = require("../models/marketingKit");
+const MarketingKit = require("../models/marketingKit");
+const Generation = require("../models/generation");
+const mongoose = require("mongoose");
+const { PRESENTATION_JOB, PRESENTATION_EDIT_JOB } = require("../jobs/presentation");
 const kits = require("../services/marketingKits");
 
 const router = express.Router();
@@ -384,6 +388,120 @@ router.post("/festive", async (req, res) => {
       conversationId: conversationId || null,
     },
     message: `queued a ${eventLabel(options)} poster (${variations} image${variations > 1 ? "s" : ""}) on ${modelLabel}`,
+  });
+});
+
+/*
+ * ── Presentation ────────────────────────────────────────────────────────────
+ * Anything in — the browser has already read every file to text and pictures
+ * (frontend lib/presentationFiles.ts) — a deck out, then edited by chat.
+ */
+
+const MAX_PRESENTATION_IMAGES = 30;
+const MAX_PRESENTATION_SOURCES = 20;
+const PRESENTATION_STYLES = ["auto", "luxury", "minimal", "corporate", "bold", "editorial"];
+const PRESENTATION_LENGTHS = ["auto", "short", "medium", "long"];
+
+const clean = (value, max) => (typeof value === "string" ? value.trim().slice(0, max) : "");
+
+router.post("/presentation", async (req, res) => {
+  const { sources, images, preview, conversationId } = req.body || {};
+  const brief = clean(req.body?.brief, 4000);
+  const style = PRESENTATION_STYLES.includes(req.body?.style) ? req.body.style : "auto";
+  const length = PRESENTATION_LENGTHS.includes(req.body?.length) ? req.body.length : "auto";
+
+  const readSources = (Array.isArray(sources) ? sources : [])
+    .slice(0, MAX_PRESENTATION_SOURCES)
+    .map((source) => ({ name: clean(source?.name, 300) || "file", kind: clean(source?.kind, 40) || "File", text: clean(source?.text, 40_000) }))
+    .filter((source) => source.text);
+  // Each picture keeps the label it was read with ("price-list.xlsx · STYLE NO R-104") —
+  // that label is how the model ties a photo to the row it sat on.
+  const readImages = (Array.isArray(images) ? images : [])
+    .slice(0, MAX_PRESENTATION_IMAGES)
+    .map((image) => {
+      const parsed = parseDataUri(image?.src);
+      return parsed ? { ...parsed, label: clean(image?.label, 300) } : null;
+    })
+    .filter(Boolean);
+
+  if (!readSources.length && !readImages.length && brief.length < 10) {
+    return res.status(400).json({
+      status: "error",
+      message: "Add some files or pictures, or describe the presentation you want",
+      code: "invalid",
+    });
+  }
+
+  return queueGeneration(req, res, {
+    type: PRESENTATION_JOB,
+    tool: "marketing_kit",
+    preview,
+    request: {
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+      modelLabel: "Sparkle 2.5 Pro",
+      kind: "presentation",
+      sourceCount: readSources.length,
+      // Not `imageCount`: the quote reads that as how many images a run
+      // produces, and a deck is one writing run however many pictures it has.
+      pictureCount: readImages.length,
+      count: 1,
+      style,
+      length,
+    },
+    payload: { sources: readSources, images: readImages, brief, style, length, conversationId: conversationId || null },
+    message: `queued a Presentation (${readSources.length} file${readSources.length === 1 ? "" : "s"}, ${readImages.length} picture${readImages.length === 1 ? "" : "s"})`,
+  });
+});
+
+/** The thread an edit sees — enough to resolve "that slide" or "undo it", not the whole history. */
+const EDIT_HISTORY_MESSAGES = 8;
+
+router.post("/presentation/edit", async (req, res) => {
+  const instruction = clean(req.body?.instruction, 2000);
+  if (!instruction) return res.status(400).json({ status: "error", message: "Say what to change", code: "invalid" });
+
+  // The stored outline, not one the client sends: it is what the last edit
+  // wrote, and only the owner's own deck can be edited.
+  const kitId = String(req.body?.kitId || "");
+  const kit = mongoose.Types.ObjectId.isValid(kitId)
+    ? await MarketingKit.findOne({ _id: kitId, tenantId: req.dbUser.tenantId, userId: req.dbUser._id, deletedAt: null }).lean()
+    : null;
+  if (!kit?.presentation?.outline) {
+    return res.status(404).json({ status: "error", message: "That presentation could not be found", code: "not_found" });
+  }
+
+  const imageCount = kit.presentation.images?.length ?? 0;
+  const imageNotes = Array.from({ length: imageCount }, (_, n) => kit.presentation.imageNotes?.[n] || kit.presentation.images[n]?.fileName || "");
+
+  // Every edit joins the thread the deck was built in, so History shows one
+  // conversation per deck rather than a new one per message.
+  const conversationId =
+    req.body?.conversationId ||
+    (kit.generationId ? (await Generation.findById(kit.generationId).select("conversationId").lean())?.conversationId : null) ||
+    null;
+
+  return queueGeneration(req, res, {
+    type: PRESENTATION_EDIT_JOB,
+    tool: "marketing_kit",
+    request: {
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+      modelLabel: "Sparkle 2.5 Pro",
+      kind: "presentation",
+      isRefinement: true,
+      kitId,
+      conversationId: conversationId ? String(conversationId) : null,
+    },
+    payload: {
+      kitId,
+      instruction,
+      outline: kit.presentation.outline,
+      imageNotes,
+      history: (kit.presentation.messages ?? []).slice(-EDIT_HISTORY_MESSAGES).map((message) => ({ role: message.role, text: message.text })),
+      conversationId: conversationId ? String(conversationId) : null,
+    },
+    message: "queued a Presentation edit",
   });
 });
 

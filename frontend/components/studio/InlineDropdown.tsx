@@ -180,6 +180,11 @@ export function InlineDropdown<T extends string>({
                       >
                         {option.label}
                       </span>
+                      {/* No cursor to follow on a touch screen, so the hint
+                          takes its second line there instead. */}
+                      {option.hint && (
+                        <span className="hidden text-[10px] leading-snug text-faint touch:block">{option.hint}</span>
+                      )}
                     </span>
                     {option.badge && (
                       <span className="mt-px shrink-0 rounded-full border border-gold/25 bg-gold/10 px-1.5 py-px text-[8px] font-semibold uppercase leading-[14px] tracking-wide text-gold">

@@ -24,9 +24,9 @@ const mongoose = require("mongoose");
  *     and lives in `campaign`.
  * Readers key off which sub-document is present, not off `kind`.
  */
-const MARKETING_KIT_TYPES = ["brand_story", "affinity", "campaign", "collection_story", "festive"];
+const MARKETING_KIT_TYPES = ["brand_story", "affinity", "campaign", "collection_story", "festive", "presentation"];
 const MARKETING_KIT_STATUSES = ["draft", "ready", "failed"];
-const MARKETING_KIT_IMAGE_ROLES = ["product", "sheet", "model"];
+const MARKETING_KIT_IMAGE_ROLES = ["product", "sheet", "model", "upload"];
 
 /** One stored upload. */
 const imageSchema = new mongoose.Schema(
@@ -202,6 +202,56 @@ const campaignSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * Presentation only — a deck built from whatever was dropped in (Excel, an old
+ * PowerPoint, PDFs, Word, photos), then edited by chat.
+ *
+ * Two layers, like Affinity's copy and design: `outline` is what the model
+ * wrote and edits (per slide a layout and its words — see the frontend's
+ * lib/presentation.ts), `design` is the laid-out slides as the person has
+ * arranged them in the editor. A chat edit rewrites the outline; the client
+ * lays out only the slides that changed and saves the design.
+ */
+const presentationSourceSchema = new mongoose.Schema(
+  {
+    name: { type: String, default: "", maxlength: 300 },
+    kind: { type: String, default: "", maxlength: 40 },
+    /** The text read out of the file — kept so a re-run or an audit can see what the model was given. */
+    text: { type: String, default: "", maxlength: 60_000 },
+  },
+  { _id: false }
+);
+
+const presentationMessageSchema = new mongoose.Schema(
+  {
+    role: { type: String, enum: ["user", "assistant"], required: true },
+    text: { type: String, default: "", maxlength: 4000 },
+    at: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
+const presentationSchema = new mongoose.Schema(
+  {
+    /** Every picture the deck may place, in the order the model numbered them. `fileName` holds its label. */
+    images: { type: [imageSchema], default: [] },
+    /** One line per picture, written by the first run, so an edit needn't send the pictures again. */
+    imageNotes: { type: [String], default: [] },
+    sources: { type: [presentationSourceSchema], default: [] },
+    brief: { type: String, default: "", maxlength: 4000 },
+    style: { type: String, default: "auto", maxlength: 40 },
+    length: { type: String, default: "auto", maxlength: 40 },
+    outline: { type: mongoose.Schema.Types.Mixed, default: null },
+    /** As first written. Never edited, same rule as `originalItems`. */
+    originalOutline: { type: mongoose.Schema.Types.Mixed, default: null },
+    design: { type: mongoose.Schema.Types.Mixed, default: null },
+    /** Denormalised so a listing needn't read the outline to say how long the deck is. */
+    slideCount: { type: Number, default: 0 },
+    messages: { type: [presentationMessageSchema], default: [] },
+  },
+  { _id: false }
+);
+
 const marketingKitSchema = new mongoose.Schema(
   {
     tenantId: { type: mongoose.Schema.Types.ObjectId, ref: "Tenant", required: true },
@@ -223,6 +273,7 @@ const marketingKitSchema = new mongoose.Schema(
     brandStory: { type: brandStorySchema, default: null },
     affinity: { type: affinitySchema, default: null },
     campaign: { type: campaignSchema, default: null },
+    presentation: { type: presentationSchema, default: null },
 
     /**
      * Why a kit ended up `failed`. Written when the run produced something

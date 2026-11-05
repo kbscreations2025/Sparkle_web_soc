@@ -4,7 +4,7 @@ const {
   CHARCOAL_MASTER_PROMPT,
   INK_MASTER_PROMPT,
 } = require("./sketchMasterPrompts");
-const { buildReferenceNote } = require("./shared");
+const { buildReferenceNote, PURE_WHITE_NOTE, ONE_OPTION_NOTE } = require("./shared");
 const { RELATED_DIRECTIONS } = require("./intent");
 const { VARIATION_FOCI, referenceNote } = require("./textToImage");
 
@@ -220,11 +220,20 @@ function buildImageToSketchRefinePrompt({ instruction, referenceCount = 0 }) {
  *
  * Two prompts. The default renders the sketch as drawn; VARIATIONS — only when
  * the notes ask for other designs (see resolveSketchMode in prompts/intent.js)
- * — grows new designs out of it. They share how to read the sheet, the metals
- * and the photograph.
+ * — grows new designs out of it.
+ *
+ * The render prompt was cut to a few lines after a side-by-side test (Nov
+ * 2026: two coloured band sheets drawn as face + profile, three pencil
+ * pendants, every model, two renders each). The longer prompt, with a count
+ * sheet a vision model wrote first, told the renderer to show "the main view"
+ * of a two-view sheet: Sparkle 3 Pro answered with two rings stacked, and the
+ * count sheet misread one band as "144 pavé stones" and the other as an
+ * "8-sided frame". This version — make the ONE piece every view agrees on,
+ * shown at three-quarters — rendered every sketch correctly on GPT Image 2
+ * both times, and on Nano Banana 2.1 all but once.
  */
 
-/** What on a design sheet is the piece, and what is only there to explain it. */
+/** What on a design sheet is the piece, and what is only there to explain it — for variations. */
 const SHEET_RULES = `READ THE SHEET
 - Render ONE piece: the main drawing. If the sheet shows the piece more than once — say a top view and a side view — show it as seen in the main view (the largest, or the first), and use the other views only to understand its form. The photograph never shows two objects.
 - Small close-up or profile drawings of a part — often a stone setting seen from the side — are detail views. Use them to understand depth and construction; never render them as separate objects.
@@ -241,37 +250,20 @@ const METAL_RULES = `- Metal, in this order: what the jeweller notes say; else a
 const PHOTO_RULES = `THE PHOTOGRAPH
 - A premium jewellery e-commerce photograph: tack-sharp focus across the whole piece, a soft large key light from the upper left with gentle fill, clean highlights and natural contrast.
 - The metal reflects only a clean studio — no camera, room or equipment reflections, no black patches.
-- Background: pure, seamless, uniform white (#FFFFFF). The paper, its tone and its texture are gone. No props, hands, stand or box, and no visible floor shadow.
+- Background: pure, seamless, uniform white (#FFFFFF) — never off-white, cream or grey, and no gradient or vignette. The paper, its tone and its texture are gone. No props, hands, stand or box, and no visible floor shadow.
 - The piece is complete, uncropped and centred, with generous white space on every side.
 - It is a real photograph: no pencil lines, hatching, smudges or paper grain — never an illustration, concept art or plastic-looking CGI.`;
 
-const SKETCH_TO_IMAGE_PROMPT = `TASK — TURN THIS SKETCH INTO A PHOTOGRAPH OF THE REAL PIECE
+/**
+ * The render. A coloured CAD sheet's colours are its metals; pencil shading is
+ * not — "grey = white gold" alone turned plain pencil pendants white gold.
+ */
+const SKETCH_TO_IMAGE_PROMPT = `Turn this jewellery design drawing into a photorealistic studio product photograph of the exact piece it shows, made in real metal and diamonds.
 
-The attached image is a jeweller's hand-drawn design sketch. Turn it into a photograph of that exact piece, made in real metal and stones. This is a faithful render of an existing design — not a design task, and not a reinterpretation.
-
-THE SKETCH IS THE BLUEPRINT
-- Reproduce exactly what is drawn: the outline, every part, where each part sits, how the parts join, cross, overlap or stay apart, every opening, every stone, and the size of everything relative to everything else.
-- Overlay test: laid over the sketch, the photographed piece lines up with the drawing — same shapes, same positions, same proportions, same number of everything.
-- Unusual is correct. An asymmetric, unconventional or unfamiliar design is rendered exactly as drawn. Swapping it for a more familiar, more balanced or more typical piece that merely looks similar is the main way this task fails.
-- Do not add, remove, merge, simplify or "improve" anything. Where something is unclear, follow what is visible in the drawing — never invent.
-- Keep the main view's viewpoint and orientation — what is drawn horizontal stays horizontal. Do not rotate, tilt or re-pose the piece.
-
-${SHEET_RULES}
-
-CLEAN UP LINE QUALITY ONLY
-- A shaky line becomes the clean line it was meant to be, a wobbly circle a precise stone of the same size in the same place, doubled strokes a single edge. Follow the average path of the strokes, never a new, nicer path.
-- Where the design is clearly symmetrical, tidy hand wobble so both sides match; never force symmetry onto a design drawn asymmetrical.
-- Complete only what is clearly unfinished, and only its structure: a ring drawn as a head alone gets its full shank and shoulders in the drawn style; a halo or stone row that trails off continues with the same stone size and spacing; a pendant with no bail gets a clean, minimal one in its own design language; a cut-off earring post or hook, or a partly drawn bangle or bracelet, is completed along the drawn line. A pendant drawn without a chain is shown on its own.
-
-MATERIALS
-- Every drawn shape becomes real metal with believable thickness, polished edges, clean joins and manufacturable settings — without reshaping, re-proportioning or restructuring any of it.
-${METAL_RULES}
-- Stones: exactly the drawn number, positions, sizes and shapes — round becomes a round brilliant; pear, oval, marquise, heart, cushion, princess, emerald, baguette and trillion keep their cut. White diamonds unless the notes say otherwise, with crisp facets, natural brilliance and controlled sparkle.
-- Settings follow the drawing: a bezel stays a bezel, the drawn prong count stays the same, pavé and bead-set stones run exactly along the drawn strips. Milgrain is a row of tiny raised beads; openwork keeps every gap and strut.
-
-${PHOTO_RULES}
-
-FINAL CHECK — compare with the sketch before finishing: same outline, same parts in the same places, same openings, same stone count and positions, same proportions. Wherever the photograph differs from the drawing, follow the drawing.`;
+- Copy the design exactly: the same outline, parts, openings, stones (number, shape, size and position) and proportions. Do not add, remove, simplify or reinvent anything; only clean shaky pencil lines into the precise edges they were meant to be.
+- The drawing shows ONE piece. If it is drawn from more than one side — for example a ring's face drawn as a flat strip beside its round profile — make the single piece that matches all the views and photograph it at a three-quarter angle. Never show two pieces, and never join, cross or stack the views. A single drawing keeps its drawn viewpoint and orientation.
+- Metal: what the notes say; else the drawing's colours (yellow = yellow gold, grey or silver = white gold); plain pencil = 18K yellow gold. Stones are white diamonds.
+- Pure white #FFFFFF background — never off-white, cream or grey, and no gradient — soft studio light, sharp focus, the whole piece in frame and centred. No pencil lines, paper texture, guide lines or written notes in the photograph.`;
 
 const SKETCH_VARIATION_PROMPT = `TASK — A NEW DESIGN GROWN FROM THIS SKETCH
 
@@ -300,64 +292,39 @@ function sketchToImageVariationNote(count) {
 }
 
 /**
- * The jeweller's own words, which win wherever they say something. For a
- * render everything they leave unsaid stays as drawn; a variation is free to
- * move it.
+ * The jeweller's own words for a variation: they steer it wherever they say
+ * something — including over the prompt's "Keep" list. Naming only metal,
+ * stones and finish here let "a different motif of round diamonds and rubies"
+ * lose to "keep the core motif": both options came back with the reference's
+ * own flowers.
  */
-function jewellerNotes(description, { variation = false } = {}) {
+function jewellerNotes(description) {
   const notes = description?.trim();
   if (!notes) return "";
-  const scope = variation
-    ? "Wherever they name a metal, stones, a finish or a direction, follow it."
-    : "Wherever they name a metal, stones, a finish or a change, that wins over the sketch and over every rule above; everything they do not mention stays exactly as the sketch shows.";
-  return `\n\nJEWELLER NOTES — THESE OVERRIDE THE SKETCH\n${scope}\n\n${notes}`;
+  return (
+    "\n\nJEWELLER NOTES — THESE OVERRIDE THE SKETCH AND THE KEEP LIST ABOVE\n" +
+    "Wherever they name a metal, stones, a centre stone, a motif, a finish or any other change, do exactly that — " +
+    "a new motif they describe replaces the sketch's motif.\n\n" +
+    notes
+  );
 }
 
 /**
- * Read by a vision model before rendering (see jobs/sketchTools.js), and
- * pasted into the render prompt — so it is limited to what a renderer gets
- * wrong from the drawing alone: which drawing on the sheet to render, exact
- * counts (a 36-stone halo comes back with 26 without one), and which way an
- * elongated stone runs (an east–west setting gets "corrected" to north–south).
- *
- * It must never describe shapes or layout. The renderer copies shapes from the
- * sketch far better than from words, and draws whatever familiar piece the
- * words name instead: "intertwined double heart" and "two curved elements"
- * each turned a small heart stacked on a large one into a stock pendant, while
- * the same sketch rendered from the drawing alone came back right.
+ * The render: the drawing alone decides the design. No count sheet any more —
+ * a vision model used to read the sketch first and pass its counts along, and
+ * on a two-view band sheet it miscounted ("144 pavé stones", an "8-sided
+ * frame") with the renderer following its numbers over the drawing. The
+ * jeweller's notes are kept short too, in the form the test ran with.
  */
-const SKETCH_ANALYSIS_PROMPT = `You are a senior jewellery CAD technician preparing a hand-drawn jewellery design sheet for manufacture. If several images are given, they show ONE piece.
+function buildSketchToImagePrompt({ description, count = 1 }) {
+  const notes = description?.trim();
+  return (
+    SKETCH_TO_IMAGE_PROMPT +
+    (notes ? `
 
-A renderer will also see the sheet and will copy every shape from the drawing itself. From you it needs only the two things it is likely to get wrong: which drawing on the sheet to render, and exact counts. Do NOT describe shapes, outlines or how the parts are arranged — the drawing does that, and a written description only pulls the renderer towards a familiar design. Never name the design or compare it to a known style or symbol.
-
-Write two short sections.
-
-SHEET
-- Which drawing is the main view, and where it is on the sheet (e.g. "top half", "centre").
-- Any other drawings, and what each is: another full view of the same piece (from which angle), or a small detail view of a part (which part).
-- Drawing aids present: construction circles, centre or guide lines, measurements, written notes, coloured annotations.
-- Colour or metal, only if the drawing is coloured or labelled; otherwise "uncoloured pencil".
-
-COUNTS — in the main view
-- Each group of stones: where it runs, in a few plain words; then its count, stone shape and setting (pavé, bead, bezel, prong, channel). Count one by one, going around. If unsure, give the best count and a range, e.g. "approx. 24 (22–26)".
-- Centre stone(s): shape; if it is elongated, which way its long axis runs on the drawing (horizontal, vertical or diagonal); setting; and the number of prongs if prongs are drawn.
-- The number of sides of any polygonal frame.
-
-Output only these two sections. No preamble.`;
-
-function buildSketchToImagePrompt({ description, count = 1, spec = null }) {
-  let prompt = SKETCH_TO_IMAGE_PROMPT;
-
-  if (spec) {
-    // Numbers and the sheet only, and second to the drawing: a spec told to
-    // win over the model's own eyes lets one wrong word decide the render.
-    prompt +=
-      "\n\nTECHNICIAN'S COUNT SHEET\n" +
-      "A technician has read this sketch for what is easy to get wrong. Use it to know which drawing to render and what to leave out, and make the stone counts, prong counts, numbers of sides and the direction an elongated stone runs match it — an east–west stone stays east–west. It deliberately says nothing about shapes or layout: take every shape, position and proportion from the drawing alone. Anything it does not list is rendered as drawn.\n\n" +
-      spec;
-  }
-
-  return prompt + jewellerNotes(description) + sketchToImageVariationNote(count);
+Jeweller's notes (these win where they say something): ${notes}` : "") +
+    sketchToImageVariationNote(count)
+  );
 }
 
 /**
@@ -368,14 +335,20 @@ function buildSketchToImagePrompt({ description, count = 1, spec = null }) {
 function buildSketchVariationPrompt({ description, index = 0, total = 1 }) {
   const direction = RELATED_DIRECTIONS[index % RELATED_DIRECTIONS.length];
   const which = total > 1 ? `This is variation ${index + 1} of ${total} and must differ clearly from the others. ` : "";
-  return `${SKETCH_VARIATION_PROMPT}\n\nDIRECTION FOR THIS VARIATION\n${which}${direction}` + jewellerNotes(description, { variation: true });
+  // Last, after the notes: notes asking for "2 designs" must not turn one image into two pieces.
+  return (
+    `${SKETCH_VARIATION_PROMPT}\n\nDIRECTION FOR THIS VARIATION\n${which}${direction}` +
+    jewellerNotes(description) +
+    `\n\n${ONE_OPTION_NOTE}`
+  );
 }
 
 function buildSketchToImageRefinePrompt({ instruction, referenceCount = 0 }) {
   return (
     `Apply this modification to this jewelry photograph (the first image): ${instruction}.` +
     buildReferenceNote(referenceCount) +
-    " Keep the same photorealistic product photography style, pure white background, professional studio lighting, and all structural details. Only apply the specifically requested changes."
+    " Keep the same photorealistic product photography style, professional studio lighting, and all structural details. Only apply the specifically requested changes. " +
+    PURE_WHITE_NOTE
   );
 }
 
@@ -388,5 +361,4 @@ module.exports = {
   buildSketchToImagePrompt,
   buildSketchVariationPrompt,
   buildSketchToImageRefinePrompt,
-  SKETCH_ANALYSIS_PROMPT,
 };

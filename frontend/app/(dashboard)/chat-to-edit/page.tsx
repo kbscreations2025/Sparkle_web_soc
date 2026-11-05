@@ -25,10 +25,12 @@ import {
   type ImageEditModelId,
   type ReferenceRole,
 } from "@/lib/api";
-import { compressImage, urlToDataUrl } from "@/lib/image";
+import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useAuth } from "@/lib/auth-context";
 import { useCreditGuard } from "@/lib/credit-guard";
+import { useJobs } from "@/lib/jobs-context";
+import { failureMessage, useSettledJob } from "@/lib/useSettledJob";
 import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
@@ -38,9 +40,11 @@ const CHAT_TO_EDIT_PERMISSION = "tool.chat_to_edit.run";
 const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
 
 const START_HINTS = ["Attach a jewellery photo to begin"];
+// Offered before the first edit and again under every result, so the next
+// common change is always one click away.
 const EDIT_HINTS = [
   "Make the metal shinier",
-  "Change the background to soft grey",
+  "Make the background pure white",
   "Remove the reflection on the stone",
   "Warm up the lighting",
 ];
@@ -86,6 +90,54 @@ export default function ChatToEditPage() {
 
   const conversationId = useRef<string | null>(null);
   const parentGenerationId = useRef<string | null>(null);
+
+  /*
+   * The turn this page is waiting on: its queued job, and what to hand back to
+   * the composer if it fails. The edit runs in the queue, so it shows in the
+   * rail with its progress and carries on through a reload.
+   */
+  const { jobs: queueJobs, track } = useJobs();
+  const [waiting, setWaiting] = useState<{ jobId: string; instruction: string; baseImage: string; refsThisTurn: string[] } | null>(null);
+  const waitingJob = waiting ? (queueJobs.find((job) => job.id === waiting.jobId) ?? null) : null;
+
+  useSettledJob(waitingJob, (job) => {
+    const turn = waiting!;
+    setWaiting(null);
+    setBusy(false);
+    const urls = job.result?.outputUrls?.length ? job.result.outputUrls : job.result?.outputUrl ? [job.result.outputUrl] : [];
+    if (job.status !== "completed" || !urls.length) {
+      // A failed turn, keeping what to put back in the composer on retry.
+      setHistory((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: failureMessage(job, "The model returned no image"),
+          retryInstruction: turn.instruction,
+          retryImage: turn.baseImage,
+          retryRefImages: turn.refsThisTurn,
+        },
+      ]);
+      return;
+    }
+    conversationId.current = job.result?.conversationId ?? conversationId.current;
+    parentGenerationId.current = job.result?.generationId ?? parentGenerationId.current;
+    // The stored url — shown at once; the next edit fetches its bytes (see send).
+    setCurrentImage(urls[0]);
+    setPendingImage(null);
+    setHistory((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "Updated",
+        image: urls[0],
+        // Several when the turn asked for more design options.
+        images: urls,
+        note: job.result?.intentLabel ?? undefined,
+      },
+    ]);
+  });
 
   async function stageStartImage(file: File) {
     setError("");
@@ -166,6 +218,10 @@ export default function ChatToEditPage() {
     setChatInput("");
     setError("");
     setReadOnly(null);
+    // A turn still running carries on in the queue and lands in History;
+    // this chat just stops waiting for it.
+    setWaiting(null);
+    setBusy(false);
     conversationId.current = null;
     parentGenerationId.current = null;
   }
@@ -177,12 +233,9 @@ export default function ChatToEditPage() {
    */
   async function send(instructionOverride?: string) {
     // The picked option is the one edited next — after "more designs" there
-    // are several, and the user continues from whichever they chose. Only a
-    // data URI qualifies: a stored url would need fetching first, and the
-    // current image already holds those bytes.
-    const picked = selectedView?.startsWith("data:") ? selectedView : null;
-    const baseImage = picked ?? currentImage ?? pendingImage;
-    if (!baseImage || readOnly) return;
+    // are several, and the user continues from whichever they chose.
+    const baseImage = selectedView ?? currentImage ?? pendingImage;
+    if (!baseImage || readOnly || waiting) return;
 
     const instruction = (instructionOverride ?? chatInput).trim() || "Enhance this image.";
     const refsThisTurn = annotatedPhoto ? [annotatedPhoto, ...referenceImages] : referenceImages;
@@ -211,8 +264,11 @@ export default function ChatToEditPage() {
     setBusy(true);
 
     try {
+      // The backend edits bytes, not links: a result shown from its stored url
+      // (every finished turn, and a resumed thread) is fetched here.
+      const editable = baseImage.startsWith("data:") ? baseImage : await urlToDataUrl(baseImage);
       const result = await chatEdit({
-        image: baseImage,
+        image: editable,
         referenceImages: refsThisTurn,
         referenceRoles: rolesThisTurn,
         instruction,
@@ -221,27 +277,17 @@ export default function ChatToEditPage() {
         quality,
         conversationId: conversationId.current,
         parentGenerationId: parentGenerationId.current,
+        // So the queue rail shows this photo rather than a bare spinner.
+        preview: await makeThumbnail(editable),
       });
 
-      if (result.status === "success" && result.images?.[0]) {
-        const edited = result.images[0];
-        conversationId.current = result.conversationId ?? conversationId.current;
-        parentGenerationId.current = result.generationId ?? parentGenerationId.current;
-        setCurrentImage(edited);
-        setPendingImage(null);
-        setHistory((current) => [
-          ...current,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: "Updated",
-            image: edited,
-            // Several when the turn asked for more design options.
-            images: result.images,
-            note: result.intentLabel ?? undefined,
-          },
-        ]);
-      } else if (creditGuard(result)) {
+      if (result.status === "queued" && result.job) {
+        // `busy` stays on until the job settles — see useSettledJob above.
+        setWaiting({ jobId: result.job.id, instruction, baseImage, refsThisTurn });
+        track(result.job);
+        return;
+      }
+      if (creditGuard(result)) {
         // The edit was priced and refused, so it never ran. Take the turn back
         // out of the thread and return the instruction and its attachments to
         // the composer — the dialog is the only account of what happened.
@@ -252,13 +298,14 @@ export default function ChatToEditPage() {
         attach.setReferenceRoles(pickedRoles);
         attach.setAnnotatedPhoto(annotatedPhoto);
       } else {
-        pushFailure(result.message || "The model returned no image", { instruction, baseImage, refsThisTurn });
+        pushFailure(result.message || "Could not start this edit", { instruction, baseImage, refsThisTurn });
       }
     } catch {
       pushFailure("Could not reach the server", { instruction, baseImage, refsThisTurn });
-    } finally {
-      setBusy(false);
     }
+    // Only a turn that never reached the queue ends here; a queued one ends
+    // when its job settles.
+    setBusy(false);
   }
 
   function pushFailure(
@@ -301,16 +348,24 @@ export default function ChatToEditPage() {
             <ChatMessages
               history={history}
               busy={busy}
+              // The edit's own preview, pushed the moment the model answers.
+              busyImages={waitingJob?.partials}
               onSelectResult={setSelectedView}
               onRetry={readOnly ? undefined : retry}
               hints={
-                !readOnly && history.length === 0
-                  ? currentImage || pendingImage
+                // Not on a colleague's thread, which can't be edited. With a
+                // photo in play — before the first edit or under the latest
+                // result (ChatMessages hides them while one is running) — the
+                // edits that fit what's attached; with none yet, how to start.
+                readOnly
+                  ? undefined
+                  : currentImage || pendingImage
                     ? referenceImages.length
                       ? ATTACHMENT_HINTS
                       : EDIT_HINTS
-                    : START_HINTS
-                  : undefined
+                    : history.length === 0
+                      ? START_HINTS
+                      : undefined
               }
               onHint={(hint) => (currentImage || pendingImage ? send(hint) : undefined)}
             />
@@ -352,9 +407,11 @@ export default function ChatToEditPage() {
           <>
             {displayImage ? (
               <GenerationStage
-                src={displayImage}
+                // The edit's preview takes the stage the moment it lands; the
+                // stored result replaces it when the job finishes.
+                src={waitingJob?.partials?.at(-1) ?? displayImage}
                 alt="Current"
-                busy={busy}
+                busy={busy && !waitingJob?.partials?.length}
                 busyLabel="Applying edit…"
                 // Hidden while the annotation toolbar occupies the same corner.
                 downloadName={annotating ? undefined : "edited.jpg"}
