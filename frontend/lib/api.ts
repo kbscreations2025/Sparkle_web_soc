@@ -1641,7 +1641,7 @@ export function imageToVideo(body: {
  * `collection_story` is an Affinity deck under its own name, and `festive` a
  * set of event posters — they arrive in the `affinity` and `campaign` fields.
  */
-export type MarketingKitKind = "brand_story" | "affinity" | "campaign" | "collection_story" | "festive" | "presentation";
+export type MarketingKitKind = "brand_story" | "affinity" | "campaign" | "collection_story" | "festive" | "presentation" | "charms" | "on_model";
 
 /** One entry in the saved-kits rail. Summaries only — a full kit is large. */
 export type MarketingKitSummary = {
@@ -1835,6 +1835,50 @@ export function festivePoster(body: {
 
 /** Retouching one festive poster. */
 export const refineFestivePoster = refineOn<string>("/api/marketing-kit/festive");
+
+/** All the charms on one chain, photographed in a different aesthetic scene per image. */
+export function charmStory(body: {
+  charmImages: string[];
+  /** The chain's metal — "match" follows the charms. */
+  metal: string;
+  /** The brand's brief; when written it sets the scene instead of the curated ones. */
+  description?: string;
+  aspect: string;
+  /** How many images, 1–8. */
+  count: number;
+  model: string;
+  quality?: string;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/marketing-kit/charms", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Retouching one charm shot. */
+export const refineCharmStory = refineOn<string>("/api/marketing-kit/charms");
+
+/** Any mix of pieces worn together by one model, in cinematic editorial shots — a different pose per image. */
+export function styledOnModel(body: {
+  jewelryImages: string[];
+  /** Index-aligned with `jewelryImages`: what each piece is, or "auto". */
+  types: string[];
+  /** How the pieces are worn together — the backend's ARRANGEMENTS. */
+  arrangement: string;
+  /** The colour grade — the backend's TONES. */
+  tone: string;
+  /** The brand's brief; when written it leads (model, outfit, place, mood). */
+  description?: string;
+  aspect: string;
+  /** How many images, 1–8. */
+  count: number;
+  model: string;
+  quality?: string;
+  preview?: string | null;
+}) {
+  return apiRequest<QueuedResult>("/api/marketing-kit/on-model", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Retouching one Styled on Model shot. */
+export const refineStyledOnModel = refineOn<string>("/api/marketing-kit/on-model");
 
 /** Four shots in one run — two of the piece worn, two of it alone. */
 export function campaignKit(body: {

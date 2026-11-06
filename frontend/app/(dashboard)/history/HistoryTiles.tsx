@@ -80,7 +80,7 @@ function TextResultCover({ text }: { text?: string | null }) {
  * Kits that are a set of pictures rather than a deck: their tiles open the
  * results viewer and the chat, like an image tile, instead of an editor.
  */
-export const OPENS_AS_RESULT = new Set(["campaign", "festive"]);
+export const OPENS_AS_RESULT = new Set(["campaign", "festive", "charms", "on_model"]);
 
 type KitResultActions = {
   /** The run behind a Campaign Kit or Festive Poster tile, by kit id, once loaded. */

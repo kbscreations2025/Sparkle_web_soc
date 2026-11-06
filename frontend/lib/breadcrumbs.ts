@@ -24,6 +24,8 @@ const SUB_LABELS: Record<string, string> = {
   "/marketing-kit/campaign": "Campaign Kit",
   "/marketing-kit/collection-story": "Collection Story",
   "/marketing-kit/festive": "Poster",
+  "/marketing-kit/charms": "Charm Shots",
+  "/marketing-kit/on-model": "Styled on Model",
   "/marketing-kit/presentation": "Presentation",
 };
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, BookOpen, CalendarHeart, FileSpreadsheet, Gem, Newspaper, Presentation } from "lucide-react";
+import { ArrowRight, BookOpen, CalendarHeart, FileSpreadsheet, Gem, Newspaper, Presentation, Sparkles, UserRound } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
@@ -55,12 +55,26 @@ const SURFACES = [
     href: "/marketing-kit/festive",
     Icon: CalendarHeart,
   },
+  {
+    id: "charms",
+    label: "Charm Shots",
+    tagline: "Photos of any number of charms · all of them on one chain, styled in a different scene per image",
+    href: "/marketing-kit/charms",
+    Icon: Sparkles,
+  },
+  {
+    id: "on-model",
+    label: "Styled on Model",
+    tagline: "One piece or many — a set, layered pendants, stacked rings, charms · cinematic shots of a model wearing them",
+    href: "/marketing-kit/on-model",
+    Icon: UserRound,
+  },
 ];
 
 /** The page's sections, in order: the presentation-style stories first, then the image kits. */
 const GROUPS = [
   { title: "PPT", ids: ["presentation", "brand-story", "collection-story", "line-sheet"] },
-  { title: "Images", ids: ["campaign", "festive"] },
+  { title: "Images", ids: ["campaign", "festive", "charms", "on-model"] },
 ];
 
 export default function MarketingKitPage() {

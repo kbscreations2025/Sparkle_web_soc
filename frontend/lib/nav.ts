@@ -254,6 +254,8 @@ export function workspacePathFor(tool: string, modelLabel?: string | null, mode?
   // the hub at /marketing-kit has no chat to open it in.
   if (tool === "marketing_kit" && mode === "campaign") return "/marketing-kit/campaign";
   if (tool === "marketing_kit" && mode === "festive") return "/marketing-kit/festive";
+  if (tool === "marketing_kit" && mode === "charms") return "/marketing-kit/charms";
+  if (tool === "marketing_kit" && mode === "on_model") return "/marketing-kit/on-model";
   if (tool === "cleaning" && modelLabel && NEW_CLEANING_MODEL_LABELS.has(modelLabel)) {
     return "/cleaning/new";
   }

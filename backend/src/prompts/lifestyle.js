@@ -477,6 +477,9 @@ function buildLifestyleModelPrompt(attrs = {}, notes) {
 module.exports = {
   ANATOMY_NOTE,
   MODESTY_NOTE,
+  // Shared with Marketing Kit's Styled on Model (prompts/onModel.js), which renders a model too.
+  REALISM_NOTE,
+  SCALE_NOTE,
   buildLifestylePrompt,
   buildLifestyleSetPrompt,
   buildLifestyleRefinePrompt,

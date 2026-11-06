@@ -16,6 +16,8 @@ const KIT_SURFACE: Record<MarketingKitKind, string> = {
   collection_story: "/marketing-kit/collection-story",
   festive: "/marketing-kit/festive",
   presentation: "/marketing-kit/presentation",
+  charms: "/marketing-kit/charms",
+  on_model: "/marketing-kit/on-model",
 };
 
 export const KIT_LABEL: Record<MarketingKitKind, string> = {
@@ -25,6 +27,8 @@ export const KIT_LABEL: Record<MarketingKitKind, string> = {
   collection_story: "Collection Story",
   festive: "Poster",
   presentation: "Presentation",
+  charms: "Charm Shots",
+  on_model: "Styled on Model",
 };
 
 /** The link that reopens one kit. */
@@ -44,6 +48,8 @@ const KIT_COLORS: Record<string, string> = {
   campaign: "150 45% 45%",
   festive: "40 85% 50%",
   presentation: "330 55% 55%",
+  charms: "185 50% 48%",
+  on_model: "350 60% 58%",
 };
 
 export function kitBadgeStyle(kind: string) {
@@ -65,6 +71,8 @@ export function describeKit(kit: Pick<MarketingKitSummary, "kind" | "pieceCount"
   }
   if (kit.kind === "campaign") return `Campaign Kit · ${plural(kit.pieceCount, "shot")}`;
   if (kit.kind === "festive") return `Poster · ${plural(kit.pieceCount, "poster")}`;
+  if (kit.kind === "charms") return `Charm Shots · ${plural(kit.pieceCount, "image")}`;
+  if (kit.kind === "on_model") return `Styled on Model · ${plural(kit.pieceCount, "image")}`;
   if (kit.kind === "presentation") return `Presentation · ${plural(kit.pieceCount, "slide")}`;
   return "Brand Story";
 }

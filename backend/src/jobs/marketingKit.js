@@ -14,12 +14,16 @@ const {
 const { buildCampaignKitShots, buildCampaignKitRefinePrompt } = require("../prompts/campaignKit");
 const { matchColour, wantsColourChange } = require("../services/colorMatch");
 const { buildFestivePosterPrompt, buildFestivePosterRefinePrompt, eventLabel } = require("../prompts/festivePoster");
+const { buildCharmStoryShots, buildCharmStoryRefinePrompt } = require("../prompts/charmStory");
+const { buildOnModelShots, buildOnModelRefinePrompt } = require("../prompts/onModel");
 
 const BRAND_STORY_JOB = "marketingKit.brandStory";
 const AFFINITY_JOB = "marketingKit.affinity";
 const COLLECTION_STORY_JOB = "marketingKit.collectionStory";
 const CAMPAIGN_KIT_JOB = "marketingKit.campaign";
 const FESTIVE_POSTER_JOB = "marketingKit.festive";
+const CHARM_STORY_JOB = "marketingKit.charms";
+const ON_MODEL_JOB = "marketingKit.onModel";
 
 /** The writing halves both run on the reasoning model, never a picker's choice. */
 const WRITING_MODEL = "gemini-2.5-pro";
@@ -503,4 +507,70 @@ registerJobHandler(FESTIVE_POSTER_JOB, (context) => {
   });
 });
 
-module.exports = { BRAND_STORY_JOB, AFFINITY_JOB, COLLECTION_STORY_JOB, CAMPAIGN_KIT_JOB, FESTIVE_POSTER_JOB };
+/**
+ * Charm Shots: separate charm photos threaded onto one chain and photographed
+ * in a different aesthetic scene per image, as many images as were asked for.
+ * Saved in the Campaign Kit shape like Festive Poster.
+ */
+registerJobHandler(CHARM_STORY_JOB, (context) => {
+  const kitId = newKitId();
+  const options = context.data.options || {};
+
+  return runGenerationJob({
+    ...context,
+    tool: "marketing_kit",
+    buildShots: ({ data, count }) => buildCharmStoryShots(data.options || {}, data.sourceImages, count),
+    buildRefinePrompt: buildCharmStoryRefinePrompt,
+    // `mode` is what History's links reopen the run by (see workspacePathFor in frontend lib/nav.ts).
+    params: { ...options, mode: "charms", kitId: String(kitId) },
+    persist: context.data.isRefinement
+      ? undefined
+      : (run) =>
+          saveShotsKit(run, {
+            kind: "charms",
+            kitId,
+            title: `Charm Shots · ${run.data.sourceImages.length} charm${run.data.sourceImages.length === 1 ? "" : "s"}`,
+            modelImage: null,
+            sourceImages: run.data.sourceImages,
+          }),
+  });
+});
+
+/**
+ * Styled on Model: any mix of pieces — a set, pendants to layer, rings and
+ * bracelets to stack, a charm collection, or one piece — worn together by one
+ * model in a cinematic editorial shot, a different pose per image. Saved in
+ * the Campaign Kit shape like Festive Poster.
+ */
+registerJobHandler(ON_MODEL_JOB, (context) => {
+  const kitId = newKitId();
+  const options = context.data.options || {};
+
+  return runGenerationJob({
+    ...context,
+    tool: "marketing_kit",
+    buildShots: ({ data, count }) => buildOnModelShots(data.options || {}, data.sourceImages, count),
+    buildRefinePrompt: buildOnModelRefinePrompt,
+    params: { ...options, mode: "on_model", kitId: String(kitId) },
+    persist: context.data.isRefinement
+      ? undefined
+      : (run) =>
+          saveShotsKit(run, {
+            kind: "on_model",
+            kitId,
+            title: `Styled on Model · ${run.data.sourceImages.length} piece${run.data.sourceImages.length === 1 ? "" : "s"}`,
+            modelImage: null,
+            sourceImages: run.data.sourceImages,
+          }),
+  });
+});
+
+module.exports = {
+  BRAND_STORY_JOB,
+  AFFINITY_JOB,
+  COLLECTION_STORY_JOB,
+  CAMPAIGN_KIT_JOB,
+  FESTIVE_POSTER_JOB,
+  CHARM_STORY_JOB,
+  ON_MODEL_JOB,
+};

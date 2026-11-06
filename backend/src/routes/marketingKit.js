@@ -10,7 +10,16 @@ const {
   COLLECTION_STORY_JOB,
   CAMPAIGN_KIT_JOB,
   FESTIVE_POSTER_JOB,
+  CHARM_STORY_JOB,
+  ON_MODEL_JOB,
 } = require("../jobs/marketingKit");
+const { CHARM_METAL_IDS, CHARM_ASPECT_RATIOS } = require("../prompts/charmStory");
+const {
+  ON_MODEL_PIECE_TYPES,
+  ON_MODEL_ARRANGEMENTS,
+  ON_MODEL_TONES,
+  ON_MODEL_ASPECT_RATIOS,
+} = require("../prompts/onModel");
 const { BRAND_STORY_TONES, BRAND_STORY_LENGTHS } = require("../prompts/marketingKit");
 const { FESTIVE_EVENT_IDS, FESTIVE_ASPECT_RATIOS, POSTER_FONT_IDS, eventLabel } = require("../prompts/festivePoster");
 const { clampCount } = require("../jobs/generationRunner");
@@ -388,6 +397,206 @@ router.post("/festive", async (req, res) => {
       conversationId: conversationId || null,
     },
     message: `queued a ${eventLabel(options)} poster (${variations} image${variations > 1 ? "s" : ""}) on ${modelLabel}`,
+  });
+});
+
+/*
+ * ── Charm Shots ─────────────────────────────────────────────────────────────
+ * Separate charm photos → all the charms on one chain, photographed in a
+ * different aesthetic scene per image; as many images as the person asks for,
+ * and a written brief, when given, sets the scene.
+ */
+
+/** Each image is a separately charged generation — the runner's own ceiling. */
+const MAX_CHARM_IMAGES = 8;
+
+/**
+ * The number of charms varies run to run, so there is no real cap — this only
+ * guards the request size (each charm travels as a data URI).
+ */
+const MAX_CHARMS = 30;
+
+router.post("/charms", async (req, res) => {
+  const {
+    charmImages,
+    metal,
+    description,
+    aspect,
+    count,
+    model: requestedModel,
+    quality: requestedQuality,
+    refineImage,
+    instruction,
+    conversationId,
+    preview,
+  } = req.body || {};
+
+  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
+
+  if (refineImage && instruction) {
+    const parsed = parseDataUri(refineImage);
+    if (!parsed) {
+      return res.status(400).json({ status: "error", message: "refine image must be a data URI", code: "invalid" });
+    }
+    return queueGeneration(req, res, {
+      type: CHARM_STORY_JOB,
+      tool: "marketing_kit",
+      request: { provider, model, modelLabel, quality, kind: "charms", mode: "charms", isRefinement: true, conversationId: conversationId || null },
+      payload: refinementPayload(req.body, parsed),
+      message: `queued a Charm Shots retouch on ${modelLabel}`,
+    });
+  }
+
+  const pieces = parseImages(charmImages);
+  if (pieces.length === 0) {
+    return res.status(400).json({ status: "error", message: "add at least one charm photo", code: "invalid" });
+  }
+  if (pieces.length > MAX_CHARMS) {
+    return res.status(400).json({ status: "error", message: `use at most ${MAX_CHARMS} charms`, code: "too_many_items" });
+  }
+
+  const options = {
+    metal: CHARM_METAL_IDS.includes(metal) ? metal : "match",
+    // The brief, when written, sets the scene (see sceneBlock in prompts/charmStory.js).
+    description: typeof description === "string" ? description.replace(/\s+/g, " ").trim().slice(0, 1000) : "",
+    aspect: Object.hasOwn(CHARM_ASPECT_RATIOS, aspect) ? aspect : "portrait",
+  };
+  const images = Math.min(MAX_CHARM_IMAGES, clampCount(count, 1));
+
+  return queueGeneration(req, res, {
+    type: CHARM_STORY_JOB,
+    tool: "marketing_kit",
+    preview,
+    request: {
+      provider,
+      model,
+      modelLabel,
+      quality,
+      kind: "charms",
+      // What the queue rail and toasts reopen the run by (frontend lib/nav.ts workspacePathFor).
+      mode: "charms",
+      isRefinement: false,
+      jewelryCount: pieces.length,
+      aspect: options.aspect,
+      count: images,
+      conversationId: conversationId || null,
+    },
+    payload: {
+      isRefinement: false,
+      sourceImages: pieces,
+      options,
+      count: images,
+      defaultCount: 1,
+      // The frame shape itself, not only the words — see gemini generateImage.
+      aspectRatio: CHARM_ASPECT_RATIOS[options.aspect],
+      userPrompt: `Charm Shots — ${pieces.length} charm${pieces.length > 1 ? "s" : ""} on one chain${options.description ? ` — ${options.description}` : ""}`,
+      requestedModel,
+      requestedQuality,
+      conversationId: conversationId || null,
+    },
+    message: `queued Charm Shots (${images} image${images > 1 ? "s" : ""}) on ${modelLabel}`,
+  });
+});
+
+/*
+ * ── Styled on Model ─────────────────────────────────────────────────────────
+ * Any mix of pieces — a set, pendants to layer, rings and bracelets to stack,
+ * a charm collection, or one piece — worn together by one model in cinematic
+ * editorial shots, as many as the person asks for.
+ */
+
+/** Past twelve, one frame can no longer show every piece at its real size. */
+const MAX_ON_MODEL_PIECES = 12;
+/** Each image is a separately charged generation — the runner's own ceiling. */
+const MAX_ON_MODEL_IMAGES = 8;
+
+router.post("/on-model", async (req, res) => {
+  const {
+    jewelryImages,
+    types,
+    arrangement,
+    tone,
+    description,
+    aspect,
+    count,
+    model: requestedModel,
+    quality: requestedQuality,
+    refineImage,
+    instruction,
+    conversationId,
+    preview,
+  } = req.body || {};
+
+  const { provider, model, modelLabel, quality } = resolveProviderModel(requestedModel, requestedQuality);
+
+  if (refineImage && instruction) {
+    const parsed = parseDataUri(refineImage);
+    if (!parsed) {
+      return res.status(400).json({ status: "error", message: "refine image must be a data URI", code: "invalid" });
+    }
+    return queueGeneration(req, res, {
+      type: ON_MODEL_JOB,
+      tool: "marketing_kit",
+      request: { provider, model, modelLabel, quality, kind: "on_model", mode: "on_model", isRefinement: true, conversationId: conversationId || null },
+      payload: refinementPayload(req.body, parsed),
+      message: `queued a Styled on Model retouch on ${modelLabel}`,
+    });
+  }
+
+  const pieces = parseImages(jewelryImages);
+  if (pieces.length === 0) {
+    return res.status(400).json({ status: "error", message: "add at least one jewellery photo", code: "invalid" });
+  }
+  if (pieces.length > MAX_ON_MODEL_PIECES) {
+    return res.status(400).json({
+      status: "error",
+      message: `use at most ${MAX_ON_MODEL_PIECES} pieces in one look`,
+      code: "too_many_items",
+    });
+  }
+
+  const options = {
+    // Index-aligned with the photos; an unknown type is left to the photo.
+    types: pieces.map((_, i) => (ON_MODEL_PIECE_TYPES.includes(types?.[i]) ? types[i] : "auto")),
+    arrangement: ON_MODEL_ARRANGEMENTS.includes(arrangement) ? arrangement : "auto",
+    tone: ON_MODEL_TONES.includes(tone) ? tone : "warm_cinematic",
+    // The brief, when written, leads (see sceneBlock in prompts/onModel.js).
+    description: typeof description === "string" ? description.replace(/\s+/g, " ").trim().slice(0, 1000) : "",
+    aspect: Object.hasOwn(ON_MODEL_ASPECT_RATIOS, aspect) ? aspect : "portrait",
+  };
+  const images = Math.min(MAX_ON_MODEL_IMAGES, clampCount(count, 1));
+
+  return queueGeneration(req, res, {
+    type: ON_MODEL_JOB,
+    tool: "marketing_kit",
+    preview,
+    request: {
+      provider,
+      model,
+      modelLabel,
+      quality,
+      kind: "on_model",
+      mode: "on_model",
+      isRefinement: false,
+      jewelryCount: pieces.length,
+      aspect: options.aspect,
+      count: images,
+      conversationId: conversationId || null,
+    },
+    payload: {
+      isRefinement: false,
+      sourceImages: pieces,
+      options,
+      count: images,
+      defaultCount: 1,
+      // The frame shape itself, not only the words — see gemini generateImage.
+      aspectRatio: ON_MODEL_ASPECT_RATIOS[options.aspect],
+      userPrompt: `Styled on Model — ${pieces.length} piece${pieces.length > 1 ? "s" : ""}${options.description ? ` — ${options.description}` : ""}`,
+      requestedModel,
+      requestedQuality,
+      conversationId: conversationId || null,
+    },
+    message: `queued Styled on Model (${images} image${images > 1 ? "s" : ""}) on ${modelLabel}`,
   });
 });
 

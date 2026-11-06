@@ -27,22 +27,36 @@ const KIT_KIND_BY_JOB_TYPE: Record<string, MarketingKitKind> = {
   "marketingKit.campaign": "campaign",
   "marketingKit.collectionStory": "collection_story",
   "marketingKit.festive": "festive",
+  "marketingKit.charms": "charms",
+  "marketingKit.onModel": "on_model",
   "marketingKit.presentation": "presentation",
   "marketingKit.presentationEdit": "presentation",
 };
 
 /**
+ * Image kits that reopen in their page's chat — where a shot is retouched by
+ * typing — rather than in a kit view. Their pages have no kit view at all.
+ */
+const OPENS_IN_CHAT = new Set<MarketingKitKind>(["charms", "on_model"]);
+
+/**
  * Where clicking a row takes you: the run's own results.
  *
- * Marketing Kit is three pages under one tool, and each reopens a result by
+ * Marketing Kit is several pages under one tool, and most reopen a result by
  * its saved kit (`?kitId=`), not by conversation — a conversation link lands on
  * the kit picker, which shows nothing of the run. Until the kit exists (still
  * running, or it failed) the row falls back to the conversation link.
+ *
+ * Charm Shots and Styled on Model always take the conversation link, to
+ * their own page's chat. Their jobs carry their page as `mode`; one queued
+ * before that was added falls back to its kind, which names the same page.
  */
 function jobHref(job: QueuedJob, model?: string) {
   const kind = KIT_KIND_BY_JOB_TYPE[job.type];
-  if (kind && job.result?.kitId) return kitHref({ id: job.result.kitId, kind });
-  return conversationHref(job.tool, job.result?.conversationId || job.request?.conversationId, model, job.request?.mode);
+  const inChat = Boolean(kind && OPENS_IN_CHAT.has(kind));
+  if (kind && job.result?.kitId && !inChat) return kitHref({ id: job.result.kitId, kind });
+  const mode = job.request?.mode ?? (inChat ? kind : undefined);
+  return conversationHref(job.tool, job.result?.conversationId || job.request?.conversationId, model, mode);
 }
 
 /** How many finished jobs stay listed under whatever is still running. */

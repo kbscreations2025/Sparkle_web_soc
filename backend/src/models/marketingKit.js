@@ -24,7 +24,7 @@ const mongoose = require("mongoose");
  *     and lives in `campaign`.
  * Readers key off which sub-document is present, not off `kind`.
  */
-const MARKETING_KIT_TYPES = ["brand_story", "affinity", "campaign", "collection_story", "festive", "presentation"];
+const MARKETING_KIT_TYPES = ["brand_story", "affinity", "campaign", "collection_story", "festive", "presentation", "charms", "on_model"];
 const MARKETING_KIT_STATUSES = ["draft", "ready", "failed"];
 const MARKETING_KIT_IMAGE_ROLES = ["product", "sheet", "model", "upload"];
 

@@ -695,7 +695,7 @@ export function OutputFilter({
 
 /** The kit kinds, labelled as the rest of the app labels them. */
 const KIND_OPTIONS: FilterOption[] = (
-  ["brand_story", "collection_story", "campaign", "festive", "presentation"] as const
+  ["brand_story", "collection_story", "campaign", "festive", "charms", "on_model", "presentation"] as const
 ).map((kind) => ({
   id: kind,
   label: KIT_LABEL[kind],
