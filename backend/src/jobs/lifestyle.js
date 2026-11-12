@@ -49,7 +49,7 @@ registerJobHandler(LIFESTYLE_JOB, async (context) => {
     // is pulled back to that shot unless the edit asks for a colour change.
     finishRefine: ({ output, refineImage, instruction }) =>
       wantsColourChange(instruction) ? output : matchColour(output, refineImage),
-    // Which library model this run used — what an admin purge looks runs up by.
+    // Which library model this run used.
     params: { ...data.options, ...(data.modelRef ? { modelId: data.modelRef.id } : {}) },
   });
 });

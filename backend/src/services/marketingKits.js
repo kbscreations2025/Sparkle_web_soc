@@ -218,8 +218,8 @@ async function saveCampaignKit({
   title,
   /**
    * A library model, kept as a pointer to its photo rather than a copy —
-   * see routes/baseModel.js. An admin purge of the model swaps the url for
-   * "model removed" (services/lifestyleModels.js `purgeModel`).
+   * see routes/baseModel.js. Models are only ever soft-deleted, so the photo
+   * it points at stays.
    */
   modelRef = null,
 }) {

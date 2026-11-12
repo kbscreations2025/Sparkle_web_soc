@@ -1,18 +1,9 @@
 const mongoose = require("mongoose");
 const LifestyleModel = require("../models/lifestyleModel");
 const { uploadLibraryImage } = require("../storage/libraryImage");
-const { getObject, deleteObject, variantKeyFor } = require("../storage/r2");
-const { THUMB_EXTENSION } = require("../storage/thumbnail");
+const { getObject } = require("../storage/r2");
 const { parseDataUri } = require("../generationService");
 const { hasPermission } = require("../permissions");
-const Generation = require("../models/generation");
-const MarketingKit = require("../models/marketingKit");
-
-/**
- * Shown in place of a model photo an admin has purged — in History, the chat
- * and Campaign Kits. Served by the frontend (public/model-removed.svg).
- */
-const MODEL_REMOVED_URL = "/model-removed.svg";
 
 const MIME_BY_EXTENSION = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
 
@@ -170,10 +161,10 @@ async function setModelPublic({ dbUser, id, isPublic }) {
 }
 
 /**
- * Soft delete: out of every picker, but the photo stays — past Lifestyle and
- * Campaign Kit runs point at it (`params.modelId`) and still show it. Any
- * future storage sweep must leave a model's photo alone while a run refers to
- * it; `purgeModel` is the one path that really removes it.
+ * Soft delete, and the only delete there is: out of every picker, but the
+ * record and photo stay — past Lifestyle and Campaign Kit runs point at them
+ * (`params.modelId`) and still show them. Never hard-delete a model or its
+ * photo, and any future storage sweep must leave model photos alone.
  *
  * The creator, or an admin — who is the one who shared a model with the whole
  * organization in the first place, and so has to be able to take it back out
@@ -237,51 +228,12 @@ async function loadModelImage(ref) {
   return { mimeType: mimeForKey(ref.r2Key), base64: buffer.toString("base64") };
 }
 
-/**
- * Hard delete, admins only — for a photo that must really go (a real person
- * asked for theirs to be removed). Deletes the photo and its thumbnail from
- * R2 and swaps it for "model removed" in every run and Campaign Kit that
- * pointed at it. Runs from before model references (which kept their own
- * copy) are not touched.
- */
-async function purgeModel({ dbUser, id }) {
-  if (!mongoose.Types.ObjectId.isValid(id)) return null;
-  const row = await LifestyleModel.findOne({ _id: id, tenantId: dbUser.tenantId, purgedAt: null });
-  if (!row) return null;
-
-  // The photo and the thumbnail written beside it (see storage/libraryImage.js).
-  const keys = [row.r2Key, variantKeyFor(row.r2Key, "thumb", THUMB_EXTENSION)];
-  for (const key of keys) {
-    await deleteObject(key).catch((err) => console.error(`[lifestyle-models] could not delete ${key}:`, err.message));
-  }
-
-  const modelId = row._id;
-  await Generation.updateMany(
-    { tenantId: dbUser.tenantId, "request.inputAssets.assetId": modelId },
-    { $set: { "request.inputAssets.$[m].url": MODEL_REMOVED_URL, "request.inputAssets.$[m].thumbnailUrl": MODEL_REMOVED_URL } },
-    { arrayFilters: [{ "m.assetId": modelId, "m.role": "model" }] }
-  );
-  await MarketingKit.updateMany(
-    { tenantId: dbUser.tenantId, "campaign.modelImage.r2Key": row.r2Key },
-    { $set: { "campaign.modelImage.url": MODEL_REMOVED_URL, "campaign.modelImage.thumbnailUrl": MODEL_REMOVED_URL } }
-  );
-
-  row.purgedAt = new Date();
-  row.deletedAt = row.deletedAt || row.purgedAt;
-  row.status = "archived";
-  row.imageUrl = MODEL_REMOVED_URL;
-  row.thumbnailUrl = MODEL_REMOVED_URL;
-  await row.save();
-  return toPublicModel(row, dbUser);
-}
-
 module.exports = {
   listModels,
   createModel,
   renameModel,
   setModelPublic,
   deleteModel,
-  purgeModel,
   findUsableModel,
   toModelRef,
   modelPointer,

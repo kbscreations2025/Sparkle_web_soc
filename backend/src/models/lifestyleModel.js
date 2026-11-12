@@ -50,14 +50,6 @@ const lifestyleModelSchema = new mongoose.Schema(
     presetNumber: { type: Number, default: null },
 
     /**
-     * Hard delete, by an admin, of a photo that must really go (a real
-     * person's picture they asked to have removed). The R2 objects are deleted
-     * and every run that pointed at it shows "model removed" instead. A plain
-     * delete only sets `deletedAt` and keeps the photo, so past runs still show it.
-     */
-    purgedAt: { type: Date, default: null },
-
-    /**
      * Visible to everyone in the organization rather than only its creator.
      * Only an org admin may set it — a model is a photograph of a person, so
      * sharing one is a decision, not a convenience.

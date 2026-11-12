@@ -3,7 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { ChevronDown, ChevronUp, Eraser, Globe, Loader2, Lock, type LucideIcon, Maximize2, MoreVertical, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Globe, Loader2, Lock, type LucideIcon, Maximize2, MoreVertical, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
 import { Chip } from "./OptionChips";
 import { Lightbox } from "./Lightbox";
 import { ConfirmDialog } from "./ToolChrome";
@@ -61,8 +61,6 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
   const [confirming, setConfirming] = useState<{ id: string; name: string; share: boolean } | null>(null);
   /** A pending delete, held until it is confirmed — one stray click used to remove a model from everyone's picker. */
   const [deleting, setDeleting] = useState<{ id: string; name: string; owner: string | null } | null>(null);
-  /** A pending permanent removal (admins) — the photo itself, for a person who asked to be taken down. */
-  const [purging, setPurging] = useState<{ id: string; name: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   /**
    * Shown before the file picker: a model photo with jewellery already on
@@ -154,7 +152,6 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
                 : undefined
             }
             onDelete={isAdmin ? () => setDeleting({ id: model.id, name: model.name, owner: model.isOwn ? null : model.userName }) : undefined}
-            onPurge={isAdmin ? () => setPurging({ id: model.id, name: model.name }) : undefined}
           />
         ))}
 
@@ -239,20 +236,6 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
           onConfirm={() => {
             library.remove(deleting.id);
             setDeleting(null);
-          }}
-        />
-      )}
-
-      {purging && (
-        <ConfirmDialog
-          title="Remove this photo permanently?"
-          body={`${purging.name}'s photo will be deleted for good — use this when a person has asked for their picture to be taken down. Past results that used it will show "model removed" instead. This can't be undone.`}
-          confirmLabel="Remove permanently"
-          danger
-          onCancel={() => setPurging(null)}
-          onConfirm={() => {
-            library.remove(purging.id, { purge: true });
-            setPurging(null);
           }}
         />
       )}
@@ -418,7 +401,6 @@ function ModelTile({
   onRenamed,
   onShare,
   onDelete,
-  onPurge,
 }: {
   /** Extra classes for the tile's <li> — how the grid folds it past two rows. */
   className?: string;
@@ -438,8 +420,6 @@ function ModelTile({
   /** Omitted for anyone who may not share — see `canShare`. */
   onShare?: () => void;
   onDelete?: () => void;
-  /** Admins only: delete the photo itself, not just the library entry. */
-  onPurge?: () => void;
 }) {
   return (
     <li className={cn("group relative", className)}>
@@ -561,7 +541,6 @@ function ModelTile({
               onClick: onShare,
             },
             onDelete && { icon: Trash2, label: "Delete", onClick: onDelete, danger: true },
-            onPurge && { icon: Eraser, label: "Remove photo permanently", onClick: onPurge, danger: true },
           ]}
         />
       )}
@@ -569,9 +548,7 @@ function ModelTile({
       {(onPreview || onDelete) && (
         <div className="absolute right-1 top-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/60 p-0.5 opacity-0 backdrop-blur-sm transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:hidden">
           {onPreview && <TileAction icon={Maximize2} label={`Preview ${label}`} onClick={onPreview} />}
-          {onDelete && <TileAction icon={Trash2} label={`Delete ${label}`} onClick={onDelete} danger />}
-          {onPurge && <TileAction icon={Eraser} label={`Remove ${label}'s photo permanently`} onClick={onPurge} danger />}
-        </div>
+          {onDelete && <TileAction icon={Trash2} label={`Delete ${label}`} onClick={onDelete} danger />}        </div>
       )}
     </li>
   );

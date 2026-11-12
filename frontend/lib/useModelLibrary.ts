@@ -191,12 +191,11 @@ export function useModelLibrary() {
   }, []);
 
   /**
-   * Deletes a model from every picker — past runs keep showing it. With
-   * `purge` (admins only) the photo itself is removed too, and past runs show
-   * "model removed".
+   * Deletes a model from every picker. It's a soft delete: the record and
+   * photo stay, so past runs keep showing it.
    */
-  const remove = useCallback(async (id: string, options: { purge?: boolean } = {}) => {
-    const res = await deleteLifestyleModel(id, options);
+  const remove = useCallback(async (id: string) => {
+    const res = await deleteLifestyleModel(id);
     if (res.status === "success") {
       setModels((current) => {
         const next = current.filter((entry) => entry.id !== id);

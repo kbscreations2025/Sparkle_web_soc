@@ -1392,13 +1392,11 @@ export function updateLifestyleModel(id: string, patch: { name?: string; isPubli
 }
 
 /**
- * Takes a model out of every picker. Past runs keep showing it. `purge`
- * (admins only) really removes the photo — for a real person's picture they
- * asked to have taken down — and past runs show "model removed" instead.
+ * Takes a model out of every picker. A soft delete — the record and photo
+ * are never removed, so past runs keep showing it.
  */
-export function deleteLifestyleModel(id: string, options: { purge?: boolean } = {}) {
-  const query = options.purge ? "?purge=true" : "";
-  return apiRequest<{ model?: LifestyleModel }>(`/api/lifestyle/models/${id}${query}`, { method: "DELETE" });
+export function deleteLifestyleModel(id: string) {
+  return apiRequest<{ model?: LifestyleModel }>(`/api/lifestyle/models/${id}`, { method: "DELETE" });
 }
 
 /** Generates a new model from the builder's attributes. Queued — it's a model call. */

@@ -47,16 +47,18 @@ Every small part of the piece stays sharp, defined and exactly where it is:
 - fine jewellery edges and precise contours — the exact outline of every part;
 - small structural transitions — where the band meets the head, prongs meet the setting, or one part joins another — clean and defined, never blurred, melted or merged together.
 
-6. DIAMONDS — SHINY, NATURAL AND REALISTIC
+6. DIAMONDS — BRILLIANT, NATURAL AND REALISTIC
 Diamond enhancement is required, not optional: every diamond must look clearly sharper and more brilliant than in the input. Soft, foggy, grey, milky or blurry stones are a failure.
 - Ice-white, high-clarity stones with razor-sharp facet edges.
-- Strong contrast inside each stone: bright white facets against crisp dark facets, the classic brilliant-cut pattern.
-- Several small, bright, pin-point reflections on each stone so it visibly sparkles — the centre stone strongest, every side and pavé stone bright too.
+- Strong contrast inside each stone: bright white facets against crisp dark facets, the classic brilliant-cut pattern — the centre stone brightest, every side and pavé stone bright too.
+- The brilliance comes only from the facets themselves: bright facets and small, sharp reflections that sit inside the facet pattern and stay inside the outline of the stone.
 - Prongs crisp and polished around each stone.
-Keep it natural and photographic — real diamond optics, the way a macro lens sees them: no cartoon starbursts, no glitter, no large lens flare, no glow halo around the stones. Coloured or black stones keep their exact original colour, only cleaner, sharper and more lustrous.
+Coloured or black stones keep their exact original colour, only cleaner, sharper and more lustrous.
+
+NO ADDED SPARKLE EFFECTS. Nothing is drawn on top of the photograph: no star, cross or four-point twinkle shapes, no light rays or spikes coming out of a stone or off the metal, no glints floating over the metal or the background, no glitter, no lens flare, no glow or halo. A real camera does not record these; they make the photo look AI-generated. If the input photo already has any of them painted on (a sparkle brush, twinkle stars over the stones or metal), remove them and restore the real stone or metal underneath. The stones should look exactly as they do in a real macro photograph retouched by hand by a studio retoucher.
 
 7. FINISH
-Pin-sharp, high-resolution macro product photo in bright, professional jewellery-studio lighting: metal and diamonds shiny but natural and realistic, with high micro-contrast and no artefacts, halos or oversharpening. Output: the same piece, cleaned and polished, in the exact metal tones above, with brilliant sharp diamonds, crisp fine detail and a soft contact shadow, on the same pure white background — ready to upload to an e-commerce listing as it is.
+Pin-sharp, high-resolution macro product photo in bright, professional jewellery-studio lighting: metal and diamonds shiny but natural and realistic, with high micro-contrast and no artefacts, halos, twinkle stars or oversharpening. It must read as a real photograph cleaned by hand by a studio team, not a render. Output: the same piece, cleaned and polished, in the exact metal tones above, with brilliant sharp diamonds, crisp fine detail and a soft contact shadow, on the same pure white background — ready to upload to an e-commerce listing as it is.
 `;
 
 /**

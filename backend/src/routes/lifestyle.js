@@ -88,20 +88,7 @@ router.patch("/models/:id", requireAnyPermission(MODEL_LIBRARY_PERMISSIONS), asy
 
 router.delete("/models/:id", requireAnyPermission(MODEL_LIBRARY_PERMISSIONS), async (req, res, next) => {
   try {
-    /*
-     * `?purge=true`: really remove the photo (admins only) — for a real
-     * person's picture they asked to have taken down. Past runs show "model
-     * removed" instead. A plain delete keeps the photo for past runs.
-     */
-    if (req.query.purge === "true") {
-      if (!isAdmin(req)) {
-        return res.status(403).json({ status: "error", message: "only an admin can permanently remove a model", code: "forbidden" });
-      }
-      const purged = await models.purgeModel({ dbUser: req.dbUser, id: req.params.id });
-      if (!purged) return res.status(404).json({ status: "error", message: "model not found", code: "not_found" });
-      return res.json({ status: "success", model: purged });
-    }
-
+    // Always a soft delete — the record and photo stay for past runs.
     const model = await models.deleteModel({
       dbUser: req.dbUser,
       id: req.params.id,
