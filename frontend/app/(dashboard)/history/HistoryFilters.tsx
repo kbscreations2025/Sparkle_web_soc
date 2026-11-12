@@ -1,18 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CalendarRange,
-  ChevronDown,
-  Film,
-  Loader2,
-  type LucideIcon,
-  MoreHorizontal,
-  Search,
-  SlidersHorizontal,
-  Users,
-  X,
-} from "lucide-react";
+import { CalendarRange, ChevronDown, Film, Loader2, type LucideIcon, MoreHorizontal, Search, SlidersHorizontal, Users, X } from "lucide-react";
 import { TOOLS } from "@/lib/nav";
 import { KIT_LABEL } from "@/lib/marketingKits";
 import { useDismissable } from "@/lib/useEscapeKey";

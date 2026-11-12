@@ -84,6 +84,14 @@ async function recordGeneration({
    */
   inputImages,
   /**
+   * Inputs that already live somewhere permanent and are recorded by
+   * reference, not uploaded again — a Lifestyle or Campaign Kit model photo
+   * from the library. Ready-made snapshots (`assetId` is the library row's
+   * id; there is no Asset behind it), listed first, as the model always was.
+   * Not in `inputAssetIds`, so deleting this run never deletes the photo.
+   */
+  inputPointers = [],
+  /**
    * Same shape, and not necessarily images: a `video/*` mime is written as a
    * video asset (see `createAsset`). May be empty for a tool whose output is
    * text — Image to Text and the writing halves of Marketing Kit record the
@@ -184,7 +192,7 @@ async function recordGeneration({
       finalPrompt: prompt,
       params: { quality, ...params },
       inputAssetIds: inputAssets.map((entry) => entry.asset._id),
-      inputAssets: inputAssets.map((entry) => entry.snapshot),
+      inputAssets: [...inputPointers, ...inputAssets.map((entry) => entry.snapshot)],
     },
     response: {
       outputAssetIds: outputAssets.map((entry) => entry.asset._id),

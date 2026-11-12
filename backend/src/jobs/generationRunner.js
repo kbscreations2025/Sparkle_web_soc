@@ -309,6 +309,8 @@ async function runGenerationJob({
     // is which: Lifestyle's first image is the model and the rest are the
     // pieces, and recording all of them as "uploaded" would lose that.
     inputImages: sourceImages.map((image, index) => ({ image, role: data.sourceRoles?.[index] || "uploaded" })),
+    // A library model photo, recorded by reference rather than uploaded again.
+    inputPointers: data.inputPointers ?? [],
     outputImages: successes.map((entry) => ({ image: entry.output, role: "generated" })),
     // One provider serves a whole run; the first success stands in for all of them.
     providerId: successes[0].providerId,

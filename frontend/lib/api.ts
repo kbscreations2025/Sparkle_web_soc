@@ -1372,21 +1372,6 @@ export type LifestyleModel = {
   createdAt: string;
 };
 
-/**
- * The mannequins that ship with the app, for someone who hasn't made a model
- * of their own. The images are served from `public/`, but a run refers to
- * one by number — the backend reads its own copy off disk rather than
- * trusting the browser for what "preset 4" is.
- *
- * The numbers are not positions and are deliberately not renumbered when
- * the list changes: they are what a run records, so renumbering would make
- * an old generation's stored request point at a different person.
- */
-export const LIFESTYLE_PRESETS = [
-  { number: 4, src: "/lifestyle-presets/model_4.jpg" },
-  { number: 5, src: "/lifestyle-presets/model_5.jpg" },
-] as const;
-
 export function listLifestyleModels() {
   return apiRequest<{ models?: LifestyleModel[] }>("/api/lifestyle/models");
 }
@@ -1406,8 +1391,14 @@ export function updateLifestyleModel(id: string, patch: { name?: string; isPubli
   });
 }
 
-export function deleteLifestyleModel(id: string) {
-  return apiRequest<{ model?: LifestyleModel }>(`/api/lifestyle/models/${id}`, { method: "DELETE" });
+/**
+ * Takes a model out of every picker. Past runs keep showing it. `purge`
+ * (admins only) really removes the photo — for a real person's picture they
+ * asked to have taken down — and past runs show "model removed" instead.
+ */
+export function deleteLifestyleModel(id: string, options: { purge?: boolean } = {}) {
+  const query = options.purge ? "?purge=true" : "";
+  return apiRequest<{ model?: LifestyleModel }>(`/api/lifestyle/models/${id}${query}`, { method: "DELETE" });
 }
 
 /** Generates a new model from the builder's attributes. Queued — it's a model call. */
@@ -1425,8 +1416,8 @@ export function generateLifestyleModel(body: {
 /**
  * Places jewellery onto a model.
  *
- * Exactly one of `modelNumber` (a preset), `modelId` (one from the library)
- * or `modelImage` (a fresh upload) names who wears it.
+ * `modelId` (one from the library — Model 4 and 5 included) names who wears
+ * it; `modelImage` only for a fresh upload whose save to the library failed.
  */
 /** `w`/`h` draw the shape on the chip, same convention as `VIDEO_ASPECTS`. */
 export const LIFESTYLE_ASPECTS = [
@@ -1439,7 +1430,6 @@ export type LifestyleAspectId = (typeof LIFESTYLE_ASPECTS)[number]["id"];
 export const DEFAULT_LIFESTYLE_ASPECT: LifestyleAspectId = "4:5";
 
 export function lifestyle(body: {
-  modelNumber?: number;
   modelId?: string;
   modelImage?: string;
   /** Every piece to place, as data URIs. More than one is worn as a set. */
@@ -1882,7 +1872,6 @@ export const refineStyledOnModel = refineOn<string>("/api/marketing-kit/on-model
 
 /** Four shots in one run — two of the piece worn, two of it alone. */
 export function campaignKit(body: {
-  modelNumber?: number;
   modelId?: string;
   modelImage?: string;
   jewelryImages: string[];

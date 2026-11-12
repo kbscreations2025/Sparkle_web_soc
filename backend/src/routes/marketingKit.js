@@ -3,7 +3,7 @@ const { requireAuth, requirePermission } = require("../middleware/auth");
 const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri } = require("../generationService");
 const { queueGeneration, parseImages, refinementPayload } = require("./queueGeneration");
-const { resolveBaseModel } = require("./baseModel");
+const { resolveBaseModel, modelPayload } = require("./baseModel");
 const {
   BRAND_STORY_JOB,
   AFFINITY_JOB,
@@ -187,7 +187,6 @@ router.post("/campaign", async (req, res) => {
   const {
     modelImage,
     modelId,
-    modelNumber,
     jewelryImages,
     description,
     boxStyles,
@@ -236,7 +235,7 @@ router.post("/campaign", async (req, res) => {
 
   let baseModel;
   try {
-    baseModel = await resolveBaseModel({ dbUser: req.dbUser, modelNumber, modelId, modelImage });
+    baseModel = await resolveBaseModel({ dbUser: req.dbUser, modelId, modelImage });
   } catch (err) {
     return res.status(400).json({ status: "error", message: err.message, code: "invalid" });
   }
@@ -268,9 +267,13 @@ router.post("/campaign", async (req, res) => {
     },
     payload: {
       isRefinement: false,
-      // The model first, the pieces after — the shot builder splits on that.
-      sourceImages: [baseModel, ...jewelryList],
-      sourceRoles: ["uploaded", ...jewelryList.map(() => "reference")],
+      // The pieces, plus the model by reference (read when the job runs) — or,
+      // for an upload still saving to the library, its photo first, which is
+      // what the shot builder splits on (see jobs/marketingKit.js).
+      ...modelPayload(baseModel, jewelryList),
+      sourceRoles: baseModel.ref
+        ? jewelryList.map(() => "reference")
+        : ["model", ...jewelryList.map(() => "reference")],
       options,
       userPrompt: description || null,
       requestedModel,

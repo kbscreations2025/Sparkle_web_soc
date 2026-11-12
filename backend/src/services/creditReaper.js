@@ -1,5 +1,6 @@
 const Job = require("../models/job");
 const credit = require("./credits");
+const { getQueueForType } = require("../queue");
 
 /**
  * Closes out runs the last worker left unfinished. Runs once, at worker
@@ -25,10 +26,36 @@ const credit = require("./credits");
  * `queued` jobs are left alone: they are waiting in Redis and this worker is
  * about to pick them up.
  *
- * Assumes one worker. With several replicas, a starting replica would end
- * runs another, healthy replica is still working on.
+ * ONLY ITS OWN JOBS. Production and every developer's machine each have their
+ * own Redis, but they can share one MongoDB. A local `npm run dev` restart
+ * used to end every `running` job in that database — production's live runs
+ * included, on every backend file save (29 colleagues' runs on 2026-11-06).
+ * So a running job is closed only when this worker's own queue holds it
+ * (BullMQ's job id is the Mongo id), or when it has been running far longer
+ * than any run can take — an orphan, whoever owned it.
+ *
+ * Still assumes one worker per Redis: two replicas on the same queue would
+ * end each other's runs at startup.
  */
 const INTERRUPTED_MESSAGE = "Interrupted — the server restarted during this run. Your credits were returned.";
+
+/** No run lasts this long; a job "running" past it has no worker left, whoever owned it. */
+const ORPHANED_AFTER_MS = 2 * 60 * 60 * 1000;
+
+/** A hold closed this recently may still be settling on the deployment that ran it. */
+const SETTLING_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * Whether this worker's own queue knows the job. Unsure (Redis unreachable)
+ * counts as no: leaving a run alone is recoverable, killing someone's is not.
+ */
+async function inOwnQueue(job) {
+  try {
+    return Boolean(await getQueueForType(job.type).getJob(String(job._id)));
+  } catch {
+    return false;
+  }
+}
 
 async function closeInterruptedJobs() {
   const jobs = await Job.find({
@@ -39,9 +66,25 @@ async function closeInterruptedJobs() {
   }).exec();
 
   let closed = 0;
+  let skipped = 0;
+  const now = Date.now();
+
   for (const job of jobs) {
     try {
       const interrupted = job.status === "running";
+
+      if (interrupted) {
+        const started = (job.startedAt || job.createdAt)?.getTime?.() ?? now;
+        const orphaned = now - started > ORPHANED_AFTER_MS;
+        if (!orphaned && !(await inOwnQueue(job))) {
+          skipped += 1;
+          continue;
+        }
+      } else if (job.updatedAt && now - job.updatedAt.getTime() < SETTLING_GRACE_MS) {
+        skipped += 1;
+        continue;
+      }
+
       const holdOpen = job.credits?.held > 0 && !job.credits.settled;
 
       if (holdOpen) {
@@ -67,6 +110,7 @@ async function closeInterruptedJobs() {
   }
 
   if (closed > 0) console.log(`[credits] closed ${closed} unfinished job(s) from before the restart`);
+  if (skipped > 0) console.log(`[credits] left ${skipped} job(s) another worker may still be running`);
   return closed;
 }
 

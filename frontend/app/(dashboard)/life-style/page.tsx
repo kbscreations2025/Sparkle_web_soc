@@ -87,7 +87,7 @@ export default function LifeStylePage() {
   }
 
   async function handleGenerate() {
-    if (jewelry.length === 0 || !library.choice) return;
+    if (jewelry.length === 0 || !library.choice || library.saving) return;
 
     const chosenPlacement = resolvePlacement(category, spot);
     const chosenPose = POSES.find((entry) => entry.id === pose);
@@ -143,7 +143,8 @@ export default function LifeStylePage() {
     );
   }
 
-  const ready = jewelry.length > 0 && Boolean(library.choice);
+  // Waits for an uploaded model photo to finish saving, so the run names it by id rather than carrying a copy.
+  const ready = jewelry.length > 0 && Boolean(library.choice) && !library.saving;
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
@@ -218,7 +219,7 @@ export default function LifeStylePage() {
             />
 
             <RunButton onClick={handleGenerate} disabled={!ready} icon={<Sparkles size={14} />}>
-              {ready ? "Place on the model" : "Pick a model and a piece"}
+              {library.saving ? "Saving your model photo…" : ready ? "Place on the model" : "Pick a model and a piece"}
             </RunButton>
           </div>
         </div>

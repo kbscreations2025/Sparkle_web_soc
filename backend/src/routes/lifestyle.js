@@ -3,7 +3,7 @@ const { requireAuth, requirePermission, requireAnyPermission } = require("../mid
 const { resolveProviderModel } = require("../aiRouting");
 const { parseDataUri } = require("../generationService");
 const { queueGeneration, parseImages, refinementPayload } = require("./queueGeneration");
-const { resolveBaseModel } = require("./baseModel");
+const { resolveBaseModel, modelPayload } = require("./baseModel");
 const { LIFESTYLE_JOB, LIFESTYLE_MODEL_JOB } = require("../jobs/lifestyle");
 const models = require("../services/lifestyleModels");
 
@@ -88,6 +88,20 @@ router.patch("/models/:id", requireAnyPermission(MODEL_LIBRARY_PERMISSIONS), asy
 
 router.delete("/models/:id", requireAnyPermission(MODEL_LIBRARY_PERMISSIONS), async (req, res, next) => {
   try {
+    /*
+     * `?purge=true`: really remove the photo (admins only) — for a real
+     * person's picture they asked to have taken down. Past runs show "model
+     * removed" instead. A plain delete keeps the photo for past runs.
+     */
+    if (req.query.purge === "true") {
+      if (!isAdmin(req)) {
+        return res.status(403).json({ status: "error", message: "only an admin can permanently remove a model", code: "forbidden" });
+      }
+      const purged = await models.purgeModel({ dbUser: req.dbUser, id: req.params.id });
+      if (!purged) return res.status(404).json({ status: "error", message: "model not found", code: "not_found" });
+      return res.json({ status: "success", model: purged });
+    }
+
     const model = await models.deleteModel({
       dbUser: req.dbUser,
       id: req.params.id,
@@ -123,7 +137,6 @@ router.post("/model", requireAnyPermission(MODEL_LIBRARY_PERMISSIONS), async (re
 
 router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
   const {
-    modelNumber,
     modelImage,
     modelId,
     jewelryImage,
@@ -190,12 +203,11 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     return res.status(400).json({ status: "error", message: "at least one jewellery photo is required", code: "invalid" });
   }
 
-  // Three ways to name a model, resolved to bytes here so the worker only
-  // ever deals in images: one of the built-in presets, a saved model from
-  // the library, or a photo uploaded with the request.
+  // A library model (recorded by reference, read when the job runs) or a
+  // photo sent with the request (still saving to the library) — see baseModel.js.
   let baseModel;
   try {
-    baseModel = await resolveBaseModel({ dbUser: req.dbUser, modelNumber, modelId, modelImage });
+    baseModel = await resolveBaseModel({ dbUser: req.dbUser, modelId, modelImage });
   } catch (err) {
     return res.status(400).json({ status: "error", message: err.message, code: "invalid" });
   }
@@ -227,8 +239,10 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     },
     payload: {
       isRefinement: false,
-      // The model first, the pieces after — the order both prompts describe.
-      sourceImages: [baseModel, ...jewelryList],
+      // The pieces, plus the model by reference (or, for an upload, its photo
+      // first). The job puts the model first — the order both prompts describe.
+      ...modelPayload(baseModel, jewelryList),
+      sourceRoles: baseModel.ref ? undefined : ["model"],
       jewelryCount: jewelryList.length,
       // The frame shape the user actually picked — sent to the provider
       // directly (see `generationRunner`), not left to the prompt text alone.

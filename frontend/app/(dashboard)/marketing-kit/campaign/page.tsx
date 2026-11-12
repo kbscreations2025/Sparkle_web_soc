@@ -99,7 +99,7 @@ function CampaignKitWorkspace() {
   }
 
   async function handleGenerate() {
-    if (jewelry.length === 0 || !library.choice) return;
+    if (jewelry.length === 0 || !library.choice || library.saving) return;
 
     const preview = await makeThumbnail(jewelry[0].dataUrl);
 
@@ -156,7 +156,8 @@ function CampaignKitWorkspace() {
     );
   }
 
-  const ready = jewelry.length > 0 && Boolean(library.choice);
+  // Waits for an uploaded model photo to finish saving, so the run names it by id rather than carrying a copy.
+  const ready = jewelry.length > 0 && Boolean(library.choice) && !library.saving;
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
@@ -219,7 +220,7 @@ function CampaignKitWorkspace() {
             />
 
             <RunButton onClick={handleGenerate} disabled={!ready} icon={<Newspaper size={14} />}>
-              {ready ? "Shoot the kit · 4 images" : "Pick a model and a piece"}
+              {library.saving ? "Saving your model photo…" : ready ? "Shoot the kit · 4 images" : "Pick a model and a piece"}
             </RunButton>
           </div>
         </div>

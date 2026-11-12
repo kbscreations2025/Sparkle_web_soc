@@ -2,15 +2,7 @@
 
 import { memo, useCallback, useRef, useState } from "react";
 import Link from "next/link";
-import {
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  ImageIcon,
-  Loader2,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, ImageIcon, Loader2, TriangleAlert, X } from "lucide-react";
 import type { MarketingKitKind, QueuedJob } from "@/lib/api";
 import { describeJob, useNow } from "@/lib/job-progress";
 import { useCancelJob, useJobs, useQueueList } from "@/lib/jobs-context";

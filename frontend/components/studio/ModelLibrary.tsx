@@ -3,13 +3,13 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { ChevronDown, ChevronUp, Globe, Loader2, Lock, type LucideIcon, Maximize2, MoreVertical, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Eraser, Globe, Loader2, Lock, type LucideIcon, Maximize2, MoreVertical, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
 import { Chip } from "./OptionChips";
 import { Lightbox } from "./Lightbox";
 import { ConfirmDialog } from "./ToolChrome";
 import { useAuth } from "@/lib/auth-context";
 import { doubleTap } from "@/lib/doubleTap";
-import { LIFESTYLE_PRESETS, type LifestyleModel } from "@/lib/api";
+import type { LifestyleModel } from "@/lib/api";
 import { MODEL_ATTRS, outfitsFor } from "@/lib/lifestyleOptions";
 import type { ModelLibraryState } from "@/lib/useModelLibrary";
 import { useEscapeKey } from "@/lib/useEscapeKey";
@@ -42,9 +42,9 @@ function seeAllVisibility(tileCount: number) {
 }
 
 /**
- * The model picker: the built-in mannequins, this organization's saved
- * models, and the two ways to add one — upload a photo, or describe a person
- * and have one generated.
+ * The model picker: this organization's saved models (the old built-in
+ * Model 4 and 5 are shared library models now), and the two ways to add one —
+ * upload a photo, or describe a person and have one generated.
  *
  * Shared by Lifestyle and Campaign Kit. The state lives in
  * `useModelLibrary`; this is only how it looks.
@@ -61,6 +61,8 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
   const [confirming, setConfirming] = useState<{ id: string; name: string; share: boolean } | null>(null);
   /** A pending delete, held until it is confirmed — one stray click used to remove a model from everyone's picker. */
   const [deleting, setDeleting] = useState<{ id: string; name: string; owner: string | null } | null>(null);
+  /** A pending permanent removal (admins) — the photo itself, for a person who asked to be taken down. */
+  const [purging, setPurging] = useState<{ id: string; name: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   /**
    * Shown before the file picker: a model photo with jewellery already on
@@ -69,7 +71,7 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
    */
   const [uploadNotice, setUploadNotice] = useState(false);
 
-  const { choice, setChoice, models, generating, pendingJob } = library;
+  const { choice, setChoice, models, generating, pendingJob, loaded } = library;
 
   /*
    * Two rows until asked for more: the library grows with every model anyone
@@ -77,9 +79,9 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
    * and the placement out of sight.
    */
   const [showAll, setShowAll] = useState(false);
-  // The add tile, the one being built, the presets, then the saved models.
-  const tileCount = 1 + (generating ? 1 : 0) + LIFESTYLE_PRESETS.length + models.length;
-  const firstModelPosition = 1 + (generating ? 1 : 0) + LIFESTYLE_PRESETS.length;
+  // The add tile, the one being built, then the saved models.
+  const tileCount = 1 + (generating ? 1 : 0) + models.length;
+  const firstModelPosition = 1 + (generating ? 1 : 0);
   /** Whether a tile at `position` (0-based, in grid order) is folded away right now. */
   const foldClass = (position: number, active: boolean) => (showAll || active ? undefined : beyondTwoRows(position));
 
@@ -125,24 +127,6 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
             the queue, so this survives nothing but a page leave. */}
         {generating && <PendingModelTile percent={pendingJob?.progress ?? 0} />}
 
-        {LIFESTYLE_PRESETS.map((preset, index) => (
-          <ModelTile
-            key={`preset-${preset.number}`}
-            className={foldClass(
-              1 + (generating ? 1 : 0) + index,
-              choice?.kind === "preset" && choice.number === preset.number
-            )}
-            src={preset.src}
-            label={`Model ${preset.number}`}
-            active={choice?.kind === "preset" && choice.number === preset.number}
-            onSelect={() => setChoice({ kind: "preset", number: preset.number, src: preset.src })}
-            onPreview={() => {
-              setPreviewModel(null);
-              setPreview(preset.src);
-            }}
-          />
-        ))}
-
         {models.map((model, index) => (
           <ModelTile
             key={model.id}
@@ -170,11 +154,21 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
                 : undefined
             }
             onDelete={isAdmin ? () => setDeleting({ id: model.id, name: model.name, owner: model.isOwn ? null : model.userName }) : undefined}
+            onPurge={isAdmin ? () => setPurging({ id: model.id, name: model.name }) : undefined}
           />
         ))}
 
+        {/* Nothing to pick yet — a new organization, or every model deleted. */}
+        {loaded && models.length === 0 && !generating && choice?.kind !== "upload" && (
+          <li className="col-span-2 flex aspect-[3/2] items-center rounded-lg border border-white/[0.08] bg-white/[0.02] p-3 sm:col-span-3">
+            <p className="text-[11px] leading-relaxed text-faint">
+              No models yet. Upload a photo of a person or build one — it&apos;s saved here for every shot after.
+            </p>
+          </li>
+        )}
+
         {choice?.kind === "upload" && (
-          <ModelTile src={choice.src} label="Just uploaded" active onSelect={() => undefined} />
+          <ModelTile src={choice.src} label={library.saving ? "Saving…" : "Just uploaded"} active onSelect={() => undefined} />
         )}
       </ul>
 
@@ -238,13 +232,27 @@ export function ModelLibrary({ library }: { library: ModelLibraryState }) {
       {deleting && (
         <ConfirmDialog
           title="Delete this model?"
-          body={`${deleting.name}${deleting.owner ? ` (${deleting.owner}'s model)` : ""} will be removed from the model library and from everyone's picker.`}
+          body={`${deleting.name}${deleting.owner ? ` (${deleting.owner}'s model)` : ""} will be removed from the model library and from everyone's picker. Past results that used it keep showing it.`}
           confirmLabel="Yes, delete"
           danger
           onCancel={() => setDeleting(null)}
           onConfirm={() => {
             library.remove(deleting.id);
             setDeleting(null);
+          }}
+        />
+      )}
+
+      {purging && (
+        <ConfirmDialog
+          title="Remove this photo permanently?"
+          body={`${purging.name}'s photo will be deleted for good — use this when a person has asked for their picture to be taken down. Past results that used it will show "model removed" instead. This can't be undone.`}
+          confirmLabel="Remove permanently"
+          danger
+          onCancel={() => setPurging(null)}
+          onConfirm={() => {
+            library.remove(purging.id, { purge: true });
+            setPurging(null);
           }}
         />
       )}
@@ -410,6 +418,7 @@ function ModelTile({
   onRenamed,
   onShare,
   onDelete,
+  onPurge,
 }: {
   /** Extra classes for the tile's <li> — how the grid folds it past two rows. */
   className?: string;
@@ -429,6 +438,8 @@ function ModelTile({
   /** Omitted for anyone who may not share — see `canShare`. */
   onShare?: () => void;
   onDelete?: () => void;
+  /** Admins only: delete the photo itself, not just the library entry. */
+  onPurge?: () => void;
 }) {
   return (
     <li className={cn("group relative", className)}>
@@ -550,6 +561,7 @@ function ModelTile({
               onClick: onShare,
             },
             onDelete && { icon: Trash2, label: "Delete", onClick: onDelete, danger: true },
+            onPurge && { icon: Eraser, label: "Remove photo permanently", onClick: onPurge, danger: true },
           ]}
         />
       )}
@@ -558,6 +570,7 @@ function ModelTile({
         <div className="absolute right-1 top-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/60 p-0.5 opacity-0 backdrop-blur-sm transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:hidden">
           {onPreview && <TileAction icon={Maximize2} label={`Preview ${label}`} onClick={onPreview} />}
           {onDelete && <TileAction icon={Trash2} label={`Delete ${label}`} onClick={onDelete} danger />}
+          {onPurge && <TileAction icon={Eraser} label={`Remove ${label}'s photo permanently`} onClick={onPurge} danger />}
         </div>
       )}
     </li>

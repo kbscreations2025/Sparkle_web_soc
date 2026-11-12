@@ -3,7 +3,7 @@ const { runGenerationJob } = require("./generationRunner");
 const { loadJobActor } = require("./actor");
 const { resolveProviderModel, routeProviderCall } = require("../aiRouting");
 const { createLivePreview } = require("../storage/thumbnail");
-const { createModel } = require("../services/lifestyleModels");
+const { createModel, loadModelImage } = require("../services/lifestyleModels");
 const { logAudit } = require("../auditLog");
 const { matchColour, wantsColourChange } = require("../services/colorMatch");
 const {
@@ -23,26 +23,36 @@ const LIFESTYLE_MODEL_JOB = "lifestyle.model";
  * composite, not a set of variations — so the runner's fan-out is left at
  * one and the whole band belongs to the single call.
  *
- * The model photo is resolved at the route (a preset, an upload, or a saved
- * one fetched back from R2) and arrives here as the first source image, with
- * the jewellery after it. That order is what both prompts describe.
+ * The model is sent to the AI first, the jewellery after — the order both
+ * prompts describe. A library model arrives as a reference (`modelRef`) and
+ * its photo is read from R2 here, so neither Redis nor the run's stored
+ * inputs carry a copy; the run records a pointer instead (`inputPointers`).
+ * An uploaded photo still saving to the library arrives as the first source
+ * image, as every run used to — and so does a run queued before references.
  */
-registerJobHandler(LIFESTYLE_JOB, (context) =>
-  runGenerationJob({
+registerJobHandler(LIFESTYLE_JOB, async (context) => {
+  const { data } = context;
+  const modelImage = !data.isRefinement && data.modelRef ? await loadModelImage(data.modelRef) : null;
+  const prompt = (options) =>
+    data.jewelryCount > 1 ? buildLifestyleSetPrompt({ count: data.jewelryCount, ...options }) : buildLifestylePrompt(options);
+
+  return runGenerationJob({
     ...context,
     tool: "life_style",
-    buildPrompt: ({ data }) =>
-      data.jewelryCount > 1
-        ? buildLifestyleSetPrompt({ count: data.jewelryCount, ...data.options })
-        : buildLifestylePrompt(data.options),
+    // One composite: the model (read here, or already first in the source
+    // images) followed by the pieces.
+    buildShots: ({ data: payload }) => [
+      { prompt: prompt(payload.options), images: modelImage ? [modelImage, ...payload.sourceImages] : payload.sourceImages },
+    ],
     buildRefinePrompt: buildLifestyleRefinePrompt,
     // Each edit drifted pinker and redder than the shot it edited; its colour
     // is pulled back to that shot unless the edit asks for a colour change.
     finishRefine: ({ output, refineImage, instruction }) =>
       wantsColourChange(instruction) ? output : matchColour(output, refineImage),
-    params: context.data.options,
-  })
-);
+    // Which library model this run used — what an admin purge looks runs up by.
+    params: { ...data.options, ...(data.modelRef ? { modelId: data.modelRef.id } : {}) },
+  });
+});
 
 /**
  * Generating a new model to place jewellery onto — no input images at all,

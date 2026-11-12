@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Wand2, Film, Type, PenTool, PenLine, Image as ImageIcon, ScanText, Newspaper, MessageSquare, Leaf, History, ScrollText, Gem, Package, type LucideIcon } from "lucide-react";
+import { Wand2, Film, Type, PenTool, PenLine, Image as ImageIcon, ScanText, Newspaper, MessageSquare, Leaf, History, Gem, Package, type LucideIcon } from "lucide-react";
 import { useAuth } from "./auth-context";
 import { can } from "./permissions";
 import { NEW_CLEANING_MODELS, TESTING_CLEANING_MODELS } from "./api";

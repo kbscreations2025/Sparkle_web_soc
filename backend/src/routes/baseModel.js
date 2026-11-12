@@ -1,34 +1,53 @@
 const { resolveInlineImage } = require("../generationService");
 const lifestyleModels = require("../services/lifestyleModels");
-const { loadPreset, PRESET_IDS } = require("../services/lifestylePresets");
 
 /**
- * The chosen model as `{ mimeType, base64 }` — shared by Lifestyle and
- * Campaign Kit, which name a model the same three ways.
+ * The chosen model — shared by Lifestyle and Campaign Kit, which name a model
+ * the same two ways.
  *
- * A saved model is stored as a url, so it is fetched back rather than
- * trusted from the client: the browser sending the bytes of "model 7" is the
- * browser deciding what model 7 is.
+ *   - A library model (`modelId`) → `{ ref }`: the run records a pointer to
+ *     the library photo and the job reads the bytes when it runs. Nothing is
+ *     copied — a model used in five hundred runs is stored once. Checked here,
+ *     at queue time, against what this person may use; History shows it later
+ *     whatever happens to the model (made private, deleted).
+ *   - A photo sent with the request (`modelImage`) → `{ image }`: only while a
+ *     just-uploaded photo is still saving to the library, or if that save
+ *     failed. There is nothing to point at, so the run keeps a copy, as every
+ *     run used to.
+ *
+ * The built-in presets (Model 4 and 5) are library models now — see
+ * scripts/seedLifestylePresets.js — so `modelNumber` is gone.
  */
-async function resolveBaseModel({ dbUser, modelNumber, modelId, modelImage }) {
+async function resolveBaseModel({ dbUser, modelId, modelImage }) {
   if (modelId) {
     const saved = await lifestyleModels.findUsableModel({ dbUser, id: modelId });
     if (!saved) throw new Error("that saved model is not available");
-    return resolveInlineImage(saved.imageUrl);
+    return { ref: lifestyleModels.toModelRef(saved) };
   }
 
   if (modelImage) {
     const uploaded = await resolveInlineImage(modelImage);
     if (!uploaded) throw new Error("the model photo must be an image");
-    return uploaded;
-  }
-
-  if (modelNumber !== undefined && modelNumber !== null && modelNumber !== "") {
-    if (!PRESET_IDS.includes(Number(modelNumber))) throw new Error(`there is no preset model ${modelNumber}`);
-    return loadPreset(modelNumber);
+    return { image: uploaded };
   }
 
   return null;
 }
 
-module.exports = { resolveBaseModel };
+/**
+ * The payload fields a run needs for its model, either way it was named:
+ * a reference (and the pointer History shows) for a library model, or the
+ * photo itself at the front of the source images for an upload.
+ */
+function modelPayload(baseModel, pieces) {
+  if (baseModel.ref) {
+    return {
+      sourceImages: pieces,
+      modelRef: baseModel.ref,
+      inputPointers: [lifestyleModels.modelPointer(baseModel.ref)],
+    };
+  }
+  return { sourceImages: [baseModel.image, ...pieces], modelRef: null, inputPointers: [] };
+}
+
+module.exports = { resolveBaseModel, modelPayload };

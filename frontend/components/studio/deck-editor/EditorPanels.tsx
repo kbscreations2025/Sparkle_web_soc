@@ -2,27 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import {
-  Copy,
-  Files,
-  Group,
-  Image as ImageIcon,
-  Layers,
-  Lock,
-  Plus,
-  Shapes,
-  Trash2,
-  Type,
-  Unlock,
-  PaintBucket,
-  Stamp,
-  Upload,
-  X,
-  MoreHorizontal,
-  ArrowLeft,
-  ArrowRight,
-  LayoutTemplate,
-} from "lucide-react";
+import { Copy, Files, Group, Image as ImageIcon, Layers, Lock, Plus, Shapes, Trash2, Type, Unlock, PaintBucket, Stamp, Upload, X, MoreHorizontal, ArrowLeft, ArrowRight, LayoutTemplate } from "lucide-react";
 import { DECK, type AffinityPiece } from "@/lib/affinity";
 import {
   SLIDE_H,
@@ -329,60 +309,60 @@ function PagesPanel({ api, pieces, open }: { api: EditorApi; pieces: AffinityPie
       <ol ref={listRef} className="slim-scrollbar flex gap-2 overflow-x-auto px-2.5 pb-3 lg:block lg:space-y-1.5 lg:overflow-visible">
         {api.design.slides.map((slide, index) => (
           <Fragment key={slide.id}>
-          {slot === index && <DropSlot narrow={narrow} />}
-          <li
-            data-page={index}
-            className={cn(
-              "group/page relative w-[124px] shrink-0 select-none transition-opacity lg:w-auto",
-              drag?.from === index && "opacity-40"
-            )}
-          >
-            <button
-              type="button"
-              onPointerDown={(event) => pickUp(event, index)}
-              onContextMenu={(event) => event.preventDefault()}
-              onClick={() => {
-                if (!justDropped.current) api.setActive(index);
-              }}
+            {slot === index && <DropSlot narrow={narrow} />}
+            <li
+              data-page={index}
               className={cn(
-                "block w-full overflow-hidden rounded-md border-2 text-left transition-colors",
-                api.active === index ? "border-[#8B5CF6]" : "border-transparent hover:border-black/15"
+                "group/page relative w-[124px] shrink-0 select-none transition-opacity lg:w-auto",
+                drag?.from === index && "opacity-40"
               )}
-              title="Open this page — drag to reorder"
             >
-              <div className="pointer-events-none" style={{ width: SLIDE_W * thumbScale, height: SLIDE_H * thumbScale }}>
-                <SlideView slide={slide} pieces={pieces} scale={thumbScale} className="border border-black/5" />
-              </div>
-            </button>
-            <div className="mt-0.5 flex items-start gap-1">
-              <span className="mt-px text-[10px] font-semibold text-black/40">{index + 1}</span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[10px] font-medium leading-tight">{slideTitle(slide)}</p>
-                <p className="truncate text-[9px] leading-tight text-black/45">{summarize(slide)}</p>
-              </div>
-              {/* Phones: one ⋯ button beside the name, always there since there is no hover. */}
               <button
                 type="button"
-                title="Page options"
-                aria-label="Page options"
-                onClick={(event) => {
-                  const box = event.currentTarget.getBoundingClientRect();
-                  setMenu(menu?.index === index ? null : { index, x: box.right, y: box.top });
+                onPointerDown={(event) => pickUp(event, index)}
+                onContextMenu={(event) => event.preventDefault()}
+                onClick={() => {
+                  if (!justDropped.current) api.setActive(index);
                 }}
-                className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-black/60 hover:bg-black/5 lg:hidden"
+                className={cn(
+                  "block w-full overflow-hidden rounded-md border-2 text-left transition-colors",
+                  api.active === index ? "border-[#8B5CF6]" : "border-transparent hover:border-black/15"
+                )}
+                title="Open this page — drag to reorder"
               >
-                <MoreHorizontal size={14} />
+                <div className="pointer-events-none" style={{ width: SLIDE_W * thumbScale, height: SLIDE_H * thumbScale }}>
+                  <SlideView slide={slide} pieces={pieces} scale={thumbScale} className="border border-black/5" />
+                </div>
               </button>
-            </div>
-            <div className="absolute right-1 top-1 hidden gap-0.5 opacity-0 transition-opacity group-hover/page:opacity-100 touch:opacity-100 lg:flex">
-              <MiniButton title="Duplicate page" onClick={() => api.duplicateSlide(index)}>
-                <Copy size={11} />
-              </MiniButton>
-              <MiniButton title="Delete page" onClick={() => api.removeSlide(index)} disabled={api.design.slides.length <= 1}>
-                <Trash2 size={11} />
-              </MiniButton>
-            </div>
-          </li>
+              <div className="mt-0.5 flex items-start gap-1">
+                <span className="mt-px text-[10px] font-semibold text-black/40">{index + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[10px] font-medium leading-tight">{slideTitle(slide)}</p>
+                  <p className="truncate text-[9px] leading-tight text-black/45">{summarize(slide)}</p>
+                </div>
+                {/* Phones: one ⋯ button beside the name, always there since there is no hover. */}
+                <button
+                  type="button"
+                  title="Page options"
+                  aria-label="Page options"
+                  onClick={(event) => {
+                    const box = event.currentTarget.getBoundingClientRect();
+                    setMenu(menu?.index === index ? null : { index, x: box.right, y: box.top });
+                  }}
+                  className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-black/60 hover:bg-black/5 lg:hidden"
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+              </div>
+              <div className="absolute right-1 top-1 hidden gap-0.5 opacity-0 transition-opacity group-hover/page:opacity-100 touch:opacity-100 lg:flex">
+                <MiniButton title="Duplicate page" onClick={() => api.duplicateSlide(index)}>
+                  <Copy size={11} />
+                </MiniButton>
+                <MiniButton title="Delete page" onClick={() => api.removeSlide(index)} disabled={api.design.slides.length <= 1}>
+                  <Trash2 size={11} />
+                </MiniButton>
+              </div>
+            </li>
           </Fragment>
         ))}
         {slot === api.design.slides.length && <DropSlot narrow={narrow} />}

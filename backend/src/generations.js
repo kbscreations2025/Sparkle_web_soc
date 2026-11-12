@@ -32,7 +32,9 @@ const ASSET_KINDS = ["input", "output"];
  * the original upload, a style reference, a version the user drew on — and the
  * distinction is what lets history replay a run faithfully.
  */
-const ASSET_ROLES = ["uploaded", "reference", "annotated", "mask", "edited", "generated"];
+// "model": the person a Lifestyle or Campaign Kit run placed jewellery on —
+// a pointer to the library photo, not a copy (see recordGeneration's `inputPointers`).
+const ASSET_ROLES = ["uploaded", "reference", "annotated", "mask", "edited", "generated", "model"];
 
 const ASSET_TYPES = ["image", "video"];
 

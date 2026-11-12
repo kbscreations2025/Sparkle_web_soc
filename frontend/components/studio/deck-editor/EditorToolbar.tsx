@@ -2,41 +2,8 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AlignCenter,
-  AlignCenterHorizontal,
-  AlignCenterVertical,
-  AlignEndHorizontal,
-  AlignEndVertical,
-  AlignHorizontalDistributeCenter,
-  AlignLeft,
-  AlignRight,
-  AlignStartHorizontal,
-  AlignStartVertical,
-  AlignVerticalDistributeCenter,
-  ArrowDownToLine,
-  ArrowUpToLine,
-  Bold,
-  BringToFront,
-  ChevronDown,
-  Copy,
-  Group,
-  Italic,
-  Lock,
-  Minus,
-  Plus,
-  Redo2,
-  Replace,
-  SendToBack,
-  Trash2,
-  Underline,
-  Undo2,
-  Ungroup,
-  Unlock,
-  Baseline,
-  Blend,
-  Move,
-  Scan,
-  Square,
+  AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignLeft, AlignRight, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter,
+  ArrowDownToLine, ArrowUpToLine, Bold, BringToFront, ChevronDown, Copy, Group, Italic, Lock, Minus, Plus, Redo2, Replace, SendToBack, Trash2, Underline, Undo2, Ungroup, Unlock, Baseline, Blend, Move, Scan, Square
 } from "lucide-react";
 import { BRAND_COLORS, FONTS, fontStack, type DesignElement, type ShapeElement, type TextElement } from "@/lib/deckDesign";
 import { cn } from "@/lib/utils";

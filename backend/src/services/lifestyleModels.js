@@ -1,8 +1,24 @@
 const mongoose = require("mongoose");
 const LifestyleModel = require("../models/lifestyleModel");
 const { uploadLibraryImage } = require("../storage/libraryImage");
+const { getObject, deleteObject, variantKeyFor } = require("../storage/r2");
+const { THUMB_EXTENSION } = require("../storage/thumbnail");
 const { parseDataUri } = require("../generationService");
 const { hasPermission } = require("../permissions");
+const Generation = require("../models/generation");
+const MarketingKit = require("../models/marketingKit");
+
+/**
+ * Shown in place of a model photo an admin has purged — in History, the chat
+ * and Campaign Kits. Served by the frontend (public/model-removed.svg).
+ */
+const MODEL_REMOVED_URL = "/model-removed.svg";
+
+const MIME_BY_EXTENSION = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
+
+function mimeForKey(key) {
+  return MIME_BY_EXTENSION[String(key).split(".").pop().toLowerCase()] || "image/jpeg";
+}
 
 /**
  * Saved Lifestyle models — the people jewellery gets placed onto.
@@ -154,7 +170,10 @@ async function setModelPublic({ dbUser, id, isPublic }) {
 }
 
 /**
- * Soft delete. The R2 object is left for the purge sweep.
+ * Soft delete: out of every picker, but the photo stays — past Lifestyle and
+ * Campaign Kit runs point at it (`params.modelId`) and still show it. Any
+ * future storage sweep must leave a model's photo alone while a run refers to
+ * it; `purgeModel` is the one path that really removes it.
  *
  * The creator, or an admin — who is the one who shared a model with the whole
  * organization in the first place, and so has to be able to take it back out
@@ -186,11 +205,85 @@ async function findUsableModel({ dbUser, id }) {
   }).lean();
 }
 
+/**
+ * What a run records about its model instead of a copy of the photo: the
+ * library row and the exact photo it used. The key, not just the id — the
+ * photo is never replaced in place (see models/lifestyleModel.js), so this
+ * pins what the run was given.
+ */
+function toModelRef(row) {
+  return {
+    id: String(row._id),
+    r2Key: row.r2Key,
+    url: row.imageUrl,
+    thumbnailUrl: row.thumbnailUrl || row.imageUrl,
+    name: row.name,
+  };
+}
+
+/** The run's input entry for its model — a snapshot that points at the library photo. */
+function modelPointer(ref) {
+  return { assetId: ref.id, url: ref.url, thumbnailUrl: ref.thumbnailUrl, role: "model", type: "image" };
+}
+
+/**
+ * The photo's bytes, read when the job runs rather than carried through
+ * Redis. Read by key with no visibility check on purpose: the route checked
+ * this person could use the model when they queued the run, and a model made
+ * private or deleted while the run waited in the queue still runs.
+ */
+async function loadModelImage(ref) {
+  const buffer = await getObject(ref.r2Key);
+  return { mimeType: mimeForKey(ref.r2Key), base64: buffer.toString("base64") };
+}
+
+/**
+ * Hard delete, admins only — for a photo that must really go (a real person
+ * asked for theirs to be removed). Deletes the photo and its thumbnail from
+ * R2 and swaps it for "model removed" in every run and Campaign Kit that
+ * pointed at it. Runs from before model references (which kept their own
+ * copy) are not touched.
+ */
+async function purgeModel({ dbUser, id }) {
+  if (!mongoose.Types.ObjectId.isValid(id)) return null;
+  const row = await LifestyleModel.findOne({ _id: id, tenantId: dbUser.tenantId, purgedAt: null });
+  if (!row) return null;
+
+  // The photo and the thumbnail written beside it (see storage/libraryImage.js).
+  const keys = [row.r2Key, variantKeyFor(row.r2Key, "thumb", THUMB_EXTENSION)];
+  for (const key of keys) {
+    await deleteObject(key).catch((err) => console.error(`[lifestyle-models] could not delete ${key}:`, err.message));
+  }
+
+  const modelId = row._id;
+  await Generation.updateMany(
+    { tenantId: dbUser.tenantId, "request.inputAssets.assetId": modelId },
+    { $set: { "request.inputAssets.$[m].url": MODEL_REMOVED_URL, "request.inputAssets.$[m].thumbnailUrl": MODEL_REMOVED_URL } },
+    { arrayFilters: [{ "m.assetId": modelId, "m.role": "model" }] }
+  );
+  await MarketingKit.updateMany(
+    { tenantId: dbUser.tenantId, "campaign.modelImage.r2Key": row.r2Key },
+    { $set: { "campaign.modelImage.url": MODEL_REMOVED_URL, "campaign.modelImage.thumbnailUrl": MODEL_REMOVED_URL } }
+  );
+
+  row.purgedAt = new Date();
+  row.deletedAt = row.deletedAt || row.purgedAt;
+  row.status = "archived";
+  row.imageUrl = MODEL_REMOVED_URL;
+  row.thumbnailUrl = MODEL_REMOVED_URL;
+  await row.save();
+  return toPublicModel(row, dbUser);
+}
+
 module.exports = {
   listModels,
   createModel,
   renameModel,
   setModelPublic,
   deleteModel,
+  purgeModel,
   findUsableModel,
+  toModelRef,
+  modelPointer,
+  loadModelImage,
 };

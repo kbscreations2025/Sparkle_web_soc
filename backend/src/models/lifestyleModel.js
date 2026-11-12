@@ -32,9 +32,30 @@ const lifestyleModelSchema = new mongoose.Schema(
     attrs: { type: mongoose.Schema.Types.Mixed, default: {} },
     notes: { type: String, default: null, maxlength: 300 },
 
+    /**
+     * NEVER REPLACED IN PLACE. Lifestyle and Campaign Kit runs point at this
+     * photo (`params.modelRef`) instead of keeping their own copy, so a run
+     * from months ago shows whatever is at this key. A new or edited photo is a
+     * new model (or at least a new key) — never an overwrite of this one.
+     */
     imageUrl: { type: String, required: true },
     r2Key: { type: String, required: true },
     thumbnailUrl: { type: String, default: null },
+
+    /**
+     * Set on the shared models that replaced the built-in presets (Model 4 and
+     * Model 5) — what lets the seed script (scripts/seedLifestylePresets.js)
+     * run twice without making duplicates. Null on every other model.
+     */
+    presetNumber: { type: Number, default: null },
+
+    /**
+     * Hard delete, by an admin, of a photo that must really go (a real
+     * person's picture they asked to have removed). The R2 objects are deleted
+     * and every run that pointed at it shows "model removed" instead. A plain
+     * delete only sets `deletedAt` and keeps the photo, so past runs still show it.
+     */
+    purgedAt: { type: Date, default: null },
 
     /**
      * Visible to everyone in the organization rather than only its creator.

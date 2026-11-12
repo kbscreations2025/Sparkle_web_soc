@@ -2,21 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  ArrowUp,
-  Download,
-  FileDown,
-  FileSpreadsheet,
-  FileText,
-  ImageIcon,
-  Loader2,
-  MessageSquare,
-  Presentation as PresentationIcon,
-  RotateCcw,
-  Sparkles,
-  Upload,
-  X,
-} from "lucide-react";
+import { ArrowUp, Download, FileDown, FileSpreadsheet, FileText, ImageIcon, Loader2, MessageSquare, Presentation as PresentationIcon, RotateCcw, Sparkles, Upload, X } from "lucide-react";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { Chip } from "@/components/studio/OptionChips";
 import { DeckEditor } from "@/components/studio/deck-editor/DeckEditor";
@@ -419,37 +405,37 @@ export function PresentationWorkspace() {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
         <ErrorBanner message={error} />
-      <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden lg:flex-row">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <DeckEditor key={designKey} initial={design} pieces={pieces} onSave={saveDesign} latestRef={latestDesign} />
-        </div>
-
-        {/* Desktop: the chat is a column beside the deck. */}
-        <aside className="hidden w-[320px] shrink-0 flex-col border-l border-white/[0.06] bg-surface-raised/40 lg:flex">
-          <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2.5">
-            <Sparkles size={13} className="text-gold" />
-            <p className="text-[12px] font-semibold text-cream">Edit with AI</p>
+        <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden lg:flex-row">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <DeckEditor key={designKey} initial={design} pieces={pieces} onSave={saveDesign} latestRef={latestDesign} />
           </div>
-          {chat}
-        </aside>
 
-        {/* Below desktop: a bar under the deck that opens into the thread. */}
-        <div className={cn("flex flex-col border-t border-white/[0.06] bg-surface-raised lg:hidden", chatOpen ? "h-[52dvh]" : "")}>
-          <button
-            type="button"
-            onClick={() => setChatOpen((open) => !open)}
-            className="flex items-center gap-2 px-3 py-2.5 text-left"
-          >
-            <MessageSquare size={14} className="text-gold" />
-            <span className="flex-1 text-[12px] font-semibold text-cream">Edit with AI</span>
-            {editing && <Loader2 size={13} className="animate-spin text-faint" />}
-            <span className="text-[11px] text-faint">{chatOpen ? "Hide" : messages.length ? `${messages.length} messages` : "Open"}</span>
-          </button>
-          {chatOpen && chat}
+          {/* Desktop: the chat is a column beside the deck. */}
+          <aside className="hidden w-[320px] shrink-0 flex-col border-l border-white/[0.06] bg-surface-raised/40 lg:flex">
+            <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2.5">
+              <Sparkles size={13} className="text-gold" />
+              <p className="text-[12px] font-semibold text-cream">Edit with AI</p>
+            </div>
+            {chat}
+          </aside>
+
+          {/* Below desktop: a bar under the deck that opens into the thread. */}
+          <div className={cn("flex flex-col border-t border-white/[0.06] bg-surface-raised lg:hidden", chatOpen ? "h-[52dvh]" : "")}>
+            <button
+              type="button"
+              onClick={() => setChatOpen((open) => !open)}
+              className="flex items-center gap-2 px-3 py-2.5 text-left"
+            >
+              <MessageSquare size={14} className="text-gold" />
+              <span className="flex-1 text-[12px] font-semibold text-cream">Edit with AI</span>
+              {editing && <Loader2 size={13} className="animate-spin text-faint" />}
+              <span className="text-[11px] text-faint">{chatOpen ? "Hide" : messages.length ? `${messages.length} messages` : "Open"}</span>
+            </button>
+            {chatOpen && chat}
+          </div>
+
+          {printing && <PrintDeck design={printing} pieces={pieces} onDone={endPrint} />}
         </div>
-
-        {printing && <PrintDeck design={printing} pieces={pieces} onDone={endPrint} />}
-      </div>
       </div>
     );
   }

@@ -64,6 +64,31 @@ async function storeImage({ tenantId, userId, kitId, role, image, fileName = nul
   };
 }
 
+/**
+ * A kit image that points at a library model's photo instead of a copy of it.
+ * Same shape as `storeImage`'s, so every reader renders it unchanged; its
+ * size isn't known without reading the photo, and nothing needs it.
+ */
+function modelPointerImage(ref) {
+  const extension = String(ref.r2Key).split(".").pop().toLowerCase();
+  return {
+    _id: new mongoose.Types.ObjectId(),
+    role: "model",
+    r2Bucket: config.r2.bucket,
+    r2Key: ref.r2Key,
+    url: ref.url,
+    thumbnailKey: null,
+    thumbnailUrl: ref.thumbnailUrl ?? null,
+    mimeType: { png: "image/png", webp: "image/webp" }[extension] || "image/jpeg",
+    sizeBytes: 0,
+    width: null,
+    height: null,
+    fileName: ref.name || null,
+    pdfName: null,
+    pdfPage: null,
+  };
+}
+
 /** Uploads a list in parallel — a kit's pages are independent of each other. */
 function storeImages({ tenantId, userId, kitId, role, images = [] }) {
   return Promise.all(images.map((image) => storeImage({ tenantId, userId, kitId, role, image })));
@@ -191,11 +216,21 @@ async function saveCampaignKit({
   // "festive" stores its posters in this same shape, with no model photo.
   kind = "campaign",
   title,
+  /**
+   * A library model, kept as a pointer to its photo rather than a copy —
+   * see routes/baseModel.js. An admin purge of the model swaps the url for
+   * "model removed" (services/lifestyleModels.js `purgeModel`).
+   */
+  modelRef = null,
 }) {
   const common = { tenantId: dbUser.tenantId, userId: dbUser._id, kitId };
 
   const [storedModel, storedSources] = await Promise.all([
-    modelImage ? storeImage({ ...common, role: "model", image: modelImage }) : null,
+    modelRef
+      ? modelPointerImage(modelRef)
+      : modelImage
+        ? storeImage({ ...common, role: "model", image: modelImage })
+        : null,
     storeImages({ ...common, role: "product", images: sourceImages }),
   ]);
 

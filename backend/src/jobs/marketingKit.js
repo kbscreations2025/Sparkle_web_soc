@@ -3,6 +3,7 @@ const { registerJobHandler } = require("./registry");
 const { runTextJob, ModelRefusedError, inlineData } = require("./textRunner");
 const { runGenerationJob } = require("./generationRunner");
 const kits = require("../services/marketingKits");
+const { loadModelImage } = require("../services/lifestyleModels");
 const gemini = require("../providers/gemini");
 const {
   SETTING_CODE_REFERENCE,
@@ -434,14 +435,22 @@ function parseAffinityResult(text, data) {
  * shots are worth having, and the runner already reports each one the
  * moment it lands.
  */
-registerJobHandler(CAMPAIGN_KIT_JOB, (context) => {
+registerJobHandler(CAMPAIGN_KIT_JOB, async (context) => {
   const kitId = newKitId();
+  /*
+   * A library model arrives by reference and its photo is read here (see
+   * routes/baseModel.js); an uploaded one — or a run queued before
+   * references — is still the first source image.
+   */
+  const ref = !context.data.isRefinement ? context.data.modelRef : null;
+  const loadedModel = ref ? await loadModelImage(ref) : null;
+  const split = (sourceImages) => (loadedModel ? [loadedModel, ...sourceImages] : sourceImages);
 
   return runGenerationJob({
     ...context,
     tool: "marketing_kit",
     buildShots: ({ data }) => {
-      const [modelImage, ...jewelry] = data.sourceImages;
+      const [modelImage, ...jewelry] = split(data.sourceImages);
       return buildCampaignKitShots(data.options).map((shot) => ({
         // Carried through so the deck can label each picture with the shot
         // it came from — see `delivered` in the runner.
@@ -456,14 +465,16 @@ registerJobHandler(CAMPAIGN_KIT_JOB, (context) => {
     // edited, so retouches don't drift pinker turn by turn.
     finishRefine: ({ output, refineImage, instruction }) =>
       wantsColourChange(instruction) ? output : matchColour(output, refineImage),
-    params: { ...context.data.options, kitId: String(kitId) },
+    params: { ...context.data.options, ...(ref ? { modelId: ref.id } : {}), kitId: String(kitId) },
     /*
      * A retouch of one shot is not a new deck — it edits a picture inside
-     * an existing one — so only a first run writes a kit.
+     * an existing one — so only a first run writes a kit. A library model is
+     * kept as a pointer to its photo (`modelRef`), not a second copy.
      */
     persist: context.data.isRefinement
       ? undefined
       : (run) => {
+          if (ref) return saveShotsKit(run, { kind: "campaign", kitId, modelImage: null, modelRef: ref, sourceImages: run.data.sourceImages });
           const [modelImage, ...jewelry] = run.data.sourceImages;
           return saveShotsKit(run, { kind: "campaign", kitId, modelImage, sourceImages: jewelry });
         },
