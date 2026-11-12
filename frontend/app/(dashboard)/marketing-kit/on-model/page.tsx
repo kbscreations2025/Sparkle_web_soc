@@ -217,8 +217,8 @@ function StyledOnModelWorkspace() {
                 </ol>
               )}
               <p className="text-[11px] leading-relaxed text-faint">
-                Shot like a real editorial: every piece at its true size and exactly as photographed, the model always
-                tastefully dressed.
+                Candid, sultry editorial shots — mostly close crops below the chin — with every piece at its true size and
+                exactly as photographed. Glamorous, never explicit.
               </p>
             </section>
 

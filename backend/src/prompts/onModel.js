@@ -8,10 +8,11 @@ const { ANATOMY_NOTE, REALISM_NOTE, SCALE_NOTE } = require("./lifestyle");
  * worn together by one model in a cinematic editorial photograph.
  *
  * Unlike Lifestyle and Campaign Kit there is no model photo: the model is
- * created in the shot itself. She is striking, confident and alluring in the
- * way of a luxury fashion campaign — and, like every model this app renders,
- * always clearly dressed (the brand-safety line Lifestyle's MODESTY_NOTE
- * draws); the allure comes from light, styling, pose and expression.
+ * created in the shot itself. The brand wants the look of its references —
+ * candid, sultry jewellery editorials: crops below the chin, a white shirt
+ * open in a deep V, parted lips, a hand at the jaw or collarbone. Glamorous
+ * and seductive, but an adult who is always dressed: no nudity, no lingerie,
+ * nothing explicit — what an ad can run, and what the image model will draw.
  *
  * Every piece is the customer's real product, so it comes back exactly as
  * photographed and at its real size. The ids below are mirrored in the
@@ -61,42 +62,43 @@ const TONES = {
 };
 
 /**
- * One pose and styling per image, cycled — each keeps her hands near her face
- * or neckline so a ring or bracelet can share the frame with earrings and
- * necklaces. The first follows the brand's own references.
+ * One pose and styling per image, cycled — modelled on the brand's own
+ * references: mostly tight crops below the chin, caught mid-moment. Each
+ * keeps a hand near her face or neckline, so a ring or bracelet shares the
+ * frame with the earrings and necklaces.
  */
 const POSES = [
   {
-    label: "Open white shirt",
-    text: "She wears a crisp white shirt open at the collar; one hand lifts the edge of the collar or rests lightly at her collarbone. Framed from just below the eyes to mid-chest, head turned slightly so an ear shows.",
+    label: "Open shirt, below the chin",
+    text: "Cropped from her lips down to mid-chest: a crisp white shirt unbuttoned into a deep V that frames her neck and collarbones, her fingers resting at her collarbone or lightly tugging the collar open. Lips softly parted. Caught mid-moment, as if she just turned.",
   },
   {
-    label: "Chin on hand",
-    text: "A close portrait: her chin rests lightly on the back of her hand, forearm across the lower frame, gaze soft and off-camera. A fine knit or silk top at the shoulders.",
+    label: "Hand at the jaw",
+    text: "Cropped from the nose down: her head tilted, fingertips trailing along her jaw just under the ear, lips parted, a white shirt open at the throat. Sultry and unposed.",
+  },
+  {
+    label: "Chin on wrist",
+    text: "A close, sultry portrait: her chin resting on her wrist, forearm across the lower frame, a heavy-lidded gaze off-camera, glossy lips, a dark fine-knit top. Intimate, magazine-cover glamour.",
+  },
+  {
+    label: "Lapel pull",
+    text: "Cropped below the chin: one hand pulling the lapel of an oversized cream blazer back over a white shirt open to the sternum, the necklaces lying on her skin in the V. Confident and bold.",
+  },
+  {
+    label: "Hair sweep",
+    text: "A candid, close crop from just under the eyes to the chest: she sweeps her hair back off her neck with one hand, the other at her neckline, lips parted mid-laugh or mid-breath. A black silk shirt open at the collar.",
   },
   {
     label: "Over the shoulder",
-    text: "A three-quarter view glancing back over her shoulder, hair swept to one side to reveal the ear and neck, one hand resting on her shoulder. A silk camisole or a softly draped top.",
+    text: "A seductive glance back over her shoulder, hair swept to one side baring the ear and neck, one hand resting on her shoulder; a silk slip top with thin straps, the shoulder line in frame.",
   },
   {
-    label: "Hand in hair",
-    text: "Waist-up, one hand running back through her hair at the temple, the other resting at her neckline, eyes meeting the camera with a calm, confident look. An oversized blazer over a silk top.",
-  },
-  {
-    label: "Window light",
-    text: "Seated by a tall window, elbow on the sill, fingers resting near her jaw, face turned towards the light. A soft cream knit slipping slightly off one shoulder, its neckline still clearly in frame.",
-  },
-  {
-    label: "Profile",
-    text: "A profile portrait, chin lifted, one hand at the nape of her neck, the line of the neck and jaw long and elegant. A black satin top with a clean neckline.",
-  },
-  {
-    label: "Collar close-up",
-    text: "A close crop on the neckline and one hand: a softly open linen shirt, her fingers lightly touching the jewellery at her collarbone, the lower half of her face just in frame.",
+    label: "Collarbone close-up",
+    text: "An extreme close crop of the neck and collarbones with the lower lip just in frame: her fingertips touching the jewellery, a white shirt falling open around it, warm skin glowing.",
   },
   {
     label: "Leaning in",
-    text: "Leaning on a stone balustrade or table, forearms crossed in front of her, hands near her chin, looking just past the camera. A sleeveless silk top.",
+    text: "Leaning towards the camera across a table, forearms crossed, hands near her chin, a direct, knowing gaze; a sleeveless black top with a deep neckline. Glamorous and confident.",
   },
 ];
 
@@ -120,11 +122,16 @@ const PLACEMENT_RULES = `HOW EACH KIND IS WORN — AND ITS REAL SIZE
 - Anklet: encircling the ankle, resting on the bone — frame wider (seated or full length) so it shows.
 - Frame as close as the pieces allow while keeping every one of them in the shot: necklaces only → a neckline close-up; earrings with necklaces → a close portrait; rings or bracelets → her hand raised near her face or collarbone so it shares the frame.`;
 
-/** Tasteful allure — the same line every model this app renders keeps. */
+/**
+ * Sultry editorial glamour, as in the brand's references — and the line it
+ * stops at: an adult, always dressed, never explicit.
+ */
 const MODEL_BLOCK = `THE MODEL
-- One strikingly beautiful adult woman in her mid-twenties to thirties: a toned, graceful figure, glowing natural skin, elegant neck and hands with softly manicured natural nails, hair styled away from her ears and neck wherever jewellery sits.
-- A magnetic, confident, quietly captivating presence — the allure of a luxury fashion campaign: a direct, self-assured gaze or a soft, faraway look, relaxed shoulders, a slow, graceful gesture. Elegance, beauty and confidence — never vulgar.
-- ALWAYS CLEARLY DRESSED: part of her outfit is visible in every shot (a collar, a neckline, a strap, a sleeve), even in a tight crop; a bare-shouldered crop must never read as unclothed. Never nude, topless or implied nudity, no sheer or see-through fabric over the body, no lingerie or swimwear, no emphasised cleavage, no suggestive pose. The allure comes from the light, the styling, the pose and the expression — never from revealing the body.`;
+- One strikingly beautiful adult woman, clearly in her mid-twenties to thirties: a toned figure, glowing sun-warmed skin, a long elegant neck, defined collarbones, slender hands with softly manicured nails, hair styled away from her ears and neck wherever jewellery sits.
+- Hot, glamorous and confident — the sultry allure of a high-fashion jewellery campaign: softly parted, glossy lips, a heavy-lidded or knowing gaze, a slow touch at her jaw, neck or collarbone. Seductive in the way a luxury ad is, never vulgar.
+- CANDID, NOT POSED: caught mid-movement, like an off-guard frame from a real editorial shoot — a turn of the head, a hand halfway through her hair, a breath, a half-smile. Mostly tight crops below the chin or just under the eyes, the way jewellery campaigns frame it.
+- STYLING: a crisp white or silk shirt unbuttoned into a deep V, an oversized blazer, a slip top with thin straps, a fine knit — necklines that open the neck and collarbones for the jewellery.
+- ALWAYS DRESSED AND NEVER EXPLICIT: part of her clothing is always in frame; no nudity, no exposed breasts or nipples, nothing see-through over the chest, no lingerie or swimwear, no sexual act or pose. The heat comes from the expression, the light, the open neckline and the confidence — not from undressing.`;
 
 const FOCUS_BLOCK = `FOCUS
 - Every worn piece is tack-sharp, with every stone and metal edge crisp; her skin falls into gentle, natural focus around it and the background into soft bokeh (about f/2–f/2.8 on an 85 mm lens), exactly as a real lens renders it.

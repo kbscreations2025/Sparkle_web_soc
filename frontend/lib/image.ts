@@ -206,22 +206,60 @@ function saveLocalUrl(url: string, filename: string) {
  * rejection.
  */
 /**
- * Saves a whole set of results, numbered from 1.
+ * Saves a whole set of results as ONE zip — `<baseName>.zip` holding
+ * `<baseName>-1.jpg`, `<baseName>-2.jpg`… — instead of a download per image.
  *
- * Sequential with a beat between each: a burst of downloads fired from one
- * click is throttled — and silently dropped past the first few — by every
- * browser, which would look like the button half-working.
+ * Six separate downloads meant six save prompts (or six files scattered in
+ * Downloads), and browsers throttle a burst of them from one click. Each file
+ * is still fetched through our download proxy (the stored urls are
+ * cross-origin), one at a time so several multi-megabyte streams don't run at
+ * once; one that fails is left out rather than sinking the whole zip.
  *
- * Resolves with how many actually saved, so a caller can tell a partial run
- * from a complete one.
+ * A single image is saved as itself — a zip of one is just an extra step.
+ * Resolves with how many went in, so a caller can tell a partial set.
  */
 export async function downloadAllImages(sources: string[], baseName: string): Promise<number> {
-  let saved = 0;
-  for (const [index, src] of sources.entries()) {
-    if (index > 0) await new Promise((resolve) => setTimeout(resolve, 300));
-    if (await downloadImage(src, downloadName(src, `${baseName}-${index + 1}`))) saved++;
+  const files = sources.map((src, index) => ({ src, filename: downloadName(src, `${baseName}-${index + 1}`) }));
+  return downloadFilesAsZip(files, baseName);
+}
+
+/** The zip behind `downloadAllImages`, for callers that name each file themselves (History). */
+export async function downloadFilesAsZip(files: { src: string; filename: string }[], zipName: string): Promise<number> {
+  if (files.length === 0) return 0;
+  if (files.length === 1) return (await downloadImage(files[0].src, files[0].filename)) ? 1 : 0;
+
+  // Loaded on demand — only someone saving a set pays for the library.
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+  let added = 0;
+
+  for (const file of files) {
+    const blob = await fetchForDownload(file.src, file.filename);
+    if (!blob) continue;
+    // Already-compressed images: storing, not deflating, keeps it fast.
+    zip.file(file.filename, blob, { compression: "STORE" });
+    added++;
   }
-  return saved;
+  if (added === 0) return 0;
+
+  const objectUrl = URL.createObjectURL(await zip.generateAsync({ type: "blob" }));
+  saveLocalUrl(objectUrl, `${zipName}.zip`);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+  return added;
+}
+
+/** One file's bytes, through our proxy for a stored url — null when it can't be had. */
+async function fetchForDownload(src: string, filename: string): Promise<Blob | null> {
+  try {
+    if (src.startsWith("data:") || src.startsWith("blob:")) return await (await fetch(src)).blob();
+    const endpoint = `${BACKEND_URL}/api/history/download?url=${encodeURIComponent(src)}&filename=${encodeURIComponent(filename)}`;
+    const res = await fetch(endpoint, { credentials: "include" });
+    if (!res.ok) throw new Error(`download failed with ${res.status}`);
+    return await res.blob();
+  } catch (error) {
+    console.error(`Could not download ${filename}:`, error);
+    return null;
+  }
 }
 
 /**

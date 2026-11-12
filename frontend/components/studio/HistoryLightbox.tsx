@@ -3,7 +3,7 @@
 import { useState, type CSSProperties } from "react";
 import { Check, Download, Eye, Loader2, MessageCircle, Pencil, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { DESIGN_NO_MAX, type HistoryItem, type HistoryOutput } from "@/lib/api";
-import { downloadImage, downloadName } from "@/lib/image";
+import { downloadFilesAsZip, downloadImage, downloadName } from "@/lib/image";
 import { useEscapeKey } from "@/lib/useEscapeKey";
 import { useImageZoom } from "@/lib/useImageZoom";
 import { toolBadgeStyle } from "@/lib/nav";
@@ -101,14 +101,16 @@ export function HistoryLightbox({
     downloadImage(output.url, downloadName(output.url, `${item.tool}-${item.id}-${index + 1}`, output.type));
 
   /**
-   * One at a time, in order. Firing them together would open as many parallel
-   * proxy streams of several megabytes each, and browsers throttle or drop
-   * simultaneous downloads from one gesture anyway. `downloadImage` reports
-   * failure by returning false rather than throwing, so one bad image can't
-   * abandon the rest of the set.
+   * Every image in one zip, named after the run — one save instead of one
+   * per image. A failed image is left out rather than abandoning the set.
    */
   async function downloadAll() {
-    for (const [i, output] of item!.outputs.entries()) await save(output, i);
+    const base = `${item!.tool}-${item!.id}`;
+    const files = item!.outputs.map((output, i) => ({
+      src: output.url,
+      filename: downloadName(output.url, `${base}-${i + 1}`, output.type),
+    }));
+    await downloadFilesAsZip(files, base);
   }
 
   return (

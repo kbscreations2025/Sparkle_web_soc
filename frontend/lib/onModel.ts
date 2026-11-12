@@ -47,13 +47,13 @@ export const TONES = [
 
 /** One pose per image, in the order the backend uses them. */
 export const ON_MODEL_POSES = [
-  "Open white shirt",
-  "Chin on hand",
+  "Open shirt, below the chin",
+  "Hand at the jaw",
+  "Chin on wrist",
+  "Lapel pull",
+  "Hair sweep",
   "Over the shoulder",
-  "Hand in hair",
-  "Window light",
-  "Profile",
-  "Collar close-up",
+  "Collarbone close-up",
   "Leaning in",
 ] as const;
 
