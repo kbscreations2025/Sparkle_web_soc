@@ -14,7 +14,7 @@ const NAV_LABEL_BY_HREF: Record<string, string> = Object.fromEntries(
 const SUB_LABELS: Record<string, string> = {
   "/cleaning/default": "Cleaning 2 (up to 4K)",
   "/cleaning/new": "Cleaning 1 (up to 1K)",
-  "/cleaning/testing": "Cleaning Testing",
+  "/cleaning/studio": "Cleaning",
   "/cleaning/shank": "Shank Retouch",
   "/cleaning/views": "Views Generator",
   "/cleaning/replace": "Jewellery Swap",

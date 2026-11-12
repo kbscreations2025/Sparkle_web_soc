@@ -12,6 +12,11 @@ const nextConfig: NextConfig = {
     // already have their own small `_thumb` copies in R2.
     unoptimized: true,
   },
+  // The Cleaning page used to live at /cleaning/testing — old bookmarks and
+  // shared links (with their ?conversationId=) still land on it.
+  async redirects() {
+    return [{ source: "/cleaning/testing", destination: "/cleaning/studio", permanent: true }];
+  },
 };
 
 export default nextConfig;

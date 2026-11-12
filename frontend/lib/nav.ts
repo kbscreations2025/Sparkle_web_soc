@@ -259,9 +259,9 @@ export function workspacePathFor(tool: string, modelLabel?: string | null, mode?
   if (tool === "cleaning" && modelLabel && NEW_CLEANING_MODEL_LABELS.has(modelLabel)) {
     return "/cleaning/new";
   }
-  // A model on trial reopens on the testing page — the only one that offers it.
+  // These models reopen on the Cleaning page (/cleaning/studio) — the only one that offers them.
   if (tool === "cleaning" && modelLabel && TESTING_CLEANING_MODEL_LABELS.has(modelLabel)) {
-    return "/cleaning/testing";
+    return "/cleaning/studio";
   }
   return TOOL_WORKSPACE_PATHS[tool];
 }

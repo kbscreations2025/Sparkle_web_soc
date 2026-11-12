@@ -28,26 +28,26 @@ type CleaningMode = {
  * promising a page that isn't there yet.
  */
 const MODES: CleaningMode[] = [
+  // {
+  //   id: "new-cleaning",
+  //   label: "Cleaning 1 (up to 1K)",
+  //   description: "GPT's latest image model via OpenRouter — same workspace, its own instructions",
+  //   icon: Eraser,
+  //   href: "/cleaning/new",
+  // },
+  // {
+  //   id: "default",
+  //   label: "Cleaning 2 (up to 4K)",
+  //   description: "The standard retouch — upload, clean, then ask for changes",
+  //   icon: Sparkles,
+  //   href: "/cleaning/default",
+  // },
   {
-    id: "new-cleaning",
-    label: "Cleaning 1 (up to 1K)",
-    description: "GPT's latest image model via OpenRouter — same workspace, its own instructions",
-    icon: Eraser,
-    href: "/cleaning/new",
-  },
-  {
-    id: "default",
-    label: "Cleaning 2 (up to 4K)",
-    description: "The standard retouch — upload, clean, then ask for changes",
-    icon: Sparkles,
-    href: "/cleaning/default",
-  },
-  {
-    id: "testing",
-    label: "Cleaning Testing",
+    id: "studio",
+    label: "Cleaning",
     description: "White background, polished metal, one consistent gold — Nano Banana 2.1 up to 4K",
     icon: FlaskConical,
-    href: "/cleaning/testing",
+    href: "/cleaning/studio",
   },
   {
     id: "shank",
@@ -74,7 +74,7 @@ const MODES: CleaningMode[] = [
 
 /** The page's two groups: the full-photo cleanings, then the tools that do one specific job. */
 const SECTIONS = [
-  { title: "Cleaning", ids: ["new-cleaning", "default", "testing"] },
+  { title: "Cleaning", ids: ["new-cleaning", "default", "studio"] },
   { title: "Retouch & Edit Tools", ids: ["shank", "views", "replacement"] },
 ];
 
