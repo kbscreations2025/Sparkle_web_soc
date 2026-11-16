@@ -11,6 +11,7 @@ import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { UploadZone, type UploadItem } from "@/components/studio/UploadZone";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
+import { ModelLibrary } from "@/components/studio/ModelLibrary";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import {
   styledOnModel,
@@ -26,7 +27,6 @@ import {
   MAX_ON_MODEL_PIECES,
   ON_MODEL_BRIEF_IDEAS,
   ON_MODEL_COUNT_OPTIONS,
-  ON_MODEL_POSES,
   ON_MODEL_SOFT_LIMIT,
   PIECE_TYPES,
   TONES,
@@ -38,6 +38,7 @@ import { filesToUploadItems, uploadErrorMessage } from "@/lib/uploads";
 import { useGenerationWorkspace, type RefineRequest } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
+import { modelRequestFields, useModelLibrary } from "@/lib/useModelLibrary";
 import { can } from "@/lib/permissions";
 
 const PERMISSION = "tool.marketing_kit.run";
@@ -46,6 +47,12 @@ const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
 const HINTS = ["Warmer, more golden light", "Move the camera closer to the jewellery", "Change her outfit to a black silk top", "More candid, less posed"];
 
 type Piece = UploadItem & { type: PieceType };
+
+/** Who wears the pieces: a model created in the shot, or one picked from the library. */
+const WHO_OPTIONS = [
+  { id: "ai", label: "Create a model for me" },
+  { id: "library", label: "Choose a model" },
+];
 
 /**
  * Styled on Model: any mix of jewellery — a matching set, several pendants to
@@ -71,12 +78,16 @@ function StyledOnModelWorkspace() {
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [piecePreview, setPiecePreview] = useState<PreviewImage | null>(null);
   const [arrangement, setArrangement] = useState<string>("auto");
-  const [tone, setTone] = useState<string>("warm_cinematic");
+  const [tone, setTone] = useState<string>("natural");
   const [description, setDescription] = useState("");
   const [aspect, setAspect] = useState<string>("portrait");
   const [count, setCount] = useState(4);
   const [model, setModel] = useState<ImageEditModelId>(DEFAULT_IMAGE_EDIT_MODEL);
   const [quality, setQuality] = useModelQuality(model);
+  const [who, setWho] = useState<string>("ai");
+  // The same library Lifestyle and Campaign Kit pick from.
+  const library = useModelLibrary();
+  const usesLibrary = who === "library";
 
   const onRefine = useCallback((body: RefineRequest) => refineStyledOnModel({ ...body, model, quality }), [model, quality]);
 
@@ -110,8 +121,9 @@ function StyledOnModelWorkspace() {
   }
 
   const brief = description.trim();
-  const ready = pieces.length > 0;
-  const poses = Array.from({ length: count }, (_, index) => ON_MODEL_POSES[index % ON_MODEL_POSES.length]);
+  // A picked model has to be settled first — chosen, and saved if just uploaded.
+  const modelReady = !usesLibrary || (Boolean(library.choice) && !library.saving);
+  const ready = pieces.length > 0 && modelReady;
   const arrangementHint = ARRANGEMENTS.find((entry) => entry.id === arrangement)?.hint;
 
   async function handleGenerate() {
@@ -128,6 +140,7 @@ function StyledOnModelWorkspace() {
           description: brief,
           aspect,
           count,
+          ...(usesLibrary && library.choice ? modelRequestFields(library.choice) : {}),
           model,
           quality,
           preview,
@@ -135,7 +148,7 @@ function StyledOnModelWorkspace() {
       {
         count,
         prompt: `Styled on Model — ${pieces.length} piece${pieces.length > 1 ? "s" : ""}${brief ? ` — ${brief}` : ""}`,
-        images: pieces.map((piece) => piece.dataUrl),
+        images: [...pieces.map((piece) => piece.dataUrl), ...(usesLibrary && library.choice ? [library.choice.src] : [])],
       }
     );
   }
@@ -166,12 +179,27 @@ function StyledOnModelWorkspace() {
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <ErrorBanner
-        message={workspace.error || (kitLink.failed ? "That run couldn't be reopened — its images weren't saved. Start a new look below." : "")}
+        message={
+          workspace.error ||
+          (usesLibrary ? library.error : "") ||
+          (kitLink.failed ? "That run couldn't be reopened — its images weren't saved. Start a new look below." : "")
+        }
       />
 
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
         <div className="grid w-full items-start gap-6 lg:grid-cols-[60fr_40fr] lg:gap-8">
           <div className="space-y-5">
+            <section className="space-y-2">
+              <OptionChips label="The model" options={WHO_OPTIONS} value={who} onChange={setWho} />
+              {usesLibrary ? (
+                <ModelLibrary library={library} />
+              ) : (
+                <p className="text-[11px] leading-relaxed text-faint">
+                  A model is created for the shoot — or choose one of your saved models to wear the pieces.
+                </p>
+              )}
+            </section>
+
             <div className="space-y-2">
               <OptionChips label="How to wear them" options={ARRANGEMENTS} value={arrangement} onChange={setArrangement} />
               {arrangementHint && <p className="text-[11px] leading-relaxed text-faint">{arrangementHint}</p>}
@@ -190,36 +218,6 @@ function StyledOnModelWorkspace() {
                   />
                 ))}
               </div>
-            </section>
-
-            <section className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-cream">
-                What you&apos;ll get{" "}
-                <span className="font-normal normal-case tracking-normal text-faint">
-                  — {count} image{count > 1 ? "s" : ""}, one model wearing every piece
-                </span>
-              </p>
-              {brief ? (
-                <p className="text-[12px] leading-relaxed text-cream/80">
-                  Your description leads — the model, outfit and place follow it, and each image takes its own pose.
-                </p>
-              ) : (
-                <ol className="flex flex-wrap gap-2">
-                  {poses.map((pose, index) => (
-                    <li
-                      key={`${pose}-${index}`}
-                      className="rounded-full border border-gold/25 bg-gold/[0.06] px-3 py-1 text-[11px] text-cream"
-                    >
-                      <span className="mr-1 text-faint">{index + 1}.</span>
-                      {pose}
-                    </li>
-                  ))}
-                </ol>
-              )}
-              <p className="text-[11px] leading-relaxed text-faint">
-                Candid, sultry editorial shots — mostly close crops below the chin — with every piece at its true size and
-                exactly as photographed. Glamorous, never explicit.
-              </p>
             </section>
 
             <AspectChips options={CAMPAIGN_ASPECTS} value={aspect} onChange={setAspect} />
@@ -303,7 +301,13 @@ function StyledOnModelWorkspace() {
             </div>
 
             <RunButton onClick={handleGenerate} disabled={!ready} icon={<Sparkles size={14} />}>
-              {pieces.length === 0 ? "Add your jewellery" : `Make ${count} image${count > 1 ? "s" : ""}`}
+              {pieces.length === 0
+                ? "Add your jewellery"
+                : usesLibrary && library.saving
+                  ? "Saving your model photo…"
+                  : !modelReady
+                    ? "Pick a model"
+                    : `Make ${count} image${count > 1 ? "s" : ""}`}
             </RunButton>
           </div>
         </div>

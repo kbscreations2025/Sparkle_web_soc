@@ -16,8 +16,9 @@ const { buildReferenceNote } = require("./shared");
  * photographed. When the brand writes a brief, the brief sets the scene and
  * the variations differ by angle and light instead.
  *
- * Scene ids and order are mirrored in the frontend (lib/charmStory.ts), which
- * shows the person which scenes their images will use.
+ * Each run picks its scenes (or, with a brief, its angles and light) at
+ * random, so two runs on the same charms don't come back looking the same.
+ * The scenes live only here; the page doesn't list them.
  */
 
 /** The chain's metal. "match" follows the charms — usually vermeil or gold. */
@@ -29,11 +30,58 @@ const CHARM_METALS = {
 };
 
 /**
- * The scenes, one per image, in this order. The first two follow the brand's
- * own references (a hand dangling the necklace, the necklace poured into
- * open palms).
+ * The scenes a run picks from — a different one per image, chosen at random.
+ * They follow the brand's references: a hand dangling the necklace, the
+ * necklace poured into open palms, and (from the later set) quiet still lifes
+ * — raking sunlight on warm paper, marble flat lays, seamless studio
+ * backdrops, colour-block paper — with the necklace small in the frame.
  */
 const CHARM_SCENES = [
+  {
+    id: "sunbeam",
+    label: "Sunbeam on warm paper",
+    text: "The necklace lying on smooth warm-beige paper, the chain trailing in from the top of the frame and all the charms gathered together at its lowest point. One band of low late-afternoon sunlight falls diagonally across the paper and over the charms, with the rest of the frame in soft warm shade — the light is the only drama. Shot close, slightly from above.",
+  },
+  {
+    id: "shadow_wall",
+    label: "Light and shadow wall",
+    text: "The necklace hanging straight down in front of a warm taupe plaster wall, the charms gathered at the bottom of the chain. A crisp diagonal edge of sunlight cuts across the wall behind, half of it bright and warm, half in soft shadow, and the charms catch the light. Framed on the lower part of the chain, the top of the chain leaving the frame.",
+  },
+  {
+    id: "marble",
+    label: "Marble flat lay",
+    text: "A top-down flat lay on white Carrara marble with soft grey veining: the chain comes in from the top edge in a narrow V and the charms lie together where it meets, small in the frame with plenty of calm marble around them. Soft, even overcast daylight and very gentle shadows.",
+  },
+  {
+    id: "gradient",
+    label: "Studio gradient",
+    text: "The necklace hanging in front of a seamless studio backdrop that shades smoothly from deep teal at the top to a pale misty grey-green at the bottom. The charms hang together at the bottom of the chain and cast a soft, faint shadow on the backdrop below them. One soft studio light from the side.",
+  },
+  {
+    id: "grey_seamless",
+    label: "Soft grey close-up",
+    text: "A close-up of the bottom of the necklace hanging against soft, cool pale-grey seamless paper, the charms together in a small bunch, sharp, with the chain above them softening out of focus. Soft, diffused light from one side; quiet, minimal and modern.",
+  },
+  {
+    id: "cream_card",
+    label: "Cream still life",
+    text: "The necklace laid down on smooth cream card in a relaxed loop, the charms resting together at one end, photographed at a slight angle from above. A single soft light from the upper left gives each charm a small, soft shadow on the card. Minimal, warm, lots of empty space.",
+  },
+  {
+    id: "colour_block",
+    label: "Colour-block paper",
+    text: "A top-down flat lay across two sheets of matte paper meeting at a diagonal — dusty rose on one side, soft apricot on the other. The chain lies in a long, loose line across the join and the charms sit together at its lowest point. Soft, even daylight, gentle shadows.",
+  },
+  {
+    id: "sage_macro",
+    label: "Sage macro",
+    text: "A macro close-up of the charms hanging together at the bottom of the chain, in front of a soft out-of-focus background of pale sage and warm linen tones. Warm light from the side catches the edges of the charms. Very shallow depth of field — only the charms are sharp.",
+  },
+  {
+    id: "tabletop",
+    label: "Pale tabletop",
+    text: "The necklace resting on a smooth, pale grey-white tabletop, the chain in a loose curve and the charms lying together in a small group, seen from a low three-quarter angle. One soft light from behind and to the side, so each charm has a gentle reflection and a soft shadow on the surface. Clean, quiet, editorial.",
+  },
   {
     id: "hand",
     label: "Held in hand",
@@ -76,17 +124,39 @@ const CHARM_SCENES = [
   },
 ];
 
-/** When the brief sets the scene, each image still needs to look different. */
+/** When the brief sets the scene, each image still needs to look different: its own framing… */
 const COMPOSITIONS = [
   "a close, intimate framing on the bunch of charms",
-  "a slightly wider view that shows more of the scene, the charms still the clear subject",
+  "a slightly wider view that shows more of the scene, the necklace small and delicate in it",
   "a low three-quarter angle with a shallow depth of field",
   "a top-down overhead view",
+  "a relaxed, slightly off-centre handheld framing",
+  "a quiet, centred framing with lots of empty space around the necklace",
+  "a macro close-up where only the charms are sharp",
+  "the necklace hanging, framed on the lower part of the chain",
+];
+
+/** …and its own light. */
+const LIGHTS = [
+  "soft window daylight from one side",
+  "one band of low, warm sunlight falling diagonally across the scene",
   "soft backlight from a window behind",
   "low side light with long, soft shadows",
-  "a relaxed, slightly off-centre handheld framing",
-  "a quiet, centred framing with lots of space around the necklace",
+  "even, soft overcast daylight",
+  "warm late-afternoon light",
+  "one soft studio light with a gentle shadow",
+  "cool, calm morning light",
 ];
+
+/** A copy of `list` in random order — each run gets its own mix. */
+function shuffled(list) {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
 
 const CHARM_ASPECT_RATIOS = { square: "1:1", portrait: "4:5", landscape: "16:9", story: "9:16" };
 
@@ -94,7 +164,8 @@ const CHARM_ASPECT_RATIOS = { square: "1:1", portrait: "4:5", landscape: "16:9",
 function necklaceBlock(count, metal) {
   const plural = count > 1;
   return `ONE NECKLACE, ALL THE CHARMS
-- Thread ${plural ? `all ${count} attached charms` : "the attached charm"} onto exactly ONE fine curb chain (about 1–1.5 mm thick) ${metal}. There is only one chain in the image — never two or more chains, no layering, no second necklace or bracelet. The chain is the only thing added to the jewellery.
+- Thread ${plural ? `all ${count} attached charms` : "the attached charm"} onto exactly ONE very thin, delicate chain ${metal} — a dainty fine cable or fine curb chain about 0.8–1 mm thick, the kind of fine everyday chain sold with small charms. In the photo the chain reads as a fine thread of metal next to the charms: never chunky, heavy, wide-linked, paperclip or statement-sized. There is only one chain in the image — never two or more chains, no layering, no second necklace or bracelet. The chain is the only thing added to the jewellery.
+- The whole necklace is small, fine and delicate — dainty jewellery, never bold or oversized.
 ${
   plural
     ? `- HOW REAL CHARMS HANG: each charm hangs from the chain by its own small jump ring, and the rings are free to slide — so, exactly as on a real necklace, gravity has pulled them all down to the lowest point of the chain, where they gather close together in one natural cluster. They touch and nudge each other, sit at slightly different depths, and some are turned a little sideways or tilted — but they overlap only slightly at their edges, so the front of every charm stays clearly visible. When the necklace lies on a surface they lie together in a small, loose group where the chain bottoms out.
@@ -122,11 +193,11 @@ const PHOTO_BLOCK = `A REAL PHOTOGRAPH — IT MUST NOT LOOK AI-GENERATED
 const NO_TEXT = "NO TEXT — no words, letters, numbers, logos or watermarks anywhere in the image.";
 
 /** The scene for one image: a curated one, or the brand's brief with this image's own angle and light. */
-function sceneBlock({ brief, scene, index, total }) {
+function sceneBlock({ brief, scene, composition, light, index, total }) {
   if (!brief) return `THE SCENE\n${scene.text}`;
   return `THE SCENE — FROM THE BRAND'S BRIEF (follow it first)
 "${brief}"
-- If the brief describes a setting, place, surface, props or a way of showing the necklace, build the image around exactly that, and give this image its own camera angle, framing and light: ${COMPOSITIONS[index % COMPOSITIONS.length]}.
+- If the brief describes a setting, place, surface, props or a way of showing the necklace, build the image around exactly that, and give this image its own camera angle and light: ${composition}, with ${light} (unless the brief asks for a different light).
 - If the brief only asks for a colour, light, mood or detail, apply it to this scene: ${scene.text}
 - The brief never changes the charms themselves: it is still exactly one chain, with the charms bunched together naturally.${total > 1 ? `\n- This is image ${index + 1} of ${total}: it must look clearly different from the others.` : ""}`;
 }
@@ -140,8 +211,13 @@ function buildCharmStoryShots(options, sourceImages, count) {
   const metal = CHARM_METALS[options.metal] || CHARM_METALS.match;
   const aspect = Object.hasOwn(CHARM_ASPECT_RATIOS, options.aspect) ? options.aspect : "portrait";
 
+  // Picked fresh for every run, without repeats until a list runs out.
+  const scenes = shuffled(CHARM_SCENES);
+  const compositions = shuffled(COMPOSITIONS);
+  const lights = shuffled(LIGHTS);
+
   return Array.from({ length: count }, (_, index) => {
-    const scene = CHARM_SCENES[index % CHARM_SCENES.length];
+    const scene = scenes[index % scenes.length];
     return {
       id: `look${index + 1}`,
       label: brief ? `Look ${index + 1}` : scene.label,
@@ -149,7 +225,14 @@ function buildCharmStoryShots(options, sourceImages, count) {
 
 ${necklaceBlock(sourceImages.length, metal)}
 
-${sceneBlock({ brief, scene, index, total: count })}
+${sceneBlock({
+  brief,
+  scene,
+  composition: compositions[index % compositions.length],
+  light: lights[index % lights.length],
+  index,
+  total: count,
+})}
 
 ${PHOTO_BLOCK}
 

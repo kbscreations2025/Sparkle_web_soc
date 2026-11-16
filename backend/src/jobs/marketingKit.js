@@ -552,27 +552,49 @@ registerJobHandler(CHARM_STORY_JOB, (context) => {
  * bracelets to stack, a charm collection, or one piece — worn together by one
  * model in a cinematic editorial shot, a different pose per image. Saved in
  * the Campaign Kit shape like Festive Poster.
+ *
+ * The model is either created in the shot or picked from the model library,
+ * the same two ways Campaign Kit names one (`modelSource`): a library model by
+ * reference, read here; a photo still saving to the library as the first
+ * source image.
  */
-registerJobHandler(ON_MODEL_JOB, (context) => {
+registerJobHandler(ON_MODEL_JOB, async (context) => {
   const kitId = newKitId();
   const options = context.data.options || {};
+  const modelSource = !context.data.isRefinement ? context.data.modelSource ?? null : null;
+  const ref = modelSource === "library" ? context.data.modelRef : null;
+  const loadedModel = ref ? await loadModelImage(ref) : null;
+
+  /** The model photo, if any, and the pieces — however the run named its model. */
+  const split = (sourceImages) => {
+    if (loadedModel) return { modelImage: loadedModel, pieces: sourceImages };
+    if (modelSource === "upload") return { modelImage: sourceImages[0], pieces: sourceImages.slice(1) };
+    return { modelImage: null, pieces: sourceImages };
+  };
 
   return runGenerationJob({
     ...context,
     tool: "marketing_kit",
-    buildShots: ({ data, count }) => buildOnModelShots(data.options || {}, data.sourceImages, count),
+    buildShots: ({ data, count }) => {
+      const { modelImage, pieces } = split(data.sourceImages);
+      return buildOnModelShots(data.options || {}, pieces, count, { modelImage });
+    },
     buildRefinePrompt: buildOnModelRefinePrompt,
-    params: { ...options, mode: "on_model", kitId: String(kitId) },
+    params: { ...options, mode: "on_model", ...(ref ? { modelId: ref.id } : {}), kitId: String(kitId) },
     persist: context.data.isRefinement
       ? undefined
-      : (run) =>
-          saveShotsKit(run, {
+      : (run) => {
+          const { pieces } = split(run.data.sourceImages);
+          const title = `Styled on Model · ${pieces.length} piece${pieces.length === 1 ? "" : "s"}`;
+          if (ref) return saveShotsKit(run, { kind: "on_model", kitId, title, modelImage: null, modelRef: ref, sourceImages: pieces });
+          return saveShotsKit(run, {
             kind: "on_model",
             kitId,
-            title: `Styled on Model · ${run.data.sourceImages.length} piece${run.data.sourceImages.length === 1 ? "" : "s"}`,
-            modelImage: null,
-            sourceImages: run.data.sourceImages,
-          }),
+            title,
+            modelImage: modelSource === "upload" ? run.data.sourceImages[0] : null,
+            sourceImages: pieces,
+          });
+        },
   });
 });
 

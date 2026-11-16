@@ -21,7 +21,7 @@ import {
   type ImageEditModelId,
 } from "@/lib/api";
 import { CAMPAIGN_ASPECTS } from "@/lib/campaignOptions";
-import { CHARM_COUNT_OPTIONS, CHARM_METALS, CHARM_SCENES, MAX_CHARMS } from "@/lib/charmStory";
+import { CHARM_COUNT_OPTIONS, CHARM_METALS, MAX_CHARMS } from "@/lib/charmStory";
 import { makeThumbnail } from "@/lib/image";
 import { useKitOpensInChat } from "@/lib/useKitOpensInChat";
 import { filesToUploadItems, uploadErrorMessage } from "@/lib/uploads";
@@ -103,8 +103,6 @@ function CharmShotsWorkspace() {
 
   const brief = description.trim();
   const ready = charms.length > 0;
-  // The scenes this run will use, in the backend's order — wrapping if more images than scenes.
-  const scenes = Array.from({ length: count }, (_, index) => CHARM_SCENES[index % CHARM_SCENES.length]);
 
   async function handleGenerate() {
     if (!ready) return;
@@ -161,37 +159,44 @@ function CharmShotsWorkspace() {
 
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
         <div className="grid w-full items-start gap-6 lg:grid-cols-[60fr_40fr] lg:gap-8">
+          {/* The charms lead the wide column — they're the one thing every run needs —
+              with how they're shown underneath; the scene and the button sit on the right. */}
           <div className="space-y-5">
-            <section className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-cream">
-                What you&apos;ll get{" "}
+            <section className="space-y-3">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-cream">
+                The charms{" "}
                 <span className="font-normal normal-case tracking-normal text-faint">
-                  — {count} image{count > 1 ? "s" : ""}, every one with all your charms on a single chain
+                  — {charms.length === 1 ? "1 charm" : `${charms.length} charms`} · add as many as you like
                 </span>
-              </p>
-              {brief ? (
-                <p className="text-[12px] leading-relaxed text-cream/80">
-                  Your description sets the scene. Each image follows it with its own angle, framing and light.
-                </p>
+              </h2>
+              {charms.length === 0 ? (
+                <UploadZone items={[]} onAdd={addCharms} onRemove={() => {}} />
               ) : (
-                <>
-                  <ol className="flex flex-wrap gap-2">
-                    {scenes.map((scene, index) => (
-                      <li
-                        key={`${scene}-${index}`}
-                        className="rounded-full border border-gold/25 bg-gold/[0.06] px-3 py-1 text-[11px] text-cream"
+                // Once there are charms, the + tile leads one row and the charms follow it, wrapping.
+                <div className="flex flex-wrap items-start gap-2">
+                  <UploadZone items={[]} onAdd={addCharms} onRemove={() => {}} compact />
+                  {charms.map((charm) => (
+                    <div key={charm.id} className="relative h-16 w-16 shrink-0 rounded-lg border border-white/[0.10] bg-white p-1">
+                      <button
+                        type="button"
+                        onClick={() => setCharmPreview({ src: charm.dataUrl, key: charm.id })}
+                        title={charm.name}
+                        className="block h-full w-full"
                       >
-                        <span className="mr-1 text-faint">{index + 1}.</span>
-                        {scene}
-                      </li>
-                    ))}
-                  </ol>
-                  <p className="text-[11px] leading-relaxed text-faint">
-                    Each image is set somewhere different and shot like a real photo — natural light, the charms bunched
-                    together at the bottom of the chain the way they really hang. To pick the scene yourself, describe it in
-                    the box on the right.
-                  </p>
-                </>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={charm.dataUrl} alt={charm.name} className="h-full w-full object-contain" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Remove charm"
+                        onClick={() => setCharms((current) => current.filter((entry) => entry.id !== charm.id))}
+                        className="absolute right-0.5 top-0.5 rounded-full bg-black/50 p-0.5 text-white/70 hover:text-white"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
             </section>
 
@@ -201,36 +206,6 @@ function CharmShotsWorkspace() {
           </div>
 
           <div className="space-y-5 lg:sticky lg:top-0">
-            <section className="space-y-3">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-cream">
-                The charms{" "}
-                <span className="font-normal normal-case tracking-normal text-faint">
-                  — {charms.length === 1 ? "1 charm" : `${charms.length} charms`} · add as many as you like
-                </span>
-              </h2>
-              <UploadZone items={[]} onAdd={addCharms} onRemove={() => {}} compact />
-              {charms.length > 0 && (
-                <ul className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-                  {charms.map((charm) => (
-                    <li key={charm.id} className="relative rounded-lg border border-white/[0.10] bg-white p-1">
-                      <button type="button" onClick={() => setCharmPreview({ src: charm.dataUrl, key: charm.id })} className="block w-full">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={charm.dataUrl} alt={charm.name} className="aspect-square w-full object-contain" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Remove charm"
-                        onClick={() => setCharms((current) => current.filter((entry) => entry.id !== charm.id))}
-                        className="absolute right-1 top-1 rounded-full bg-black/50 p-0.5 text-white/70 hover:text-white"
-                      >
-                        <X size={11} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
             <div className="space-y-2">
               <PromptCard
                 label="Describe the scene (optional)"

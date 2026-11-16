@@ -522,6 +522,10 @@ router.post("/on-model", async (req, res) => {
     description,
     aspect,
     count,
+    // Optional: a model from the library (or a just-uploaded photo) to wear the
+    // pieces. Without one, the model is created in the shot, as before.
+    modelId,
+    modelImage,
     model: requestedModel,
     quality: requestedQuality,
     refineImage,
@@ -562,12 +566,32 @@ router.post("/on-model", async (req, res) => {
     // Index-aligned with the photos; an unknown type is left to the photo.
     types: pieces.map((_, i) => (ON_MODEL_PIECE_TYPES.includes(types?.[i]) ? types[i] : "auto")),
     arrangement: ON_MODEL_ARRANGEMENTS.includes(arrangement) ? arrangement : "auto",
-    tone: ON_MODEL_TONES.includes(tone) ? tone : "warm_cinematic",
+    tone: ON_MODEL_TONES.includes(tone) ? tone : "natural",
     // The brief, when written, leads (see sceneBlock in prompts/onModel.js).
     description: typeof description === "string" ? description.replace(/\s+/g, " ").trim().slice(0, 1000) : "",
     aspect: Object.hasOwn(ON_MODEL_ASPECT_RATIOS, aspect) ? aspect : "portrait",
   };
   const images = Math.min(MAX_ON_MODEL_IMAGES, clampCount(count, 1));
+
+  let baseModel = null;
+  try {
+    baseModel = await resolveBaseModel({ dbUser: req.dbUser, modelId, modelImage });
+  } catch (err) {
+    return res.status(400).json({ status: "error", message: err.message, code: "invalid" });
+  }
+  /*
+   * Same shape as Campaign Kit: a library model by reference (read when the
+   * job runs), or an upload still saving as the first source image —
+   * `modelSource` says which, so the job knows what the first image is.
+   */
+  const modelFields = baseModel
+    ? {
+        ...modelPayload(baseModel, pieces),
+        modelSource: baseModel.ref ? "library" : "upload",
+        // The pieces keep the role they had before a model could be picked.
+        ...(baseModel.ref ? {} : { sourceRoles: ["model", ...pieces.map(() => "uploaded")] }),
+      }
+    : { sourceImages: pieces, modelSource: null };
 
   return queueGeneration(req, res, {
     type: ON_MODEL_JOB,
@@ -588,7 +612,7 @@ router.post("/on-model", async (req, res) => {
     },
     payload: {
       isRefinement: false,
-      sourceImages: pieces,
+      ...modelFields,
       options,
       count: images,
       defaultCount: 1,

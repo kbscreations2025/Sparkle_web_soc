@@ -1858,6 +1858,10 @@ export function styledOnModel(body: {
   aspect: string;
   /** How many images, 1–8. */
   count: number;
+  /** A model from the library to wear the pieces; leave both out to have one created. */
+  modelId?: string;
+  /** A just-uploaded model photo still saving to the library. */
+  modelImage?: string;
   model: string;
   quality?: string;
   preview?: string | null;

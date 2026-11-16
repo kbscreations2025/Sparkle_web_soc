@@ -1,6 +1,7 @@
 /**
- * Styled on Model's choices. The ids and the pose order must match the
- * backend's prompts/onModel.js, which describes each to the model.
+ * Styled on Model's choices. The ids must match the backend's
+ * prompts/onModel.js, which describes each to the model. The poses live only
+ * there — the backend picks one per image at random.
  */
 
 /** The backend's MAX_ON_MODEL_PIECES. */
@@ -35,26 +36,15 @@ export const ARRANGEMENTS = [
   { id: "stacked", label: "Stacked rings & bracelets", hint: "Rings across her fingers and bracelets stacked on one wrist, hands close to the camera." },
 ] as const;
 
-/** The cinematic colour grade. Swatches are a hint of each look. */
+/** The colour grade, default first. Swatches are a hint of each look. */
 export const TONES = [
+  { id: "natural", label: "Natural glow", swatch: "linear-gradient(135deg,#f3e6d8,#c8946a)" },
   { id: "warm_cinematic", label: "Warm cinematic", swatch: "linear-gradient(135deg,#f2c27b,#7a4a2a)" },
   { id: "soft_editorial", label: "Soft editorial", swatch: "linear-gradient(135deg,#f6efe6,#d6c3ad)" },
   { id: "moody", label: "Moody low-light", swatch: "linear-gradient(135deg,#5a3f2b,#0f0b09)" },
   { id: "golden_hour", label: "Golden hour", swatch: "linear-gradient(135deg,#ffd37f,#d3714a)" },
   { id: "riviera", label: "Sunlit Riviera", swatch: "linear-gradient(135deg,#f7f2e8,#5d90b9)" },
   { id: "evening", label: "Evening glamour", swatch: "linear-gradient(135deg,#55391f,#141018)" },
-] as const;
-
-/** One pose per image, in the order the backend uses them. */
-export const ON_MODEL_POSES = [
-  "Open shirt, below the chin",
-  "Hand at the jaw",
-  "Chin on wrist",
-  "Lapel pull",
-  "Hair sweep",
-  "Over the shoulder",
-  "Collarbone close-up",
-  "Leaning in",
 ] as const;
 
 /** Ideas that fill the description box with one click. */
