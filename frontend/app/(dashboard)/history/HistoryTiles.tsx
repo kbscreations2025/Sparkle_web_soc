@@ -50,6 +50,27 @@ const TILE_ACTION_ICON = "h-2.5 w-2.5 text-white/85 md:h-3 md:w-3";
 export const GRID_GAP = 10;
 
 /**
+ * From this many to a row (the size slider), a tile is too narrow for its
+ * badges and action pill — they would run past its edge. A dense tile shows
+ * the picture alone and brings the chrome back on hover; the design number
+ * stays, being what a page of search results is told apart by.
+ */
+export const DENSE_FROM_COLUMNS = 8;
+
+/** Chrome a dense tile fades out until it is hovered or focused. */
+const DENSE_FADE = "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100";
+
+/**
+ * The same, for chrome holding buttons: faded is not enough, since an
+ * invisible Continue or Delete would still catch a click meant for the
+ * picture. Clickable again once the tile is hovered and they show.
+ */
+const DENSE_HIDDEN = cn(
+  DENSE_FADE,
+  "pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
+);
+
+/**
  * What a tile shows when the run produced words instead of pictures.
  *
  * An excerpt rather than an icon: these results are told apart by what they
@@ -111,7 +132,7 @@ export function KitsGrid({
   columns: number;
   onDelete: (kit: MarketingKitSummary) => void;
 } & KitResultActions) {
-  if (loading || kits === null) return <SkeletonGrid rows={2} />;
+  if (loading || kits === null) return <SkeletonGrid rows={2} columns={columns} />;
 
   if (kits.length === 0) {
     return (
@@ -125,7 +146,7 @@ export function KitsGrid({
   return (
     <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP }}>
       {kits.map((kit) => (
-        <KitTile key={kit.id} kit={kit} onDelete={onDelete} {...actions} />
+        <KitTile key={kit.id} kit={kit} onDelete={onDelete} dense={columns >= DENSE_FROM_COLUMNS} {...actions} />
       ))}
     </div>
   );
@@ -134,12 +155,13 @@ export function KitsGrid({
 function KitTile({
   kit,
   onDelete,
+  dense,
   items,
   canContinue,
   canView,
   onOpen,
   onContinue,
-}: { kit: MarketingKitSummary; onDelete: (kit: MarketingKitSummary) => void } & KitResultActions) {
+}: { kit: MarketingKitSummary; onDelete: (kit: MarketingKitSummary) => void; dense: boolean } & KitResultActions) {
   // Campaign Kit and Festive Poster open the results viewer once their run
   // has loaded; until then (and for every other kind) the tile opens the kit.
   const item = OPENS_AS_RESULT.has(kit.kind) ? items[kit.id] : undefined;
@@ -180,7 +202,12 @@ function KitTile({
         </Link>
       )}
 
-      <div className="pointer-events-none absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2">
+      <div
+        className={cn(
+          "pointer-events-none absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2",
+          dense && DENSE_FADE
+        )}
+      >
         {/* The same badge the results tiles carry, in Marketing Kit's own
             colour, so a kit is recognisable at a glance in either tab. */}
         <span
@@ -193,7 +220,14 @@ function KitTile({
         {/* A teammate's kit is readable but not theirs to remove — the
             server refuses it, so the tile doesn't offer it. */}
         {(item || kit.isOwn !== false) && (
-          <div className={cn(TILE_ACTION_GROUP, "pointer-events-auto")}>
+          <div
+            className={cn(
+              TILE_ACTION_GROUP,
+              dense
+                ? "pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
+                : "pointer-events-auto"
+            )}
+          >
             {/* The same chat and download buttons an image tile has. */}
             {item && canContinue(item) && (
               <button
@@ -240,7 +274,12 @@ function KitTile({
         )}
       </div>
 
-      <div className="pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
+      <div
+        className={cn(
+          "pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2",
+          dense && DENSE_FADE
+        )}
+      >
         {/* Who made it, in the same corner and the same chip the results
             tiles use for it — the kit's own name is the badge above and the
             tooltip on the tile, so this corner stays the one place you look
@@ -290,7 +329,19 @@ function timeAgoShort(iso: string) {
  */
 const SKELETON_GRID_COLUMNS = "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6";
 
-export function SkeletonGrid({ rows }: { rows: number }) {
+export function SkeletonGrid({ rows, columns }: { rows: number; columns?: number }) {
+  // A size the person picked with the slider is known exactly, so the
+  // stand-in takes the same shape as the grid it hands over to.
+  if (columns) {
+    return (
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP }}>
+        {Array.from({ length: columns * rows }).map((_, i) => (
+          <div key={i} className="aspect-square animate-pulse rounded-lg bg-white/[0.04] md:rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
   // Enough tiles for the widest layout; the surplus is hidden at narrower
   // ones so every breakpoint shows the same number of *rows* rather than the
   // same number of tiles.
@@ -323,6 +374,8 @@ type HistoryTileProps = {
   /** Their own result, or a colleague's with org.results.delete. */
   canDelete: boolean;
   deleting: boolean;
+  /** Too many to a row for the chrome — see DENSE_FROM_COLUMNS. */
+  dense: boolean;
   onOpen: (item: HistoryItem) => void;
   onContinue: (item: HistoryItem) => void;
   onDelete: (item: HistoryItem) => void;
@@ -343,6 +396,7 @@ export const HistoryTile = memo(
     canView,
     canDelete,
     deleting,
+    dense,
     onOpen,
     onContinue,
     onDelete,
@@ -374,7 +428,12 @@ export const HistoryTile = memo(
           <TextResultCover text={item.text} />
         )}
 
-        <div className="absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2">
+        <div
+          className={cn(
+            "absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2",
+            dense && DENSE_HIDDEN
+          )}
+        >
           <div className="flex min-w-0 items-center gap-1">
             <span
               className="max-w-[55%] truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
@@ -480,7 +539,12 @@ export const HistoryTile = memo(
                 #{item.designNo}
               </span>
             )}
-            <span className="max-w-full truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]">
+            <span
+              className={cn(
+                "max-w-full truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]",
+                dense && DENSE_FADE
+              )}
+            >
               {item.userName}
             </span>
           </div>
@@ -489,7 +553,12 @@ export const HistoryTile = memo(
               the actions: it is information about the tile, not a control, and
               a long name truncates before it rather than pushing it off. */}
           {item.outputs.length > 1 && (
-            <span className="flex h-5 shrink-0 items-center gap-0.5 rounded-full bg-black/55 px-1.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:h-6 md:text-[10px]">
+            <span
+              className={cn(
+                "flex h-5 shrink-0 items-center gap-0.5 rounded-full bg-black/55 px-1.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:h-6 md:text-[10px]",
+                dense && DENSE_FADE
+              )}
+            >
               <Copy size={9} className="md:h-2.5 md:w-2.5" /> {item.outputs.length}
             </span>
           )}
@@ -503,5 +572,6 @@ export const HistoryTile = memo(
     prev.canContinue === next.canContinue &&
     prev.canView === next.canView &&
     prev.canDelete === next.canDelete &&
-    prev.deleting === next.deleting
+    prev.deleting === next.deleting &&
+    prev.dense === next.dense
 );

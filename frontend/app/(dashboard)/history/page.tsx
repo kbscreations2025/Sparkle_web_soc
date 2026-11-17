@@ -39,7 +39,8 @@ import {
   withinRange,
   type DateRange,
 } from "./HistoryFilters";
-import { GRID_GAP, HistoryTile, KitsGrid, OPENS_AS_RESULT, SkeletonGrid } from "./HistoryTiles";
+import { TileSizeSlider } from "@/components/studio/TileSizeSlider";
+import { DENSE_FROM_COLUMNS, GRID_GAP, HistoryTile, KitsGrid, OPENS_AS_RESULT, SkeletonGrid } from "./HistoryTiles";
 
 const HISTORY_PERMISSION = "result.read.own";
 /** Opening a colleague's chat, read-only — see grants.js. */
@@ -154,7 +155,30 @@ function listParam(params: { get(name: string): string | null }, name: string) {
   return raw ? raw.split(",").filter(Boolean) : [];
 }
 
-/** 2 columns on mobile, 4 on tablet, 6 on desktop. */
+/**
+ * The size slider's range, from `md` up: fewest photos to a row (the biggest)
+ * to most (the smallest). Phones keep their fixed two or four.
+ */
+const COLUMNS_MIN = 2;
+const COLUMNS_MAX = 10;
+/**
+ * Where the slider's choice is kept — this browser only, a viewing preference
+ * like a window size, so nothing the server needs to know.
+ */
+const COLUMNS_STORAGE_KEY = "sparkle:history:columns";
+
+/** The column count picked earlier in this browser, if any and still in range. */
+function readStoredColumns(): number | null {
+  try {
+    const value = Number(window.localStorage.getItem(COLUMNS_STORAGE_KEY));
+    return Number.isInteger(value) && value >= COLUMNS_MIN && value <= COLUMNS_MAX ? value : null;
+  } catch {
+    // Storage blocked (a private window, strict settings) — the default layout it is.
+    return null;
+  }
+}
+
+/** 2 columns on mobile, 4 on tablet, 6 on desktop — until the slider says otherwise. */
 function useResponsiveColumns() {
   const tablet = useMinWidth(640);
   const desktop = useMinWidth(1024);
@@ -275,11 +299,49 @@ export default function HistoryPage() {
     if (kits) setPageCache(kitsKey, kits);
   }, [kits, kitsKey]);
 
-  const columns = useResponsiveColumns();
+  const responsiveColumns = useResponsiveColumns();
   // Which form the filter row takes — see `filterControls`.
   const tabletUp = useMinWidth(768);
   const wide = useMinWidth(1280);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * How many to a row, as picked with the size slider — from `md` up, where
+   * the slider shows. Null until someone picks, which keeps the responsive
+   * default. Read after mount: the server render has no storage to read.
+   */
+  const [pickedColumns, setPickedColumns] = useState<number | null>(null);
+  useEffect(() => {
+    setPickedColumns(readStoredColumns());
+  }, []);
+  const columns = tabletUp && pickedColumns ? pickedColumns : responsiveColumns;
+  /** The slider's choice, once it applies — the skeletons take its shape too. */
+  const chosenColumns = tabletUp && pickedColumns ? pickedColumns : undefined;
+
+  /**
+   * Set when the slider changes the size: the tile at the top of the screen
+   * at that moment (null near the top), to keep there while every row
+   * reflows around it — otherwise a reader far down the grid lands among
+   * different pictures. Unset for every other change of column count (the
+   * first paint correcting itself, a stored choice loading), which happen
+   * before there is anything to keep or anything measured to throw away.
+   */
+  const resizeRef = useRef<{ keep: string | null } | null>(null);
+  /**
+   * The tile being kept, and when — so steps of the slider in quick
+   * succession (a drag, repeated clicks) all keep the tile that was at the
+   * top when the adjusting began, rather than reading a position the last
+   * step's jump has not finished settling into.
+   */
+  const lastKeptRef = useRef<{ id: string | null; at: number } | null>(null);
+  /**
+   * True while the grid settles into a new size. Every mounted row changes
+   * height in the same commit, and the virtualizer measures them there — its
+   * synchronous re-render is refused mid-commit and the new heights were
+   * lost, leaving each row placed by the old size with a gap beneath it. Off
+   * for the change, as for the Back restore below.
+   */
+  const [resizing, setResizing] = useState(false);
 
   /** Writes the current view and filters back to the query string. */
   const syncUrl = useCallback(
@@ -529,18 +591,93 @@ export default function HistoryPage() {
   const pendingAnchor = useRef(restoreAnchor);
   const [restoring, setRestoring] = useState(Boolean(restoreAnchor));
 
+  /*
+   * Rows are keyed by size as well as position: row 12 at eight to a row is
+   * a different row from row 12 at five, and keying them apart means a new
+   * size starts the virtualizer afresh — the rows on screen re-mount and are
+   * measured at once, the rest are estimated for the new size — instead of
+   * placing rows by heights measured at the old one.
+   */
+  const getRowKey = useCallback((index: number) => `${columns}:${index}`, [columns]);
+
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
+    getItemKey: getRowKey,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 200,
+    // A row is one square tile tall, and a tile's width follows from the
+    // column count — close enough that rows not yet measured don't throw the
+    // scrollbar off, now that the count can change under the reader.
+    estimateSize: () => {
+      const width = scrollRef.current?.clientWidth;
+      if (!width) return 200;
+      // Less the scroller's side padding (p-4 at its widest).
+      return Math.max(60, (width - 32 - GRID_GAP * (columns - 1)) / columns);
+    },
     overscan: 6,
     gap: GRID_GAP,
     // A jump to a row far down mounts and measures that row's tiles inside
     // React's commit, where the virtualizer's synchronous re-render is
-    // refused. Off only for the jump; ordinary scrolling keeps it.
-    useFlushSync: !restoring,
+    // refused. Off only for the jump, and while a new tile size settles;
+    // ordinary scrolling keeps it.
+    useFlushSync: !restoring && !resizing,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
+
+  /** The size slider: remembers the choice, and the tile to keep on screen. */
+  function changeColumns(next: number) {
+    if (next === columns) return;
+    const now = Date.now();
+    const last = lastKeptRef.current;
+    let keep: string | null;
+    if (last && now - last.at < 800) {
+      keep = last.id;
+    } else {
+      const el = scrollRef.current;
+      const top =
+        el && el.scrollTop >= 48 ? rowVirtualizer.getVirtualItems().find((row) => row.end > el.scrollTop) : undefined;
+      keep = top ? (rows[top.index]?.[0]?.id ?? null) : null;
+    }
+    lastKeptRef.current = { id: keep, at: now };
+    resizeRef.current = { keep };
+    // Same batch as the new size, so the commit that reshapes the rows
+    // already runs with synchronous re-renders off.
+    setResizing(true);
+    setPickedColumns(next);
+    try {
+      window.localStorage.setItem(COLUMNS_STORAGE_KEY, String(next));
+    } catch {
+      // Not remembered past this visit — the grid still changes now.
+    }
+  }
+
+  /*
+   * A new size reshapes every row; the tile that was at the top of the
+   * screen is brought back there. A frame later, for the same reason as the
+   * restore below — the virtualizer re-renders synchronously as it scrolls.
+   * (No re-measure here: the rows are keyed by size — see getRowKey — and
+   * clearing the virtualizer's measurements would also throw away the new
+   * heights it has just taken, leaving every row placed by its estimate.)
+   */
+  useEffect(() => {
+    const pending = resizeRef.current;
+    if (!pending) return;
+    resizeRef.current = null;
+    if (!pending.keep) return;
+    const index = rows.findIndex((row) => row.some((item) => item.id === pending.keep));
+    if (index < 0) return;
+    const frame = requestAnimationFrame(() => rowVirtualizer.scrollToIndex(index, { align: "start" }));
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the size alone: `rows` changes with every page loaded, and re-running then would re-measure and jump on every scroll-triggered fetch
+  }, [columns]);
+
+  // Once the size has stopped changing for long enough to land the jump and
+  // measure the rows on screen, ordinary scrolling gets its synchronous
+  // renders back. Re-armed by each further change while dragging.
+  useEffect(() => {
+    if (!resizing) return;
+    const settled = setTimeout(() => setResizing(false), 400);
+    return () => clearTimeout(settled);
+  }, [resizing, columns]);
 
   /*
    * ── Returning to where the reader was ────────────────────────────────────
@@ -1212,8 +1349,9 @@ export default function HistoryPage() {
         <div
           ref={scrollRef}
           // Room for the floating search bar above the first row; the grid
-          // still scrolls up underneath it.
-          className={cn("thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3 lg:p-4", phoneSearch && "pt-14")}
+          // still scrolls up underneath it. From `md`, room below the last
+          // row too, so it can scroll clear of the size slider.
+          className={cn("thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3 md:pb-14 lg:p-4 lg:pb-14", phoneSearch && "pt-14")}
         >
           {/* A misspelt word was searched as the word the library uses — said
               plainly, with a way back to exactly what was typed. */}
@@ -1243,7 +1381,7 @@ export default function HistoryPage() {
               onContinue={handleContinue}
             />
           ) : loading ? (
-            <SkeletonGrid rows={3} />
+            <SkeletonGrid rows={3} columns={chosenColumns} />
           ) : visibleItems.length === 0 ? (
             <p className="px-2 py-10 text-center text-sm text-faint">
               {search ? `No results for “${correctedSearch ?? search}”.` : "Nothing generated yet."}
@@ -1270,6 +1408,7 @@ export default function HistoryPage() {
                         canView={viewable(item)}
                         canDelete={deletable(item)}
                         deleting={deletingId === item.id}
+                        dense={columns >= DENSE_FROM_COLUMNS}
                         onOpen={openItem}
                         onContinue={handleContinue}
                         onDelete={requestDelete}
@@ -1283,11 +1422,24 @@ export default function HistoryPage() {
 
           {view === "history" && loadingMore && (
             <div className="pt-1">
-              <SkeletonGrid rows={1} />
+              <SkeletonGrid rows={1} columns={chosenColumns} />
             </div>
           )}
         </div>
         <ScrollEnds scrollerRef={scrollRef} />
+        {/* Photo size, bottom right over the grid — more to a row to scan,
+            fewer to look closely. From `md` only: a phone's two or four to a
+            row is all its width allows. Kept clear of the scrollbar lane and
+            its jump arrows, on a solid ground since tiles pass beneath it. */}
+        {tabletUp && (
+          <TileSizeSlider
+            columns={columns}
+            min={COLUMNS_MIN}
+            max={COLUMNS_MAX}
+            onChange={changeColumns}
+            className="absolute bottom-3 right-5 z-20 border-white/10 bg-surface-raised/95 shadow-lg backdrop-blur-sm"
+          />
+        )}
       </div>
 
       <HistoryLightbox

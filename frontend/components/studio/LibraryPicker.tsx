@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, ImageOff, Search, Loader2, Sparkles, Upload, Users, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, ChevronDown, ImageOff, Search, Loader2, Sparkles, Upload, Users } from "lucide-react";
+import { TileSizeSlider } from "./TileSizeSlider";
 import { fetchLibrary, fetchLibraryFolders, type LibraryItem, type LibrarySection } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { libraryItemsToFiles } from "@/lib/library";
@@ -535,7 +536,7 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
           {/* From `md`, whose pictures sits on the month heading's line, top
               right of the grid, so it costs the grid no height of its own. */}
           <div className="absolute right-4 top-1 z-[2] hidden items-center gap-2 sm:right-5 md:flex">
-            <TileSizeSlider columns={columns} onChange={changeColumns} />
+            <TileSizeSlider columns={columns} min={COLUMNS_MIN} max={COLUMNS_MAX} onChange={changeColumns} />
             {canReadTeam && (
               <div className="w-44">
                 <PersonSelect view={view} members={members} selfName={user?.name} onChange={changeView} />
@@ -784,61 +785,6 @@ function UploadBox({
       </span>
       <span className="hidden text-[10px] text-faint md:block">or drop photos here</span>
     </button>
-  );
-}
-
-/** Photo size: drag right for bigger photos (fewer to a row), left for smaller. */
-function TileSizeSlider({ columns, onChange }: { columns: number; onChange: (columns: number) => void }) {
-  // The slider runs small → big, columns the other way.
-  const size = COLUMNS_MAX + COLUMNS_MIN - columns;
-  const percent = ((size - COLUMNS_MIN) / (COLUMNS_MAX - COLUMNS_MIN)) * 100;
-  const step =(delta: number) => onChange(Math.min(COLUMNS_MAX, Math.max(COLUMNS_MIN, columns - delta)));
-  return (
-    <div className="flex h-7 items-center gap-1 rounded-md border border-white/[0.1] bg-white/[0.03] px-1.5 text-muted">
-      <button type="button" onClick={() => step(-1)} aria-label="Smaller photos" title="Smaller photos" className="hover:text-cream">
-        <ZoomOut size={11} />
-      </button>
-      {/* Drawn by hand — a thin line with a dot per stop and a round knob —
-          over a transparent native range that does the dragging and keys. */}
-      <div className="relative mx-1 flex h-4 w-16 items-center">
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-faint/50" />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute left-0 top-1/2 h-px -translate-y-1/2 bg-gold"
-          style={{ width: `${percent}%` }}
-        />
-        {Array.from({ length: COLUMNS_MAX - COLUMNS_MIN + 1 }, (_, index) => (
-          <span
-            key={index}
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full",
-              index + COLUMNS_MIN <= size ? "bg-gold" : "bg-faint/70"
-            )}
-            style={{ left: `${(index / (COLUMNS_MAX - COLUMNS_MIN)) * 100}%` }}
-          />
-        ))}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-gold bg-surface-raised shadow-sm"
-          style={{ left: `${percent}%` }}
-        />
-        <input
-          type="range"
-          min={COLUMNS_MIN}
-          max={COLUMNS_MAX}
-          step={1}
-          value={size}
-          onChange={(event) => onChange(COLUMNS_MAX + COLUMNS_MIN - Number(event.target.value))}
-          aria-label="Photo size"
-          title={`${columns} per row`}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        />
-      </div>
-      <button type="button" onClick={() => step(1)} aria-label="Bigger photos" title="Bigger photos" className="hover:text-cream">
-        <ZoomIn size={11} />
-      </button>
-    </div>
   );
 }
 
