@@ -21,6 +21,7 @@ import {
   cleanImage,
   checkCleaningDuplicates,
   refineImage,
+  fetchConversation,
   fetchConversationForTool,
   resolveModelId,
   toModelOptions,
@@ -85,11 +86,37 @@ type Job = {
  * couldn't hash (an insecure origin) — that photo just isn't checked.
  * `fromLibrary` marks one picked from the library rather than the disk.
  */
-type CleaningUpload = UploadItem & { sourceChecksum: string | null; checksum: string | null; fromLibrary?: boolean };
+type CleaningUpload = UploadItem & {
+  sourceChecksum: string | null;
+  checksum: string | null;
+  fromLibrary?: boolean;
+  /**
+   * The design number this photo suggests: its file name, or — for a library
+   * pick, whose name was made up — the number its earlier cleaning was saved
+   * under. Null when neither says anything.
+   */
+  designNo?: string | null;
+};
 
 /** The first turn of a cleaning thread: the instruction, with the photo it was about. */
 function openingTurn(id: string, original: string, content: string): ChatMsg {
   return { id, role: "user", content, image: original || undefined };
+}
+
+/** Names a browser gives a pasted or unnamed image — not a design code. */
+const GENERIC_FILE_NAMES = /^(image|blob|untitled|pasted.*|screenshot.*|img_?\d*)$/i;
+
+/**
+ * The design number a photo's own file name stands for — "R-1203.jpg" is
+ * R-1203 — so photos named by their design code are searchable in History
+ * without typing it. Null for a pasted image or a pick from the library, whose
+ * names were made up and say nothing about the design.
+ */
+function designNoFromFileName(item: CleaningUpload): string | null {
+  if (item.fromLibrary) return null;
+  const stem = item.name.replace(/\.[^.]+$/, "").trim();
+  if (!stem || GENERIC_FILE_NAMES.test(stem)) return null;
+  return stem.slice(0, DESIGN_NO_MAX);
 }
 
 type ModelOption = { id: string; label: string; quality: string; description: string; badge?: string };
@@ -149,6 +176,12 @@ export function CleaningWorkspace<TModel extends string>({
   const [removeMarkings, setRemoveMarkings] = useState(true);
   /** Optional — labels every photo in this run so History can find them by it. */
   const [designNo, setDesignNo] = useState("");
+  /**
+   * The value the field was filled with from a photo's file name, so a run
+   * can tell an untouched auto-fill from something the person typed: left as
+   * filled, each photo in a batch is labelled with its own file name.
+   */
+  const autoDesignNo = useRef<string | null>(null);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
@@ -372,7 +405,8 @@ export function CleaningWorkspace<TModel extends string>({
             origin ? origin.fingerprint : fingerprintFile(file),
             fingerprintDataUrl(dataUrl),
           ]);
-          return { id: crypto.randomUUID(), name: file.name, dataUrl, sourceChecksum, checksum, fromLibrary: Boolean(origin) };
+          const upload: CleaningUpload = { id: crypto.randomUUID(), name: file.name, dataUrl, sourceChecksum, checksum, fromLibrary: Boolean(origin) };
+          return { ...upload, designNo: designNoFromFileName(upload) };
         })
       );
     } catch (err) {
@@ -408,6 +442,38 @@ export function CleaningWorkspace<TModel extends string>({
       } catch {
         // No answer is no warning — the upload goes ahead as it always did.
       }
+    }
+
+    /*
+     * A library pick has no real file name, but if it was cleaned before, that
+     * thread may carry the design number it was saved under — reuse it. Only
+     * threads this person may open come back with an id; a failed lookup just
+     * leaves the photo without one.
+     */
+    await Promise.all(
+      added.map(async (item) => {
+        const conversationId = earlier[item.id]?.latest.conversationId;
+        if (item.designNo || !conversationId) return;
+        try {
+          const thread = await fetchConversation(conversationId);
+          if (thread.status === "success" && thread.designNo) item.designNo = thread.designNo;
+        } catch {
+          // Nothing to suggest — the field stays as it is.
+        }
+      })
+    );
+
+    // Fill the design number from the first photo that suggests one, ready to
+    // edit — only while the field is empty or still holds an earlier
+    // auto-fill, so nothing the person typed is overwritten. A repeat photo
+    // fills it too, whether or not it is then added.
+    const suggested = added.map((item) => item.designNo).find(Boolean);
+    if (suggested) {
+      setDesignNo((current) => {
+        if (current.trim() && current !== autoDesignNo.current) return current;
+        autoDesignNo.current = suggested;
+        return suggested;
+      });
     }
 
     const flagged = added
@@ -464,6 +530,10 @@ export function CleaningWorkspace<TModel extends string>({
     setSelectedId(queued[0]?.id ?? null);
 
     for (const item of items) {
+      // An untouched auto-fill means "use the file names": each photo gets its
+      // own. Anything typed labels the whole batch.
+      const typed = label && label !== autoDesignNo.current ? label : "";
+      const itemDesignNo = typed || item.designNo || label;
       try {
         const result = await cleanImage({
           image: item.dataUrl,
@@ -474,7 +544,9 @@ export function CleaningWorkspace<TModel extends string>({
           // here it is recognised — see handleAdd.
           sourceChecksum: item.sourceChecksum,
           // Either prompt mode — it labels the run, it isn't part of the prompt.
-          ...(label ? { designNo: label } : {}),
+          // A typed number labels the whole batch; left empty, each photo is
+          // labelled with its own file name, which is usually the design code.
+          ...(itemDesignNo ? { designNo: itemDesignNo } : {}),
           ...(custom
             ? { customPrompt: custom }
             : { variant: promptVariant, removeMarkings, ...(notes ? { extraNotes: notes } : {}) }),
@@ -616,6 +688,7 @@ export function CleaningWorkspace<TModel extends string>({
     setChatInput("");
     // The next batch is most likely another design.
     setDesignNo("");
+    autoDesignNo.current = null;
     attach.reset();
   }
 
@@ -643,9 +716,9 @@ export function CleaningWorkspace<TModel extends string>({
         maxLength={DESIGN_NO_MAX}
         disabled={running}
         placeholder="e.g. R-1203"
-        className="w-44 rounded-lg border border-white/10 bg-surface-raised px-2.5 py-1.5 text-xs text-cream outline-none transition-colors placeholder:text-faint focus:border-gold/40 disabled:opacity-50"
+        className="w-48 rounded-lg border border-white/10 bg-surface-raised px-2.5 py-1.5 text-xs text-cream outline-none transition-colors placeholder:text-faint focus:border-gold/40 disabled:opacity-50"
       />
-      {items.length > 1 && designNo.trim() && (
+      {items.length > 1 && designNo.trim() && designNo !== autoDesignNo.current && (
         <span className="text-[11px] text-faint">Applies to all {items.length} photos</span>
       )}
     </label>
@@ -663,7 +736,17 @@ export function CleaningWorkspace<TModel extends string>({
             <UploadZone
               items={items}
               onAdd={handleAdd}
-              onRemove={(id) => setItems((c) => c.filter((i) => i.id !== id))}
+              onRemove={(id) => {
+                const left = items.filter((i) => i.id !== id);
+                setItems(left);
+                // An auto-filled name follows the photos: re-fill from what's
+                // left, or clear it. A typed number is left alone.
+                if (designNo === autoDesignNo.current) {
+                  const next = left.map((i) => i.designNo).find(Boolean) ?? null;
+                  autoDesignNo.current = next;
+                  setDesignNo(next ?? "");
+                }
+              }}
               disabled={running}
               max={maxImages}
             />
