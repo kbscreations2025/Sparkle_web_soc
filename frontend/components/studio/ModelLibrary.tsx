@@ -3,8 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { ChevronDown, ChevronUp, Globe, Loader2, Lock, type LucideIcon, Maximize2, MoreVertical, Pencil, Trash2, Upload, Wand2, X } from "lucide-react";
-import { Chip } from "./OptionChips";
+import { ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Droplet, Droplets, Globe, Layers, Loader2, Lock, type LucideIcon, Maximize2, MoreVertical, NotebookPen, Palette, Pencil, PersonStanding, RotateCcw, Ruler, Scissors, Shirt, Sparkles, Trash2, Upload, UserRound, Wand2, Waves, X } from "lucide-react";
 import { Lightbox } from "./Lightbox";
 import { ConfirmDialog } from "./ToolChrome";
 import { useAuth } from "@/lib/auth-context";
@@ -296,6 +295,31 @@ function PendingModelTile({ percent }: { percent: number }) {
 }
 
 /**
+ * The rounded notch in the builder panel's top-right corner that the close
+ * button sits in, with small fillets where it meets the top and right edges
+ * so the curve flows into them instead of meeting at a point.
+ *
+ * Drawn on a 64×64 box at the corner, matching the close button: 32px
+ * across, centred 15px in from the top and right edges (so it sits on the
+ * corner, a pixel proud), a 6px gap all round (notch radius 22, fillets 6).
+ * `NOTCH_EDGE` is just the curved part, stroked to carry the panel's border
+ * round the notch.
+ */
+const NOTCH_EDGE = "M22.49 0A6 6 0 0 1 28.17 7.93A22 22 0 0 0 56.07 35.83A6 6 0 0 1 64 41.51";
+const NOTCH_CORNER_SVG = encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M0 0H22.49A6 6 0 0 1 28.17 7.93A22 22 0 0 0 56.07 35.83A6 6 0 0 1 64 41.51V64H0Z"/></svg>`
+);
+/** Three mask layers, unioned: the notched corner, plus two plain blocks covering the rest of the panel. */
+const CORNER_NOTCH_MASK = (() => {
+  const layers = [
+    `url("data:image/svg+xml,${NOTCH_CORNER_SVG}") right top / 64px 64px no-repeat`,
+    "linear-gradient(#000, #000) left top / calc(100% - 64px) 64px no-repeat",
+    "linear-gradient(#000, #000) left 64px / 100% calc(100% - 64px) no-repeat",
+  ].join(", ");
+  return { mask: layers, WebkitMask: layers } as const;
+})();
+
+/**
  * The builder, as a dialog in the middle of the window.
  *
  * A full-width sheet stretched nine short attribute rows across the whole
@@ -331,30 +355,56 @@ function ModelBuilderDrawer({
         role="dialog"
         aria-label="Build a model"
         onClick={(event) => event.stopPropagation()}
-        className="animate-drawer-up flex max-h-[90vh] w-full flex-col overflow-hidden rounded-t-2xl border border-white/[0.08] bg-surface-deep shadow-2xl sm:max-h-[85vh] sm:max-w-2xl sm:rounded-2xl"
+        className="animate-drawer-up relative w-full sm:max-w-3xl sm:drop-shadow-[0_24px_48px_rgba(0,0,0,0.35)]"
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-3.5">
-          <div className="min-w-0">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-cream">
-              <Wand2 size={14} className="text-gold/70" /> Build a model
-            </h3>
-            <p className="mt-0.5 text-[11px] text-faint">
-              Pick only what matters to you — anything you leave blank is chosen for you.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close the builder"
-            className="shrink-0 rounded-lg p-1 text-faint transition-colors hover:text-cream"
+        {/* Sits half out of the corner, in the notch cut by `CORNER_NOTCH_MASK`
+            — outside the panel so the mask and overflow don't clip it. */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close the builder"
+          // Panel colours, graded top to bottom, with a soft warm drop shadow
+          // and a faint top highlight so it reads as a raised pebble of the
+          // panel rather than a separate dark control.
+          className="absolute -right-px -top-px z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] bg-gradient-to-b from-surface-raised to-surface text-muted shadow-[0_6px_14px_-4px_rgba(60,40,10,0.35),0_1px_3px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.18)] transition-[color,box-shadow,transform] hover:-translate-y-px hover:text-gold hover:shadow-[0_8px_18px_-4px_rgba(60,40,10,0.42),0_1px_3px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.18)]"
+        >
+          <X size={15} strokeWidth={1.75} />
+        </button>
+        <div
+          style={CORNER_NOTCH_MASK}
+          className="relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl border border-white/[0.08] bg-surface sm:max-h-[90vh] sm:rounded-2xl"
+        >
+          {/* The panel's border, carried round the notch. Stroked 2px on the
+              cut line so the mask leaves the inner 1px — the same weight and
+              place as the CSS border it continues. */}
+          <svg
+            aria-hidden
+            viewBox="0 0 64 64"
+            className="pointer-events-none absolute -right-px -top-px z-30 h-16 w-16 text-cream/10"
           >
-            <X size={16} />
-          </button>
+            <path d={NOTCH_EDGE} fill="none" stroke="currentColor" strokeWidth={2} />
+          </svg>
+          {/* Banner: serif title on the left, a model photo fading in on the right. */}
+          <div className="relative flex shrink-0 items-stretch overflow-hidden border-b border-white/[0.06] bg-gradient-to-r from-gold/[0.10] via-gold/[0.04] to-transparent">
+            {/* Small on phones; a step bigger from tablet width (md) up. */}
+            <div className="relative z-10 min-w-0 flex-1 py-3 pl-4 pr-2 md:px-7 md:py-5">
+              <h3 className="font-display text-lg font-semibold leading-tight text-cream md:text-[28px]">Build a Model</h3>
+              <p className="mt-0.5 text-[11px] text-muted md:mt-1 md:text-[13px]">
+                Pick what matters — anything left blank is chosen for you.
+              </p>
+            </div>
+            <div
+              aria-hidden
+              className="relative w-20 shrink-0 [mask-image:linear-gradient(to_right,transparent,black_45%)] md:w-44"
+            >
+              <Image src="/raw_to_ai/model_1.png" alt="" fill sizes="(min-width: 768px) 176px, 80px" className="object-cover object-[50%_15%]" />
+            </div>
+          </div>
+
+          <div className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">{children}</div>
+
+          <div className="shrink-0 border-t border-white/[0.06] bg-surface-deep/60 px-3 py-2.5 sm:px-6 sm:py-3">{footer}</div>
         </div>
-
-        <div className="thin-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">{children}</div>
-
-        <div className="shrink-0 border-t border-white/[0.06] px-5 py-3">{footer}</div>
       </div>
     </div>,
     document.body
@@ -641,18 +691,19 @@ function TileAction({
 
 /**
  * A step slider for an attribute whose options are a single ordered scale —
- * Skin Tone, Hair Color, Age, Height — rather than an unordered set. Reading
- * "where along the line" is faster than reading five same-styled chips and
- * comparing their wording, and it makes the single-pick constraint visible
- * instead of just enforced.
+ * Age and Height — rather than an unordered set. Reading "where along the
+ * line" is faster than reading five same-styled chips and comparing their
+ * wording, and it makes the single-pick constraint visible instead of just
+ * enforced.
  *
- * Still single-pick underneath: `onChange` replaces the whole selection, the
- * same as `toggle` already does for these keys via `SINGLE_PICK`.
+ * Still single-pick underneath: `onChange` hands the clicked option to
+ * `toggle`, which `SINGLE_PICK` already makes replace the whole selection
+ * (and a second click on the picked step clears it, as before).
  */
-const SLIDER_ATTRS = new Set(["skinTone", "hairColor", "age", "height"]);
+const SLIDER_ATTRS = new Set(["age", "height"]);
 
-/** Short tick captions for the sliders whose real option text is too long to sit under a dot. Keys not listed here show their option text as-is. */
-const SLIDER_TICK_LABELS: Record<string, Record<string, string>> = {
+/** Short tick captions for options whose real text is too long to sit under a dot or swatch. Keys not listed here show their option text as-is. */
+const TICK_LABELS: Record<string, Record<string, string>> = {
   hairColor: {
     "Black (Level 1)": "Black",
     "Dark brown (Level 2–3)": "Dark brown",
@@ -680,24 +731,25 @@ function StepSlider({
   value?: string;
   onChange: (option: string) => void;
 }) {
-  const labels = SLIDER_TICK_LABELS[attrKey];
+  const labels = TICK_LABELS[attrKey];
   const activeIndex = value ? options.indexOf(value) : -1;
   const fillPct = activeIndex >= 0 ? (activeIndex / (options.length - 1)) * 100 : 0;
 
   return (
-    <div className="pt-5">
-      <div className="relative mx-1.5 h-1">
+    <div className="pt-2">
+      <div className="relative mx-2 h-1">
         <div aria-hidden className="absolute inset-0 rounded-full bg-white/10" />
         {activeIndex >= 0 && (
           <div
             aria-hidden
-            className="absolute inset-y-0 left-0 rounded-full bg-gold/70"
+            className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-gold-dim to-gold"
             style={{ width: `${fillPct}%` }}
           />
         )}
         <div className="absolute inset-0 flex items-center justify-between">
           {options.map((option, index) => {
             const active = index === activeIndex;
+            const passed = activeIndex >= 0 && index < activeIndex;
             return (
               <button
                 key={option}
@@ -706,29 +758,319 @@ function StepSlider({
                 aria-pressed={active}
                 aria-label={option}
                 className={cn(
-                  "relative -mx-1.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
-                  active ? "border-gold bg-surface-deep" : "border-white/25 bg-white/10 hover:border-white/40"
+                  "relative -mx-2 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-all",
+                  active
+                    ? "scale-125 border-gold bg-gold shadow-[0_0_0_4px_rgba(196,168,106,0.18)]"
+                    : passed
+                      ? "border-gold bg-surface"
+                      : "border-faint/60 bg-surface hover:border-gold/60"
                 )}
-              >
-                {active && (
-                  <span className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-gold/30 bg-gold/15 px-2 py-0.5 text-[10px] font-semibold text-gold">
-                    {labels?.[option] ?? option}
-                  </span>
-                )}
-              </button>
+              />
             );
           })}
         </div>
       </div>
 
-      <div className="mt-2 flex justify-between gap-1">
-        {options.map((option) => (
-          <span key={option} className="flex-1 text-center text-[9px] leading-tight text-faint">
+      <div className="mt-3 flex justify-between gap-1">
+        {options.map((option, index) => (
+          <button
+            key={option}
+            type="button"
+            tabIndex={-1}
+            onClick={() => onChange(option)}
+            className={cn(
+              "flex-1 text-center text-[11px] leading-tight transition-colors",
+              index === activeIndex ? "font-semibold text-cream" : "text-muted/80 hover:text-cream"
+            )}
+          >
             {labels?.[option] ?? option}
-          </span>
+          </button>
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * Colours for the swatch rows. Display only — the option text sent to the
+ * backend is unchanged. Skin runs light to deep along the Monk scale.
+ */
+const SWATCH_COLORS: Record<string, Record<string, string>> = {
+  skinTone: {
+    "MST 1–2": "#F4E0CB",
+    "MST 3–4": "#E2BF9C",
+    "MST 5–6": "#C49470",
+    "MST 7–8": "#966646",
+    "MST 9–10": "#5A3A27",
+  },
+  hairColor: {
+    "Black (Level 1)": "#1A1615",
+    "Dark brown (Level 2–3)": "#3D2920",
+    "Medium / light brown (Level 4–5)": "#6E4A33",
+    "Dark blonde (Level 6)": "#A27C57",
+    "Blonde (Level 7–8)": "#D9B97E",
+    "Light blonde / platinum (Level 9–10)": "#EEE5D0",
+  },
+};
+
+/** Round colour swatches, single-pick, with a check badge on the chosen one. */
+function SwatchRow({
+  attrKey,
+  options,
+  value,
+  onChange,
+}: {
+  attrKey: string;
+  options: string[];
+  value?: string;
+  onChange: (option: string) => void;
+}) {
+  const colors = SWATCH_COLORS[attrKey];
+  const labels = TICK_LABELS[attrKey];
+  return (
+    <div className="grid gap-x-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      {options.map((option) => {
+        const active = option === value;
+        const label = labels?.[option] ?? option;
+        return (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            aria-pressed={active}
+            aria-label={option}
+            title={option}
+            className="group flex min-w-0 flex-col items-center gap-1.5"
+          >
+            <span
+              className={cn(
+                "relative h-8 w-8 shrink-0 rounded-full md:h-10 md:w-10 border shadow-[inset_0_-3px_6px_rgba(0,0,0,0.18),0_1px_3px_rgba(0,0,0,0.25)] transition-all",
+                active
+                  ? "border-gold ring-2 ring-gold/70 ring-offset-2 ring-offset-surface"
+                  : "border-black/10 group-hover:scale-105"
+              )}
+              style={{ backgroundColor: colors?.[option] }}
+            >
+              {active && (
+                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-surface bg-gold text-surface-deep">
+                  <Check size={10} strokeWidth={3} />
+                </span>
+              )}
+            </span>
+            <span
+              className={cn(
+                "text-center text-[10px] leading-tight transition-colors",
+                active ? "font-semibold text-cream" : "text-muted/80 group-hover:text-cream"
+              )}
+            >
+              {label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Line icons for the hair-style chips, drawn on the 20×20 grid lucide uses at size 20. */
+const HAIR_ICON_PATHS: Record<string, string> = {
+  "Long straight": "M5.5 9a4.5 4.5 0 0 1 9 0v8 M5.5 9v8",
+  "Long wavy": "M5.5 8.5a4.5 4.5 0 0 1 9 0c0 2 1.4 3 .6 4.6-.8 1.6.8 2.6 0 4.4 M5.5 8.5c0 2-1.4 3-.6 4.6.8 1.6-.8 2.6 0 4.4",
+  Curly:
+    "M5.2 10a1.8 1.8 0 0 1 .3-3.4 1.8 1.8 0 0 1 2.4-2.4 1.8 1.8 0 0 1 4.2 0 1.8 1.8 0 0 1 2.4 2.4 1.8 1.8 0 0 1 .3 3.4",
+  Short: "M5.7 9a4.3 4.3 0 0 1 8.6 0 M6 7.6c1.8.1 3.3-.6 4.3-2 .8 1.2 2 1.9 3.8 2",
+  "Sleek bun": "M5.8 9a4.2 4.2 0 0 1 8.4 0 M10 4.8a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2",
+  Ponytail: "M5.8 9a4.2 4.2 0 0 1 8.4 0 M14 7.2c1.9.4 2.6 2.6 2 5.2-.3 1.4-.1 2.6.5 3.6",
+};
+
+function HairIcon({ style }: { style: string }) {
+  const hair = HAIR_ICON_PATHS[style];
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 20 20"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="10" cy="10" r="3.4" />
+      <path d="M4.5 19c.9-2 3-3 5.5-3s4.6 1 5.5 3" />
+      {hair && <path d={hair} />}
+    </svg>
+  );
+}
+
+/** A dress silhouette for the outfit cards — lucide has a shirt but nothing for a gown. */
+function DressIcon({ size }: { size: number }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 2.5v3.2L7.6 9.5 9.4 11 5.5 21.5h13L14.6 11l1.8-1.5L15 5.7V2.5" />
+      <path d="M9 5.7c1 .8 2 1.2 3 1.2s2-.4 3-1.2" />
+    </svg>
+  );
+}
+
+/** Gowns, dresses and one-pieces read as a dress; everything else as a top. */
+const isDressLike = (outfit: string) => /dress|gown|kaftan|jumpsuit/i.test(outfit);
+
+/**
+ * One outfit card — a placeholder figure rather than a photo, since the repo
+ * has no per-outfit images. Selected cards get a gold border and check badge.
+ */
+function OutfitCard({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className="group flex w-[88px] shrink-0 snap-start flex-col items-center gap-1.5 sm:w-24"
+    >
+      <span
+        className={cn(
+          "relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden rounded-xl border bg-gradient-to-b from-gold/[0.10] to-gold/[0.02] transition-all",
+          active ? "border-gold ring-1 ring-gold/60" : "border-white/[0.08] group-hover:border-gold/40"
+        )}
+      >
+        <span className={cn("transition-colors", active ? "text-gold" : "text-gold/45 group-hover:text-gold/70")}>
+          {isDressLike(label) ? <DressIcon size={40} /> : <Shirt size={34} strokeWidth={1.2} />}
+        </span>
+        {active && (
+          <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-surface-deep">
+            <Check size={10} strokeWidth={3} />
+          </span>
+        )}
+      </span>
+      <span
+        className={cn(
+          "line-clamp-2 text-center text-[10.5px] leading-tight transition-colors",
+          active ? "font-semibold text-cream" : "text-muted group-hover:text-cream"
+        )}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The wardrobe as a carousel of cards, with arrows and a "View all" that
+ * lays every card out in a grid instead. Picking follows `toggle`, so the
+ * pick-one / pick-any rule is whatever `SINGLE_PICK` says for "outfit".
+ */
+function OutfitPicker({
+  options,
+  chosen,
+  onToggle,
+}: {
+  options: string[];
+  chosen: string[];
+  onToggle: (option: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const railRef = useRef<HTMLDivElement>(null);
+
+  function scrollRail(direction: 1 | -1) {
+    const rail = railRef.current;
+    if (rail) rail.scrollBy({ left: direction * rail.clientWidth * 0.8, behavior: "smooth" });
+  }
+
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-[11px] text-faint">
+          {chosen.length ? (
+            <>
+              Picked: <span className="text-cream">{chosen.join(", ")}</span>
+            </>
+          ) : (
+            "None picked — a different outfit is chosen for you."
+          )}
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowAll((open) => !open)}
+          aria-expanded={showAll}
+          className="flex shrink-0 items-center gap-0.5 text-[11px] font-medium text-gold/85 transition-colors hover:text-gold"
+        >
+          {showAll ? "Show less" : `View All (${options.length})`}
+          <ChevronRight size={12} className={cn("transition-transform", showAll && "rotate-90")} />
+        </button>
+      </div>
+
+      {showAll ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] justify-items-center gap-x-2 gap-y-3">
+          {options.map((option) => (
+            <OutfitCard key={option} label={option} active={chosen.includes(option)} onClick={() => onToggle(option)} />
+          ))}
+        </div>
+      ) : (
+        <div className="relative">
+          <div ref={railRef} className="no-scrollbar flex snap-x gap-2.5 overflow-x-auto scroll-smooth px-1 pb-1 sm:scroll-px-8 sm:px-8">
+            {options.map((option) => (
+              <OutfitCard key={option} label={option} active={chosen.includes(option)} onClick={() => onToggle(option)} />
+            ))}
+          </div>
+          {([-1, 1] as const).map((direction) => (
+            <button
+              key={direction}
+              type="button"
+              onClick={() => scrollRail(direction)}
+              aria-label={direction < 0 ? "Scroll outfits left" : "Scroll outfits right"}
+              className={cn(
+                "absolute top-[38%] hidden h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-white/[0.1] bg-surface-raised text-muted shadow-md transition-colors hover:border-gold/40 hover:text-gold sm:flex",
+                direction < 0 ? "left-0" : "right-0"
+              )}
+            >
+              {direction < 0 ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A text chip for the pick-from-a-list fields, gold when picked. */
+function BuilderChip({
+  label,
+  active,
+  icon,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  icon?: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "flex min-h-9 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[12px] transition-colors",
+        active
+          ? "border-gold/70 bg-gold/15 font-medium text-cream shadow-[0_1px_6px_rgba(196,168,106,0.18)]"
+          : "border-white/[0.09] bg-white/[0.03] text-muted hover:border-gold/35 hover:text-cream"
+      )}
+    >
+      {icon && <span className={active ? "text-gold" : "text-faint"}>{icon}</span>}
+      {label}
+    </button>
   );
 }
 
@@ -737,6 +1079,19 @@ const ATTRS_BY_KEY = Object.fromEntries(MODEL_ATTRS.map((attr) => [attr.key, att
 /** Attributes that take one value — the rest can blend several. */
 const SINGLE_PICK = new Set(["gender", "age", "skinTone", "hairColor", "height", "outfit"]);
 
+/** The small icon beside each field's label. */
+const FIELD_ICONS: Record<string, LucideIcon> = {
+  gender: UserRound,
+  body: PersonStanding,
+  age: CalendarDays,
+  height: Ruler,
+  skinTone: Droplet,
+  skinFinish: Sparkles,
+  hairStyle: Scissors,
+  hairColor: Palette,
+  outfit: Shirt,
+};
+
 /**
  * The form, grouped the way a person describes someone: who they are, then
  * their skin, their hair, and what they are wearing. Within a group the
@@ -744,12 +1099,51 @@ const SINGLE_PICK = new Set(["gender", "age", "skinTone", "hairColor", "height",
  *
  * The wardrobe is the one long list, so it has its section to itself.
  */
-const SECTIONS: { title: string; fields: string[] }[] = [
-  { title: "Basics", fields: ["gender", "body", "age", "height"] },
-  { title: "Skin", fields: ["skinTone", "skinFinish"] },
-  { title: "Hair", fields: ["hairStyle", "hairColor"] },
-  { title: "Outfit", fields: ["outfit"] },
+const SECTIONS: { title: string; icon: LucideIcon; fields: string[] }[] = [
+  { title: "Basics", icon: Layers, fields: ["gender", "body", "age", "height"] },
+  { title: "Skin", icon: Droplets, fields: ["skinTone", "skinFinish"] },
+  { title: "Hair", icon: Waves, fields: ["hairStyle", "hairColor"] },
+  { title: "Outfit & Styling", icon: Shirt, fields: ["outfit"] },
 ];
+
+/**
+ * One-tap heritage descriptions for the "Anything else" box. Tapping one
+ * writes its sentence into the notes (so the person can still read and
+ * edit it), and tapping again takes that sentence back out. Picking two
+ * reads as mixed heritage. They go to the backend as ordinary notes text.
+ */
+const HERITAGE_PRESETS: { label: string; text: string }[] = [
+  { label: "European / White", text: "Of European descent, with natural facial features." },
+  { label: "Asian & South Asian", text: "Of East or South Asian descent, with natural facial features." },
+  { label: "African", text: "Of African descent, with natural facial features." },
+  { label: "Latino & Spanish", text: "Of Latino / Hispanic descent, with natural facial features." },
+  { label: "Middle Eastern", text: "Of Middle Eastern descent, with natural facial features." },
+];
+
+/** The backend's limit on a saved model's notes (`LifestyleModel.notes`, maxlength 300). */
+const NOTES_SAVE_MAX = 300;
+
+/** Adds the sentence if it isn't there (and still fits), or removes it if it is. */
+function toggleNote(notes: string, text: string) {
+  if (notes.includes(text)) return notes.replace(text, "").replace(/ {2,}/g, " ").trim();
+  const trimmed = notes.trimEnd();
+  const next = trimmed ? `${trimmed} ${text}` : text;
+  return next.length <= NOTES_SAVE_MAX ? next : notes;
+}
+
+/** A soft card with an icon-and-heading strip on top. */
+function BuilderSection({ title, icon: Icon, aside, children }: { title: string; icon: LucideIcon; aside?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-surface-raised/60 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+      <h4 className="flex items-center gap-2.5 border-b border-white/[0.06] bg-gold/[0.06] px-4 py-2.5 text-[13px] font-semibold uppercase tracking-[0.18em] text-cream sm:px-5">
+        <Icon size={17} strokeWidth={1.5} className="shrink-0 text-gold" />
+        {title}
+        {aside && <span className="text-[11px] font-normal normal-case tracking-normal text-faint">{aside}</span>}
+      </h4>
+      <div className="px-4 py-4 sm:px-5">{children}</div>
+    </section>
+  );
+}
 
 /**
  * Describe a person, get a model.
@@ -770,12 +1164,6 @@ function ModelBuilder({
   const [picks, setPicks] = useState<Record<string, string[]>>({});
   const [notes, setNotes] = useState("");
   const [name, setName] = useState("");
-  /**
-   * The wardrobe starts folded. Most people are happy with a random outfit
-   * (see the backend's fallback), and twenty-odd chips were the bulk of the
-   * form — so it is one line until someone asks to choose.
-   */
-  const [outfitOpen, setOutfitOpen] = useState(false);
 
   function toggle(key: string, option: string) {
     setPicks((current) => {
@@ -792,6 +1180,14 @@ function ModelBuilder({
     });
   }
 
+  const dirty = Object.values(picks).some((chosen) => chosen.length > 0) || notes.length > 0 || name.length > 0;
+
+  function clearAll() {
+    setPicks({});
+    setNotes("");
+    setName("");
+  }
+
   async function build() {
     const attrs = Object.fromEntries(
       Object.entries(picks)
@@ -801,138 +1197,167 @@ function ModelBuilder({
     if (await library.generate(attrs, notes, name)) onClose();
   }
 
+  function renderField(key: string) {
+    const attr = ATTRS_BY_KEY[key];
+    if (!attr) return null;
+    const chosen = picks[key] ?? [];
+    const FieldIcon = FIELD_ICONS[key];
+
+    let control: ReactNode;
+    if (SLIDER_ATTRS.has(key)) {
+      control = <StepSlider attrKey={key} options={attr.options} value={chosen[0]} onChange={(option) => toggle(key, option)} />;
+    } else if (SWATCH_COLORS[key]) {
+      control = <SwatchRow attrKey={key} options={attr.options} value={chosen[0]} onChange={(option) => toggle(key, option)} />;
+    } else {
+      control = (
+        <div className="flex flex-wrap gap-2">
+          {attr.options.map((option) => (
+            <BuilderChip
+              key={option}
+              label={option}
+              active={chosen.includes(option)}
+              icon={
+                key === "gender" ? <UserRound size={14} strokeWidth={1.6} /> : key === "hairStyle" ? <HairIcon style={option} /> : undefined
+              }
+              onClick={() => toggle(key, option)}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-2.5">
+        <div>
+          <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-cream">
+            {FieldIcon && <FieldIcon size={15} strokeWidth={1.6} className="text-gold/80" />}
+            {attr.label}
+            {/* Says how many it takes, so a second click on a slider
+                doesn't read as the first one being lost. */}
+            <span className="text-[10.5px] font-normal text-faint">
+              ({SINGLE_PICK.has(key) ? "pick one" : "pick one or more"})
+            </span>
+          </p>
+          {attr.note && <p className="mt-0.5 pl-[21px] text-[10.5px] text-faint">{attr.note}</p>}
+        </div>
+        {control}
+      </div>
+    );
+  }
+
   return (
     <ModelBuilderDrawer
       onClose={onClose}
       footer={
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Name this model (optional)"
-            className="min-h-9 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[12px] text-cream placeholder:text-faint focus:border-gold/30 focus:outline-none"
-          />
+        // Phones get one compact row — name box, an icon-only Clear, a short
+        // "Build" — and the labelled layout returns from `sm` up.
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
+          <label className="flex min-w-0 flex-1 items-center gap-2.5">
+            <span className="hidden shrink-0 items-center gap-1.5 text-[12px] font-semibold text-cream sm:flex">
+              <UserRound size={15} strokeWidth={1.6} className="text-gold/80" />
+              Name this Model
+              <span className="hidden font-normal text-faint md:inline">(Optional)</span>
+            </span>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Name (optional)"
+              aria-label="Name this model (optional)"
+              className="min-h-9 min-w-0 flex-1 rounded-xl border border-white/[0.09] bg-white/[0.03] px-3 py-1.5 text-[12.5px] text-cream placeholder:text-faint focus:border-gold/40 focus:outline-none sm:min-h-10"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={clearAll}
+            disabled={!dirty || busy}
+            aria-label="Clear all"
+            title="Clear all"
+            className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-xl px-2 text-[12px] font-medium text-muted transition-colors hover:text-cream disabled:opacity-40 disabled:hover:text-muted sm:min-h-10 sm:px-3"
+          >
+            <RotateCcw size={14} /> <span className="hidden sm:inline">Clear All</span>
+          </button>
           <button
             type="button"
             onClick={build}
             disabled={busy}
-            className="flex min-h-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-gold/30 bg-gold/15 px-4 text-xs font-semibold text-gold transition-colors hover:bg-gold/25 disabled:opacity-50"
+            className="flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-gold-bright via-gold to-gold-dim px-3.5 text-[12.5px] font-semibold text-white shadow-[0_4px_14px_rgba(160,120,40,0.35)] transition-[filter,opacity] hover:brightness-110 disabled:opacity-60 sm:min-h-10 sm:gap-2 sm:px-5 sm:text-[13px]"
           >
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
-            {busy ? "Building…" : "Build this model"}
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+            {busy ? "Building…" : <><span className="sm:hidden">Build</span><span className="hidden sm:inline">Build this Model</span></>}
+            {!busy && <ArrowRight size={14} className="hidden sm:block" />}
           </button>
         </div>
       }
     >
-      {SECTIONS.map((section) => (
-        <section key={section.title} className="space-y-3">
-          <h4 className="border-b border-white/[0.06] pb-1.5 text-[11px] font-semibold uppercase tracking-widest text-cream/80">
-            {section.title}
-          </h4>
-          <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-            {section.fields.map((key) => {
-              const attr = ATTRS_BY_KEY[key];
-              if (!attr) return null;
-              const chosen = picks[key] ?? [];
-              const isOutfit = key === "outfit";
-              // The wardrobe follows gender — see `outfitsFor`.
-              const options = isOutfit ? outfitsFor(picks.gender) : attr.options;
-
-              return (
-                <div key={key} className={cn("space-y-2", isOutfit && "sm:col-span-2")}>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <p className="text-[11px] font-medium text-muted">
-                      {attr.label}
-                      {/* Says how many it takes, so a second click on a
-                          slider doesn't read as the first one being lost. */}
-                      <span className="ml-1.5 text-[10px] font-normal text-faint">
-                        {SINGLE_PICK.has(key) ? "pick one" : "pick any"}
-                      </span>
-                    </p>
-                    {isOutfit && chosen.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setPicks((current) => ({ ...current, outfit: [] }))}
-                        className="text-[10px] text-gold/80 transition-colors hover:text-gold"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-
-                  {attr.note && <p className="-mt-1 text-[10px] text-faint/70">{attr.note}</p>}
-
-                  {isOutfit && !outfitOpen ? (
-                    <button
-                      type="button"
-                      onClick={() => setOutfitOpen(true)}
-                      aria-expanded={false}
-                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-left transition-colors hover:border-white/[0.16]"
-                    >
-                      <span className="min-w-0 truncate text-[12px] text-cream">
-                        {chosen.length ? chosen.join(", ") : "Random"}
-                        {!chosen.length && (
-                          <span className="ml-1.5 text-[11px] text-faint">— a different outfit is chosen for you</span>
-                        )}
-                      </span>
-                      <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-gold/80">
-                        {chosen.length ? "Change" : "Choose"} <ChevronDown size={12} />
-                      </span>
-                    </button>
-                  ) : SLIDER_ATTRS.has(key) ? (
-                    <StepSlider attrKey={key} options={options} value={chosen[0]} onChange={(option) => toggle(key, option)} />
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {options.map((option) => (
-                        <Chip
-                          key={option}
-                          label={option}
-                          size="sm"
-                          active={chosen.includes(option)}
-                          onClick={() => {
-                            toggle(key, option);
-                            // One outfit, so picking it is the end of the choice — fold the list back up.
-                            if (isOutfit && !chosen.includes(option)) setOutfitOpen(false);
-                          }}
-                        />
-                      ))}
-                    </div>
+      {SECTIONS.map((section) =>
+        section.fields[0] === "outfit" ? (
+          <BuilderSection key={section.title} title={section.title} icon={section.icon}>
+            {/* The wardrobe follows gender — see `outfitsFor`. */}
+            <OutfitPicker options={outfitsFor(picks.gender)} chosen={picks.outfit ?? []} onToggle={(option) => toggle("outfit", option)} />
+          </BuilderSection>
+        ) : (
+          <BuilderSection key={section.title} title={section.title} icon={section.icon}>
+            <div className="grid gap-y-5 sm:grid-cols-2">
+              {section.fields.map((key, index) => (
+                <div
+                  key={key}
+                  className={cn(
+                    "min-w-0",
+                    index % 2 === 0 ? "sm:pr-6" : "sm:border-l sm:border-white/[0.07] sm:pl-6"
                   )}
-
-                  {isOutfit && outfitOpen && (
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] text-faint">
-                        Pick one outfit, or leave it unpicked for a random one.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setOutfitOpen(false)}
-                        aria-expanded
-                        className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-gold/80 transition-colors hover:text-gold"
-                      >
-                        Done <ChevronUp size={12} />
-                      </button>
-                    </div>
-                  )}
+                >
+                  {renderField(key)}
                 </div>
+              ))}
+            </div>
+          </BuilderSection>
+        )
+      )}
+
+      <BuilderSection title="Anything Else" icon={NotebookPen} aside="(optional)">
+        <div className="mb-3 space-y-2">
+          <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-cream">
+            <Globe size={15} strokeWidth={1.6} className="text-gold/80" />
+            Heritage
+            <span className="text-[10.5px] font-normal text-faint">(tap to add a description — tap again to remove)</span>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {HERITAGE_PRESETS.map((preset) => {
+              const active = notes.includes(preset.text);
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setNotes((current) => toggleNote(current, preset.text))}
+                  aria-pressed={active}
+                  title={preset.text}
+                  className={cn(
+                    "flex min-h-9 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[12px] transition-colors",
+                    active
+                      ? "border-gold/70 bg-gold/15 font-medium text-cream shadow-[0_1px_6px_rgba(196,168,106,0.18)]"
+                      : "border-white/[0.09] bg-white/[0.03] text-muted hover:border-gold/35 hover:text-cream"
+                  )}
+                >
+                  {active && <Check size={12} strokeWidth={2.5} className="text-gold" />}
+                  {preset.label}
+                </button>
               );
             })}
           </div>
-        </section>
-      ))}
-
-      <section className="space-y-2">
-        <h4 className="border-b border-white/[0.06] pb-1.5 text-[11px] font-semibold uppercase tracking-widest text-cream/80">
-          Anything else <span className="font-normal normal-case tracking-normal text-faint">(optional)</span>
-        </h4>
+        </div>
+        {/* No visible counter — the box grows with the text, up to a scroll.
+            The quiet cap is the backend's own: `LifestyleModel.notes` has
+            maxlength 300, checked when the finished model is saved, so a
+            longer note would fail the build after the image was paid for. */}
         <textarea
           value={notes}
-          onChange={(event) => setNotes(event.target.value)}
+          onChange={(event) => setNotes(event.target.value.slice(0, NOTES_SAVE_MAX))}
+          maxLength={NOTES_SAVE_MAX}
           rows={2}
           placeholder="e.g. freckles across the nose, a small gap between the front teeth, warm undertones…"
-          className="w-full resize-none rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[12px] leading-relaxed text-cream placeholder:text-faint focus:border-gold/30 focus:outline-none"
+          className="field-sizing-content block max-h-60 min-h-[4.5rem] w-full resize-none rounded-xl border border-white/[0.09] bg-white/[0.03] px-3 py-2 text-[12.5px] leading-relaxed text-cream placeholder:text-faint focus:border-gold/40 focus:outline-none"
         />
-      </section>
+      </BuilderSection>
     </ModelBuilderDrawer>
   );
 }

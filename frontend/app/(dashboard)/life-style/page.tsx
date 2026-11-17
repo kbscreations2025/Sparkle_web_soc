@@ -23,7 +23,16 @@ import {
   type LifestyleModelId,
   type LifestyleAspectId,
 } from "@/lib/api";
-import { PLACEMENT_GROUPS, POSES, THEMES, HINTS, resolvePlacement, resolveScene } from "@/lib/lifestyleOptions";
+import {
+  PLACEMENT_GROUPS,
+  POSES,
+  THEMES,
+  HINTS,
+  resolvePlacement,
+  resolvePiecePlacements,
+  resolveScene,
+  spotLabel,
+} from "@/lib/lifestyleOptions";
 import { makeThumbnail } from "@/lib/image";
 import { filesToUploadItems, uploadErrorMessage } from "@/lib/uploads";
 import { useGenerationWorkspace, type RefineRequest } from "@/lib/useGenerationWorkspace";
@@ -44,8 +53,10 @@ export default function LifeStylePage() {
   const [jewelry, setJewelry] = useState<UploadItem[]>([]);
   /** A jewellery photo opened for a closer look, or to annotate before it's placed. */
   const [jewelryPreview, setJewelryPreview] = useState<PreviewImage | null>(null);
-  const [category, setCategory] = useState<string | null>(null);
-  const [spot, setSpot] = useState<string | null>(null);
+  /** Every kind of piece picked — any mix of them, or none for "from the photo". */
+  const [categories, setCategories] = useState<string[]>([]);
+  /** The exact spot picked for each category, if any. */
+  const [spots, setSpots] = useState<Record<string, string | null>>({});
   const [pose, setPose] = useState(POSES[0].id);
   const [theme, setTheme] = useState(THEMES[0].id);
   const [aspectRatio, setAspectRatio] = useState<LifestyleAspectId>(DEFAULT_LIFESTYLE_ASPECT);
@@ -89,7 +100,19 @@ export default function LifeStylePage() {
   async function handleGenerate() {
     if (jewelry.length === 0 || !library.choice || library.saving) return;
 
-    const chosenPlacement = resolvePlacement(category, spot);
+    /*
+     * One category (or none) works exactly as before: a single `placement`,
+     * the category's standard one if no spot was picked. Two or more also
+     * send `placements`, one per kind; any without a spot is left for the
+     * backend to pick at random from that kind's spots.
+     */
+    const multi = categories.length > 1;
+    const single = categories.length === 1 ? categories[0] : null;
+    const chosenPlacement = resolvePlacement(single, single ? spots[single] ?? null : null);
+    const pieces = multi ? resolvePiecePlacements(categories, spots) : [];
+    const placementLabel = multi
+      ? pieces.map((piece) => spotLabel(piece.category, piece.spot) ?? `${piece.category} (random spot)`).join(" + ")
+      : chosenPlacement.label;
     const chosenPose = POSES.find((entry) => entry.id === pose);
     // Resolved here so the request always names a concrete scene — "Surprise
     // Me" is a choice the picker makes, never one the model is left to make.
@@ -102,7 +125,9 @@ export default function LifeStylePage() {
         lifestyle({
           ...modelRequestFields(library.choice!),
           jewelryImages,
-          placement: chosenPlacement?.value ?? "",
+          placement: chosenPlacement.value,
+          ...(categories.length ? { categories } : {}),
+          ...(multi ? { placements: pieces } : {}),
           poseInstruction: chosenPose?.value ?? "",
           shotType: chosenPose?.shot ?? "",
           sceneInstruction: scene.value,
@@ -117,7 +142,7 @@ export default function LifeStylePage() {
         count: 1,
         prompt:
           `Place ${jewelry.length > 1 ? `these ${jewelry.length} pieces` : "this piece"} on the model — ` +
-          `${chosenPlacement?.label ?? "on the model"}, ${scene.label}` +
+          `${placementLabel}, ${scene.label}` +
           `\n${fullDescription}`,
         // The piece leads; the model it goes on follows, small.
         images: [...jewelry.map((item) => item.dataUrl), library.choice.src],
@@ -172,13 +197,16 @@ export default function LifeStylePage() {
             </section>
 
             <PlacementPicker
-              category={category}
-              spot={spot}
-              onCategoryChange={(next) => {
-                setCategory(next);
-                setSpot(null);
+              categories={categories}
+              spots={spots}
+              onToggleCategory={(group) => {
+                setCategories((current) =>
+                  current.includes(group) ? current.filter((entry) => entry !== group) : [...current, group]
+                );
+                // A category switched off forgets its spot.
+                setSpots((current) => ({ ...current, [group]: null }));
               }}
-              onSpotChange={setSpot}
+              onSpotChange={(group, spot) => setSpots((current) => ({ ...current, [group]: spot }))}
             />
 
             <OptionChips label="Pose & Framing" options={POSES} value={pose} onChange={setPose} />
@@ -256,57 +284,72 @@ function PlacementChip({ label, active, onClick }: { label: string; active: bool
 }
 
 /**
- * Placement in two steps: what the piece is, then — optionally — exactly
- * where it goes. They know they have a ring before they know which finger.
+ * Placement in two steps: what the pieces are, then — optionally — exactly
+ * where each goes. They know they have a ring before they know which finger.
  *
- * Clicking a chip a second time clears it: a category back to "from the
- * photo", a spot back to that category's standard placement.
+ * Categories toggle, so any mix can be worn together (a ring and a bracelet,
+ * say). Each picked category gets its own "where it goes" row. With one
+ * category an unpicked spot means its standard placement, as it always has;
+ * with several, an unpicked spot is chosen at random by the backend.
+ *
+ * Clicking a chip a second time clears it.
  */
 function PlacementPicker({
-  category,
-  spot,
-  onCategoryChange,
+  categories,
+  spots,
+  onToggleCategory,
   onSpotChange,
 }: {
-  category: string | null;
-  spot: string | null;
-  onCategoryChange: (category: string | null) => void;
-  onSpotChange: (spot: string | null) => void;
+  categories: string[];
+  spots: Record<string, string | null>;
+  onToggleCategory: (group: string) => void;
+  onSpotChange: (group: string, spot: string | null) => void;
 }) {
-  const group = PLACEMENT_GROUPS.find((entry) => entry.group === category);
+  const picked = PLACEMENT_GROUPS.filter((entry) => categories.includes(entry.group));
+  const multi = picked.length > 1;
 
   return (
     <div className="space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-wider text-cream">What is it</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-cream">
+        What is it{" "}
+        <span className="font-normal normal-case tracking-normal text-faint">— pick one or more</span>
+      </p>
       <div className="flex flex-wrap gap-1.5">
         {PLACEMENT_GROUPS.map((entry) => (
           <PlacementChip
             key={entry.group}
             label={entry.group}
-            active={entry.group === category}
-            onClick={() => onCategoryChange(entry.group === category ? null : entry.group)}
+            active={categories.includes(entry.group)}
+            onClick={() => onToggleCategory(entry.group)}
           />
         ))}
       </div>
 
-      {group && (
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
-            Where it goes{" "}
-            <span className="normal-case tracking-normal">— optional, standard placement if none picked</span>
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {group.items.map((item) => (
-              <PlacementChip
-                key={item.id}
-                label={item.label}
-                active={item.id === spot}
-                onClick={() => onSpotChange(item.id === spot ? null : item.id)}
-              />
-            ))}
+      {picked.map((group) => {
+        const spot = spots[group.group] ?? null;
+        return (
+          <div key={group.group} className="space-y-1.5">
+            <p className="text-[10px] font-medium uppercase tracking-widest text-faint">
+              {multi
+                ? `Where the ${group.group.toLowerCase()} ${group.group.endsWith("s") ? "go" : "goes"}`
+                : "Where it goes"}{" "}
+              <span className="normal-case tracking-normal">
+                {multi ? "— optional, a random spot if none picked" : "— optional, standard placement if none picked"}
+              </span>
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {group.items.map((item) => (
+                <PlacementChip
+                  key={item.id}
+                  label={item.label}
+                  active={item.id === spot}
+                  onClick={() => onSpotChange(group.group, item.id === spot ? null : item.id)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }

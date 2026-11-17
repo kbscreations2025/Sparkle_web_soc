@@ -9,6 +9,36 @@ const models = require("../services/lifestyleModels");
 
 const router = express.Router();
 
+const MAX_TEXT = 1000;
+const text = (value) => (typeof value === "string" ? value.trim().slice(0, MAX_TEXT) : "");
+
+/**
+ * Two or more jewellery categories worn together: `[{ category, value, options }]`
+ * from the picker, one per kind. A kind sent without a `value` gets one of
+ * its `options` (that kind's spots) at random — chosen here, once, so the
+ * queued job and any retry of it place the piece in the same spot.
+ *
+ * Returns `[{ category, placement, picked }]`, or [] for a request without
+ * them — a single category, or an older client, which goes on sending just
+ * `placement`.
+ */
+function resolvePieces(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const pieces = [];
+  for (const entry of raw.slice(0, 8)) {
+    const category = text(entry?.category);
+    if (!category || seen.has(category.toLowerCase())) continue;
+    seen.add(category.toLowerCase());
+
+    const chosen = text(entry.value);
+    const options = Array.isArray(entry.options) ? entry.options.slice(0, 20).map(text).filter(Boolean) : [];
+    const placement = chosen || options[Math.floor(Math.random() * options.length)] || `Place the ${category.toLowerCase()} on its natural, standard body location.`;
+    pieces.push({ category, placement, picked: Boolean(chosen) });
+  }
+  return pieces;
+}
+
 router.use(requireAuth);
 
 /** The model library is shared with Marketing Kit, which picks from it too. */
@@ -202,8 +232,13 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
     return res.status(400).json({ status: "error", message: "choose a model to place the jewellery on", code: "invalid" });
   }
 
+  const pieces = resolvePieces(req.body?.placements);
+
   const options = {
-    placement: placement || "around neck",
+    // With several kinds, `placement` is just their texts joined, kept for
+    // the run's record; the prompt reads `pieces`.
+    placement: pieces.length > 1 ? pieces.map((piece) => piece.placement).join(" ") : placement || "around neck",
+    ...(pieces.length > 1 ? { pieces } : {}),
     poseInstruction: poseInstruction || "",
     description: description || "",
     shotType: shotType || "",
@@ -222,6 +257,9 @@ router.post("/", requirePermission("tool.life_style.run"), async (req, res) => {
       isRefinement: false,
       jewelryCount: jewelryList.length,
       placement: options.placement,
+      ...(pieces.length > 1
+        ? { categories: pieces.map((piece) => piece.category), spotPicked: pieces.map((piece) => piece.picked) }
+        : {}),
       conversationId: conversationId || null,
     },
     payload: {

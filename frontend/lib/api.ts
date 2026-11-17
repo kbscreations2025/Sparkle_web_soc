@@ -1432,7 +1432,12 @@ export function lifestyle(body: {
   modelImage?: string;
   /** Every piece to place, as data URIs. More than one is worn as a set. */
   jewelryImages: string[];
+  /** One placement's text — the only one sent for a single category (or none). */
   placement: string;
+  /** Every category picked, e.g. ["Ring", "Bracelet"]. */
+  categories?: string[];
+  /** Two or more categories: one entry per kind; an empty `value` has the backend pick from `options`. */
+  placements?: { category: string; spot: string | null; value: string; options: string[] }[];
   poseInstruction?: string;
   shotType?: string;
   sceneInstruction?: string;

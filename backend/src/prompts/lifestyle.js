@@ -127,8 +127,30 @@ function targetFingerFor(placement, fallback = "specified finger") {
   return fallback;
 }
 
-/** The per-type placement rules — what "worn correctly" means for this kind of piece. */
-function jewelrySpecificRules(jewelryType, placement) {
+/**
+ * The picker's category names, mapped straight to a kind. A multi-category
+ * shot names each kind outright rather than sniffing it from the placement
+ * prose — that sniffing is what once prompted ring runs for "earrings".
+ */
+const CATEGORY_TYPES = {
+  ring: "ring",
+  earrings: "earrings",
+  "necklace & pendant": "necklace",
+  bracelet: "bracelet",
+};
+
+function categoryToJewelryType(category, placement) {
+  return CATEGORY_TYPES[String(category || "").trim().toLowerCase()] || placementToJewelryType(placement);
+}
+
+/**
+ * The per-type placement rules — what "worn correctly" means for this kind of piece.
+ *
+ * `multi` is set when this kind is one of several worn in the same shot: the
+ * ring's "one ring, nothing else" lines then say no *other ring*, rather than
+ * forbidding the other pieces being placed alongside it.
+ */
+function jewelrySpecificRules(jewelryType, placement, { multi = false } = {}) {
   if (jewelryType === "ring") {
     const targetFinger = targetFingerFor(placement);
     const bareFingers = ALL_FINGERS.filter((finger) => finger !== targetFinger).join(", ");
@@ -138,7 +160,7 @@ function jewelrySpecificRules(jewelryType, placement) {
 
     return `
 RING PLACEMENT — CRITICAL:
-- The reference piece is a ring, worn on a finger — it stays a ring and appears nowhere else on the model.
+- ${multi ? "The ring is worn on a finger — it stays a ring, and appears on no other finger." : "The reference piece is a ring, worn on a finger — it stays a ring and appears nowhere else on the model."}
 - The ring goes on the ${targetFinger} ONLY. This is the single allowed finger.
 - BARE FINGERS — STRICTLY ENFORCED: The following fingers must have ZERO rings, completely bare skin with no jewelry: ${bareFingers}. No exceptions.
 - The ${neighbours} must be 100% bare — if you see yourself about to place anything on them, do not.
@@ -146,7 +168,7 @@ RING PLACEMENT — CRITICAL:
 - The ring band height must be no more than 1/10th of the finger's total length — a thin delicate band, not a wide cuff.
 - REAL SIZE: a band about 1.5–3 mm wide, any stone only a few millimetres across — never wider than the finger it sits on.
 - The ring band encircles the finger's full circumference in 3D — physically worn at the base knuckle, not floating or overlaid flat.
-- One ring. One finger. Nothing else.`;
+- ${multi ? "One ring. One finger. No other ring anywhere." : "One ring. One finger. Nothing else."}`;
   }
 
   if (jewelryType === "earrings") {
@@ -284,6 +306,70 @@ PHOTOGRAPHY:
 - Scene: ${sceneInstruction || DEFAULT_SCENE}
 ${aspectLine(aspectRatio)}
 - Color harmony: the background tones and light's color temperature must complement the jewelry's metal color and gemstone hues, so the set reads as naturally photographed in this environment — never composited or pasted on top of it.
+- Do NOT change the model's face, ethnicity, body proportions, or identity.
+${poseInstruction ? `POSE: ${poseInstruction}` : ""}
+${description?.trim() ? `ADDITIONAL NOTES: ${description}` : ""}
+
+${FIDELITY_REMINDER}`;
+}
+
+/**
+ * Picks a framing that can hold every kind at once when no pose set one:
+ * hands-only kinds get a hand close-up, face-and-neck kinds a close portrait,
+ * and a mix of the two the roomier set framing.
+ */
+function multiShotType(types) {
+  const named = types.join(" and the ");
+  if (types.every((type) => type === "ring" || type === "bracelet")) {
+    return `close-up on the hand and wrist, the camera as close as it can be while the ${named} are both clearly visible, each at its real size`;
+  }
+  if (types.every((type) => type === "earrings" || type === "necklace")) {
+    return `close-up portrait of the ear, jaw and neckline, framed so the ${named} are both clearly visible, each at its real size`;
+  }
+  return `${DEFAULT_SET_SHOT_TYPE} — the ${named} all clearly visible in the one frame, each at its real size`;
+}
+
+/**
+ * Several kinds of piece worn together in one shot — the user picked two or
+ * more categories (say a ring and a bracelet). Each kind keeps the exact
+ * placement and size rules it gets when worn alone, with its own placement
+ * text, so a ring's finger rules only ever read the ring's placement.
+ *
+ * @param pieces `[{ category, placement }]`, one per kind, each placement
+ *   already resolved (a picked spot, or one chosen at random by the route).
+ * @param count How many jewellery photos were sent. One photo may show
+ *   several of the pieces; several photos may each show one.
+ */
+function buildLifestyleMultiPrompt({ pieces, count = 1, poseInstruction, description, shotType, sceneInstruction, aspectRatio }) {
+  const kinds = pieces.map((piece) => ({ ...piece, type: categoryToJewelryType(piece.category, piece.placement) }));
+  const types = kinds.map((kind) => kind.type);
+  const named = types.join(", ");
+  const photos =
+    count > 1
+      ? `The ${count} images after the first are the jewelry reference photos. Between them they show these ${kinds.length} pieces: ${named}. Match each piece in the photos to its kind.`
+      : `The second image is the jewelry reference photo. It shows these ${kinds.length} pieces: ${named}. Pick out each piece in it by its kind.`;
+
+  return `Photorealistic image editing. The model is shown in the FIRST image. ${photos} Place ALL ${kinds.length} pieces onto the same female model in a single photograph — she wears them together: ${named}.
+
+PIECES AND WHERE EACH ONE GOES — each kind goes only on its own body location below, never on another's:
+${kinds.map((kind, index) => `${index + 1}. ${kind.type.toUpperCase()}: ${kind.placement}`).join("\n")}
+
+JEWELRY FIDELITY — NON-NEGOTIABLE (applies to EVERY piece):
+- Every structural detail of each piece MUST match its reference exactly: shape, stone settings, filigree, chain links, clasps, metal color, and internal proportions (how its parts compare to each other) — but NOT its size in the photo, which is a close-up; the size on the body follows the size rules below.
+- Stone count is exact for each piece — count every stone in the reference and render that exact same number, in the same positions. Do NOT add, remove, merge, or omit a single stone on any piece.
+- Do NOT simplify, alter, merge, or hallucinate any part of any piece. Each rendered piece must be individually recognisable against its reference.
+${kinds.map((kind) => jewelrySpecificRules(kind.type, kind.placement, { multi: true })).join("\n")}
+${SCALE_NOTE}
+ONLY THESE PIECES — CRITICAL: Any jewellery or watch the model already wears in her photo is removed — all of it. The finished photo shows exactly these ${kinds.length} pieces (${named}), one of each kind, each on its own location above, and nothing else. Never invent matching or extra jewellery anywhere on the model, and never put two pieces on the same spot.
+${MODESTY_NOTE}
+${ANATOMY_NOTE}
+${REALISM_NOTE}
+${FOCUS_NOTE}
+PHOTOGRAPHY:
+- Shot type: ${shotType || multiShotType(types)} with 85mm f/1.4 lens.
+- Scene: ${sceneInstruction || DEFAULT_SCENE}
+${aspectLine(aspectRatio)}
+- Color harmony: the background tones and light's color temperature must complement the jewelry's metal color and gemstone hues, so the pieces read as naturally photographed in this environment — never composited or pasted on top of it.
 - Do NOT change the model's face, ethnicity, body proportions, or identity.
 ${poseInstruction ? `POSE: ${poseInstruction}` : ""}
 ${description?.trim() ? `ADDITIONAL NOTES: ${description}` : ""}
@@ -482,6 +568,7 @@ module.exports = {
   SCALE_NOTE,
   buildLifestylePrompt,
   buildLifestyleSetPrompt,
+  buildLifestyleMultiPrompt,
   buildLifestyleRefinePrompt,
   buildLifestyleModelPrompt,
 };

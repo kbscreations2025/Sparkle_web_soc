@@ -132,6 +132,39 @@ export function resolvePlacement(category: string | null, spotId: string | null)
 }
 
 /**
+ * One kind of piece in a multi-category shot, as sent in `placements`.
+ *
+ * `value` is the exact spot's text, or "" when none was picked — the backend
+ * then picks one of `options` (that kind's spots) at random. `category` is
+ * sent by name so the backend never has to guess the kind from the prose,
+ * which is how ring runs once got prompted for "earrings".
+ */
+export type PiecePlacement = { category: string; spot: string | null; value: string; options: string[] };
+
+/**
+ * Every picked category, in the picker's own order, with its spot if one was
+ * chosen. Used only when two or more categories are picked; a single one
+ * still goes through `resolvePlacement`, unchanged.
+ */
+export function resolvePiecePlacements(categories: string[], spots: Record<string, string | null>): PiecePlacement[] {
+  return PLACEMENT_GROUPS.filter((group) => categories.includes(group.group)).map((group) => {
+    const picked = group.items.find((item) => item.id === spots[group.group]) ?? null;
+    return {
+      category: group.group,
+      spot: picked?.id ?? null,
+      value: picked?.value ?? "",
+      options: group.items.map((item) => item.value),
+    };
+  });
+}
+
+/** The short label for a piece's spot, for the run's display prompt. */
+export function spotLabel(category: string, spotId: string | null): string | null {
+  const group = PLACEMENT_GROUPS.find((entry) => entry.group === category);
+  return group?.items.find((item) => item.id === spotId)?.label ?? null;
+}
+
+/**
  * Poses. Every one is a tight crop by design — this tool is for jewellery
  * hero shots, not fashion full-lengths.
  *

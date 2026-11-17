@@ -9,6 +9,7 @@ const { matchColour, wantsColourChange } = require("../services/colorMatch");
 const {
   buildLifestylePrompt,
   buildLifestyleSetPrompt,
+  buildLifestyleMultiPrompt,
   buildLifestyleRefinePrompt,
   buildLifestyleModelPrompt,
 } = require("../prompts/lifestyle");
@@ -33,8 +34,14 @@ const LIFESTYLE_MODEL_JOB = "lifestyle.model";
 registerJobHandler(LIFESTYLE_JOB, async (context) => {
   const { data } = context;
   const modelImage = !data.isRefinement && data.modelRef ? await loadModelImage(data.modelRef) : null;
+  // Two or more categories picked → each kind named with its own placement;
+  // otherwise a set (several photos) or a single piece, as before.
   const prompt = (options) =>
-    data.jewelryCount > 1 ? buildLifestyleSetPrompt({ count: data.jewelryCount, ...options }) : buildLifestylePrompt(options);
+    options?.pieces?.length > 1
+      ? buildLifestyleMultiPrompt({ count: data.jewelryCount, ...options })
+      : data.jewelryCount > 1
+        ? buildLifestyleSetPrompt({ count: data.jewelryCount, ...options })
+        : buildLifestylePrompt(options);
 
   return runGenerationJob({
     ...context,
