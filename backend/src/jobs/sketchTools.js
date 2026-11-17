@@ -68,11 +68,14 @@ registerJobHandler(SKETCH_TO_IMAGE_JOB, async (context) => {
   // Rendered from the drawing alone. A vision model used to read the sketch
   // first and hand the renderer its counts; on two-view band sheets it
   // miscounted, and the renderer followed the numbers over the drawing — see
-  // buildSketchToImagePrompt.
+  // buildSketchToImagePrompt. A hand sketch and a CAD sheet get different
+  // prompts (`data.drawingType`, from the page's toggle; older runs have none
+  // and render as hand sketches).
   return runGenerationJob({
     ...context,
     tool: "sketch_to_image",
-    buildPrompt: ({ data, count }) => buildSketchToImagePrompt({ description: data.description, count }),
+    buildPrompt: ({ data, count }) =>
+      buildSketchToImagePrompt({ description: data.description, count, drawingType: data.drawingType }),
     buildRefinePrompt: buildSketchToImageRefinePrompt,
   });
 });

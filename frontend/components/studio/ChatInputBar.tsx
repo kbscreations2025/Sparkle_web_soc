@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { ImagePlus, Send, Loader2 } from "lucide-react";
 import { AttachmentChips, type Attachment, type RoleOption } from "./AttachmentChips";
 import { SpellCheckedTextarea } from "./SpellCheckedTextarea";
@@ -32,6 +32,7 @@ export function ChatInputBar<TModel extends string>({
   qualityValue,
   onQualityChange,
   placeholder = "Describe a change… or paste/attach reference images",
+  extraControls,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -64,6 +65,11 @@ export function ChatInputBar<TModel extends string>({
   qualityValue?: string;
   onQualityChange?: (quality: string) => void;
   placeholder?: string;
+  /**
+   * A tool's own settings for the next turn — Sketch to Image's drawing type.
+   * Sits in the footer row after Quality; keep it a compact chip, the rail is narrow.
+   */
+  extraControls?: ReactNode;
 }) {
   const selected = modelOptions.find((option) => option.value === modelValue);
   const qualityOptions = selected?.qualities ?? [];
@@ -130,7 +136,8 @@ export function ChatInputBar<TModel extends string>({
             onChange={onModelChange}
             disabled={busy}
             options={modelOptions.map((option) => ({ value: option.value, label: option.label, group: option.provider }))}
-            triggerClassName="max-w-[150px] sm:max-w-[170px]"
+            // A tool's own control shares this row, so the model name gives up the room.
+            triggerClassName={extraControls ? "max-w-[110px]" : "max-w-[150px] sm:max-w-[170px]"}
             panelClassName="w-[190px]"
           />
 
@@ -151,6 +158,8 @@ export function ChatInputBar<TModel extends string>({
               </div>
             )
           )}
+
+          {extraControls}
         </div>
 
         <button

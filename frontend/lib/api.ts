@@ -1212,6 +1212,13 @@ export function textToSketch(body: {
   return apiRequest<QueuedResult>("/api/text-to-sketch", { method: "POST", body: JSON.stringify(body) });
 }
 
+/**
+ * What a Sketch to Image upload is. A hand sketch renders as one photograph of
+ * the piece; a CAD sheet comes back as the same sheet made real — every view
+ * where it is drawn, with the measurements removed.
+ */
+export type SketchDrawingType = "sketch" | "cad";
+
 /** One or more hand-drawn sketches rendered as a photorealistic product shot. */
 export function sketchToImage(body: {
   /** Every view of the piece, as data URIs — they go to the model together. */
@@ -1222,8 +1229,19 @@ export function sketchToImage(body: {
   /** Output size, from `qualitiesFor(model)`. Omitted runs at the model's best. */
   quality?: string;
   count: number;
+  /** Omitted renders as a hand sketch. */
+  drawingType?: SketchDrawingType;
   preview?: string | null;
 }) {
+  return apiRequest<QueuedResult>("/api/sketch-to-image", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * A follow-up on Sketch to Image. `drawingType` only matters when the turn
+ * re-renders the user's own sketch (`refineSource: "input"`); an edit of a
+ * result ignores it.
+ */
+export function refineSketchToImage(body: RefineBody<string> & { drawingType?: SketchDrawingType }) {
   return apiRequest<QueuedResult>("/api/sketch-to-image", { method: "POST", body: JSON.stringify(body) });
 }
 
@@ -2093,6 +2111,8 @@ export type ConversationTurn = {
   outputAssets: ConversationAsset[];
   /** What a text-out tool produced. Null for every tool that makes pictures. */
   text?: string | null;
+  /** A Sketch to Image render: what the upload was. Absent on edits and on runs from before it was recorded. */
+  drawingType?: SketchDrawingType | null;
   /** A Product Views turn: the piece, and the angle of each input and output asset. */
   productViews?: {
     category: ProductViewCategory;

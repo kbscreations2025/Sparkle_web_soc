@@ -218,9 +218,11 @@ function buildImageToSketchRefinePrompt({ instruction, referenceCount = 0 }) {
  * two-line "turn this into the real piece" on the same sketch came back as the
  * drawing. Every rule below earns its place; add to them sparingly.
  *
- * Two prompts. The default renders the sketch as drawn; VARIATIONS — only when
- * the notes ask for other designs (see resolveSketchMode in prompts/intent.js)
- * — grows new designs out of it.
+ * Three prompts. The jeweller picks what they uploaded: a HAND SKETCH (the
+ * default) renders as one photograph of the piece, a CAD SHEET comes back as
+ * the same sheet made real, view for view. VARIATIONS — only when the notes ask
+ * for other designs (see resolveSketchMode in prompts/intent.js) — grows new
+ * designs out of either.
  *
  * The render prompt was cut to a few lines after a side-by-side test (Nov
  * 2026: two coloured band sheets drawn as face + profile, three pencil
@@ -231,7 +233,25 @@ function buildImageToSketchRefinePrompt({ instruction, referenceCount = 0 }) {
  * "8-sided frame". This version — make the ONE piece every view agrees on,
  * shown at three-quarters — rendered every sketch correctly on GPT Image 2
  * both times, and on Nano Banana 2.1 all but once.
+ *
+ * The CAD sheet prompt came later (Nov 2026): a technical sheet — a top view
+ * above a side view, with dimension lines — must come back as that same sheet
+ * made real, not merged into one three-quarter shot as the hand-sketch prompt
+ * does. On two such sheets the hand-sketch prompt fused both views into one
+ * malformed ring; the CAD prompt matched the jeweller's own target renders.
+ * Run on every upload, though, it turned a hand-drawn pendant into a two-view
+ * sheet — hence the choice, rather than one prompt for both. For a CAD sheet
+ * the route also sends the sheet's own shape (see routes/sketchTools.js):
+ * GPT Image 2 otherwise renders 1:1, and a tall sheet can't stay stacked in a
+ * square.
  */
+
+/** What the jeweller uploaded, as the page's toggle sends it. Anything else is a hand sketch. */
+const DRAWING_TYPES = ["sketch", "cad"];
+
+function drawingTypeOf(value) {
+  return DRAWING_TYPES.includes(value) ? value : "sketch";
+}
 
 /** What on a design sheet is the piece, and what is only there to explain it — for variations. */
 const SHEET_RULES = `READ THE SHEET
@@ -255,8 +275,9 @@ const PHOTO_RULES = `THE PHOTOGRAPH
 - It is a real photograph: no pencil lines, hatching, smudges or paper grain — never an illustration, concept art or plastic-looking CGI.`;
 
 /**
- * The render. A coloured CAD sheet's colours are its metals; pencil shading is
- * not — "grey = white gold" alone turned plain pencil pendants white gold.
+ * The render of a hand sketch: one photograph of the piece. A coloured sheet's
+ * colours are its metals; pencil shading is not — "grey = white gold" alone
+ * turned plain pencil pendants white gold.
  */
 const SKETCH_TO_IMAGE_PROMPT = `Turn this jewellery design drawing into a photorealistic studio product photograph of the exact piece it shows, made in real metal and diamonds.
 
@@ -264,6 +285,21 @@ const SKETCH_TO_IMAGE_PROMPT = `Turn this jewellery design drawing into a photor
 - The drawing shows ONE piece. If it is drawn from more than one side — for example a ring's face drawn as a flat strip beside its round profile — make the single piece that matches all the views and photograph it at a three-quarter angle. Never show two pieces, and never join, cross or stack the views. A single drawing keeps its drawn viewpoint and orientation.
 - Metal: what the notes say; else the drawing's colours (yellow = yellow gold, grey or silver = white gold); plain pencil = 18K yellow gold. Stones are white diamonds.
 - Pure white #FFFFFF background — never off-white, cream or grey, and no gradient — soft studio light, sharp focus, the whole piece in frame and centred. No pencil lines, paper texture, guide lines or written notes in the photograph.`;
+
+/**
+ * The render of a CAD / technical sheet: the same sheet made real, every view
+ * where it is drawn, with the dimension lines and labels gone. Drawn stone
+ * colours are kept — "stones are white diamonds" would turn a sapphire white.
+ */
+const CAD_SHEET_TO_IMAGE_PROMPT = `Turn this jewellery design drawing into a photorealistic studio rendering of the exact piece it shows, made in real metal and gemstones — the same picture, made real.
+
+- Copy the design exactly: the same outline, parts, openings, prongs, pavé, gallery, stones (number, shape, size and position) and proportions. Do not add, remove, simplify or reinvent anything; only clean shaky pencil lines into the precise edges they were meant to be.
+- Keep the drawing's layout exactly. Every view of the piece stays where it is drawn, at the same size, viewpoint and orientation: a sheet with a top view above a side view comes back as a photoreal top view above a photoreal side view of the same piece. Never merge the views into one shot, re-angle them, rearrange them, or add a view that is not drawn. A single drawing keeps its drawn viewpoint and orientation.
+- Leave out everything that is not the piece: dimension and leader lines, arrows, measurements and labels (such as "2.2MM"), written notes, construction and centre lines, borders and the paper itself. Where such a line crosses the piece, the piece continues unbroken beneath it.
+- Metal: what the notes say; else the drawing's colours (yellow = yellow gold, grey or silver = white gold); plain pencil = 18K yellow gold.
+- Stones: what the notes say; else the colour they are drawn in (blue = blue sapphire, red = ruby, green = emerald); white, grey or uncoloured stones = white diamonds.
+- Pure white #FFFFFF background — never off-white, cream or grey, and no gradient — soft studio light, sharp focus, every view whole and in frame. No pencil lines, paper texture, guide lines or text anywhere in the image.
+- If several drawings are attached, they show one piece: follow the layout of the first, and use the others only to understand the piece.`;
 
 const SKETCH_VARIATION_PROMPT = `TASK — A NEW DESIGN GROWN FROM THIS SKETCH
 
@@ -315,11 +351,14 @@ function jewellerNotes(description) {
  * on a two-view band sheet it miscounted ("144 pavé stones", an "8-sided
  * frame") with the renderer following its numbers over the drawing. The
  * jeweller's notes are kept short too, in the form the test ran with.
+ *
+ * `drawingType` is what the jeweller said they uploaded: "cad" keeps the
+ * sheet's layout, anything else is a hand sketch.
  */
-function buildSketchToImagePrompt({ description, count = 1 }) {
+function buildSketchToImagePrompt({ description, count = 1, drawingType = "sketch" }) {
   const notes = description?.trim();
   return (
-    SKETCH_TO_IMAGE_PROMPT +
+    (drawingTypeOf(drawingType) === "cad" ? CAD_SHEET_TO_IMAGE_PROMPT : SKETCH_TO_IMAGE_PROMPT) +
     (notes ? `
 
 Jeweller's notes (these win where they say something): ${notes}` : "") +
@@ -361,4 +400,5 @@ module.exports = {
   buildSketchToImagePrompt,
   buildSketchVariationPrompt,
   buildSketchToImageRefinePrompt,
+  drawingTypeOf,
 };

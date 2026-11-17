@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ChatMessages } from "./ChatMessages";
 import { ErrorBanner } from "./ToolChrome";
 import { ChatInputBar } from "./ChatInputBar";
@@ -32,6 +33,7 @@ export function GenerationResults<TModel extends string>({
   modelLabel,
   checkerboard,
   onReset,
+  composerControls,
 }: {
   workspace: ReturnType<typeof useGenerationWorkspace>;
   modelOptions: readonly {
@@ -56,6 +58,8 @@ export function GenerationResults<TModel extends string>({
   checkerboard?: boolean;
   /** Replaces the header's "start over" — for a page that returns to its own view instead. */
   onReset?: () => void;
+  /** A tool's own settings for the next turn, shown in the composer — see ChatInputBar's `extraControls`. */
+  composerControls?: ReactNode;
 }) {
   const {
     images,
@@ -144,6 +148,7 @@ export function GenerationResults<TModel extends string>({
                 qualityValue={qualityValue}
                 onQualityChange={onQualityChange}
                 placeholder={displayImg ? "Describe a change…" : "Waiting for the first result…"}
+                extraControls={composerControls}
               />
               )}
             </div>

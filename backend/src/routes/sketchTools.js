@@ -4,8 +4,11 @@ const { resolveProviderModel, loadTenantOrThrow } = require("../aiRouting");
 const { clampCount } = require("../jobs/generationRunner");
 const { TEXT_TO_SKETCH_JOB, SKETCH_TO_IMAGE_JOB, IMAGE_TO_SKETCH_JOB } = require("../jobs/sketchTools");
 const { resolveSketchMode, variationCountFor, describeSketchMode } = require("../prompts/intent");
+const { drawingTypeOf } = require("../prompts/sketch");
 const { queueGeneration, parseImages, readRefinement, MAX_REFERENCE_PHOTOS } = require("./queueGeneration");
 const { readTrendCues } = require("../services/trends");
+const { nearestAspectRatio } = require("../services/cutout");
+const sharp = require("sharp");
 
 /**
  * The three sketch tools' entry points. Each validates what only it knows —
@@ -19,6 +22,16 @@ const { readTrendCues } = require("../services/trends");
 /** Photo-driven tools default to a single result; text-driven ones to four. */
 const PHOTO_DEFAULT_COUNT = 1;
 const TEXT_DEFAULT_COUNT = 2;
+
+/** The supported ratio nearest a CAD sheet's own shape; null (the model's default) if it can't be read. */
+async function sketchAspect(image) {
+  try {
+    const { width, height } = await sharp(Buffer.from(image.base64, "base64")).metadata();
+    return width && height ? nearestAspectRatio(width, height) : null;
+  } catch {
+    return null;
+  }
+}
 
 const router = express.Router();
 router.use(requireAuth);
@@ -114,6 +127,14 @@ router.post("/sketch-to-image", requirePermission("tool.sketch_to_image.run"), a
   const count = mode === "variations" ? variationCountFor({ asked, selected, tool: "sketch_to_image" }) : selected;
   const intentLabel = describeSketchMode(mode, count);
 
+  // What the jeweller says they uploaded — the page's Hand sketch / CAD sheet
+  // toggle. A CAD sheet comes back as the same sheet, so it keeps the sheet's
+  // shape too: a tall top-and-side-view sheet squeezed into GPT Image 2's
+  // default 1:1 can't stay stacked. A hand sketch, and any variation (a new
+  // single piece), keeps the model's default.
+  const drawingType = drawingTypeOf(body.drawingType);
+  const aspectRatio = drawingType === "cad" && mode !== "variations" ? await sketchAspect(sketches[0]) : null;
+
   return queueGeneration(req, res, {
     type: SKETCH_TO_IMAGE_JOB,
     tool: "sketch_to_image",
@@ -123,6 +144,7 @@ router.post("/sketch-to-image", requirePermission("tool.sketch_to_image.run"), a
       isRefinement: false,
       description: description || null,
       sketchCount: sketches.length,
+      drawingType,
       count,
       mode,
       ...(intentLabel ? { intentLabel } : {}),
@@ -134,8 +156,10 @@ router.post("/sketch-to-image", requirePermission("tool.sketch_to_image.run"), a
       description,
       userPrompt,
       mode,
+      drawingType,
       count,
       intentLabel,
+      ...(aspectRatio ? { aspectRatio } : {}),
       sourceImages: sketches,
       conversationId: body.conversationId || null,
       parentGenerationId: onSketch ? body.parentGenerationId || null : null,

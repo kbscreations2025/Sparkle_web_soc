@@ -8,15 +8,17 @@ import { PromptCard } from "@/components/studio/PromptCard";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { GenerationResults } from "@/components/studio/GenerationResults";
 import { InlineModelSelect } from "@/components/studio/InlineModelSelect";
+import { InlineDropdown } from "@/components/studio/InlineDropdown";
 import { ImagePreviewLayer, type PreviewImage } from "@/components/studio/ImagePreviewLayer";
 import { LibraryPicker } from "@/components/studio/LibraryPicker";
 import { SketchPad } from "@/components/studio/SketchPad";
 import {
   sketchToImage,
-  refineOn,
+  refineSketchToImage,
   SKETCH_TO_IMAGE_MODELS,
   DEFAULT_SKETCH_TO_IMAGE_MODEL,
   toModelOptions,
+  type SketchDrawingType,
   type SketchToImageModelId,
 } from "@/lib/api";
 import { PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT } from "@/lib/jewelryConfigurator";
@@ -32,10 +34,68 @@ import { cn } from "@/lib/utils";
 
 const PERMISSION = "tool.sketch_to_image.run";
 const MODEL_OPTIONS = toModelOptions(SKETCH_TO_IMAGE_MODELS);
-const refineRender = refineOn<string>("/api/sketch-to-image");
 
 /** Several views of one piece go to the model together, so it sees the whole design. */
 const MAX_SKETCHES = 6;
+
+/**
+ * What the upload is — each gets its own prompt. A hand sketch comes back as
+ * one photograph of the piece; a CAD sheet as the same sheet made real, every
+ * view where it is drawn, measurements removed. Hand sketch is the default:
+ * the CAD prompt turned a hand-drawn pendant into a two-view sheet.
+ */
+const DRAWING_TYPES: readonly { value: SketchDrawingType; label: string; short: string; title: string }[] = [
+  { value: "sketch", label: "Hand sketch", short: "Sketch", title: "A drawing of the piece — rendered as one product photo" },
+  { value: "cad", label: "CAD sheet", short: "CAD", title: "A technical sheet — every view kept as drawn, measurements removed" },
+];
+
+/** The drawing-type pills, styled like the Images / Model / Quality groups. */
+function DrawingTypeSelector({
+  value,
+  onChange,
+  disabled,
+  className,
+}: {
+  value: SketchDrawingType;
+  onChange: (value: SketchDrawingType) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Drawing type"
+      className={cn(
+        "flex flex-col items-start gap-1 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1",
+        className
+      )}
+    >
+      <span className="text-[8px] font-semibold uppercase leading-none tracking-wide text-faint">Drawing</span>
+      <div className="flex gap-1">
+        {DRAWING_TYPES.map((option) => {
+          const active = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => onChange(option.value)}
+              disabled={disabled}
+              title={option.title}
+              className={cn(
+                "flex h-5 items-center rounded-md px-1.5 text-[10px] font-medium whitespace-nowrap transition-colors disabled:opacity-40",
+                active ? "bg-gold/15 text-gold" : "text-muted hover:bg-white/[0.06] hover:text-cream"
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 const REFINE_HINTS = [
   "Add more diamond sparkle",
@@ -63,6 +123,10 @@ export default function SketchToImagePage() {
   const [notes, setNotes] = useState("");
   const [model, setModel] = useState<SketchToImageModelId>(DEFAULT_SKETCH_TO_IMAGE_MODEL);
   const [quality, setQuality] = useModelQuality(model);
+  // Not remembered between visits on purpose: a CAD choice left on would turn
+  // the next hand sketch into a multi-view sheet without anyone noticing.
+  const [drawingType, setDrawingType] = useState<SketchDrawingType>("sketch");
+  const isCad = drawingType === "cad";
   // Shared with the other photo tools — see useStoredImageCount.
   const [count, setCount] = useStoredImageCount("photo", PHOTO_COUNT_OPTIONS, DEFAULT_PHOTO_COUNT);
   const [dragging, setDragging] = useState(false);
@@ -77,7 +141,14 @@ export default function SketchToImagePage() {
   const workspace = useGenerationWorkspace({
     tool: "sketch_to_image",
     resumeLabel: "Render this sketch",
-    onRefine: (body) => refineRender({ ...body, model, quality }),
+    // The drawing type rides along for a turn that re-renders the sketch itself.
+    onRefine: (body) => refineSketchToImage({ ...body, model, quality, drawingType }),
+    // A reopened thread goes on as it was rendered: its latest turn that says
+    // so. Turns from before the type was recorded read as hand sketches.
+    onResume: ({ generations }) => {
+      const recorded = [...generations].reverse().find((turn) => turn.drawingType)?.drawingType;
+      setDrawingType(recorded === "cad" ? "cad" : "sketch");
+    },
   });
 
   if (!can(user, PERMISSION)) {
@@ -108,10 +179,15 @@ export default function SketchToImagePage() {
     if (sketches.length === 0) return;
     const preview = await makeThumbnail(sketches[0]);
     workspace.generate(
-      () => sketchToImage({ images: sketches, description: notes.trim() || undefined, model, quality, count, preview }),
+      () =>
+        sketchToImage({ images: sketches, description: notes.trim() || undefined, model, quality, count, drawingType, preview }),
       {
         count,
-        prompt: notes.trim() || `Render ${sketches.length > 1 ? `${sketches.length} sketch views` : "this sketch"}`,
+        prompt:
+          notes.trim() ||
+          (isCad
+            ? "Render this CAD sheet"
+            : `Render ${sketches.length > 1 ? `${sketches.length} sketch views` : "this sketch"}`),
         images: sketches,
       }
     );
@@ -131,6 +207,17 @@ export default function SketchToImagePage() {
         resetLabel="New render"
         downloadName="render.png"
         modelLabel={SKETCH_TO_IMAGE_MODELS.find((entry) => entry.id === model)?.label}
+        // Switch here, pick your sketch in the thread and send, to render it the other way.
+        composerControls={
+          <InlineDropdown
+            label="Drawing"
+            value={drawingType}
+            onChange={setDrawingType}
+            options={DRAWING_TYPES.map((option) => ({ value: option.value, label: option.short, hint: option.title }))}
+            align="right"
+            panelClassName="w-[120px]"
+          />
+        }
       />
     );
   }
@@ -197,7 +284,9 @@ export default function SketchToImagePage() {
                         : "Drop your sketches here, or click to choose"}
                     </p>
                     <p className="text-[11px] text-faint">
-                      Add up to {MAX_SKETCHES} views of the same piece — they are rendered as one design.
+                      {isCad
+                        ? "A CAD sheet comes back as the same sheet, photoreal — every view kept, measurements removed."
+                        : `Add up to ${MAX_SKETCHES} views of the same piece — they are rendered as one design.`}
                     </p>
                   </button>
 
@@ -293,9 +382,25 @@ export default function SketchToImagePage() {
               footerEnd={<InlineModelSelect models={SKETCH_TO_IMAGE_MODELS} value={model} onChange={setModel} showQuality quality={quality} onQualityChange={setQuality} />}
             />
 
-            <RunButton onClick={handleGenerate} disabled={sketches.length === 0} icon={<Sparkles size={14} />}>
-              {count > 1 ? `Render ${count} images` : "Render photo"}
-            </RunButton>
+            {/* The drawing type picks the prompt, so it sits beside the button
+                that runs it. On a very narrow screen the button drops below. */}
+            <div className="flex flex-wrap items-stretch gap-2">
+              <DrawingTypeSelector
+                value={drawingType}
+                onChange={setDrawingType}
+                className="justify-center rounded-xl px-2.5"
+              />
+              <RunButton
+                onClick={handleGenerate}
+                disabled={sketches.length === 0}
+                icon={<Sparkles size={14} />}
+                className="w-auto min-w-40 flex-1"
+              >
+                {/* Names what will run, so the toggle beside it reads as part of the action. */}
+                {isCad ? "Render CAD sheet" : "Render sketch"}
+                {count > 1 && <span className="font-normal opacity-70">×{count}</span>}
+              </RunButton>
+            </div>
           </div>
         </div>
       </div>
