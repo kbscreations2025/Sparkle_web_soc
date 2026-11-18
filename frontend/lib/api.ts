@@ -1,4 +1,5 @@
 import type { DeckCategory } from "./affinity";
+import { SESSION_CHECK_TIMEOUT_MS, readSessionResponse, timeoutSignal, type SessionCheck } from "./session-check";
 
 export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
 
@@ -101,8 +102,25 @@ export function verifyOtp(email: string, otp: string, forceLogoutOthers = false)
   });
 }
 
-export function getCurrentUser() {
-  return apiRequest<{ user?: ApiUser }>("/api/auth/me");
+/**
+ * Who is signed in, telling "signed out" apart from "couldn't find out" (see
+ * SessionCheck), so only the first ever sends anyone to the login page. A
+ * plain `apiRequest` can't make that call: offline, a timeout and a server
+ * error all fail there exactly like a refusal.
+ *
+ * A GET with no extra headers, so the browser sends it without a CORS
+ * preflight: one round trip on a slow connection, not two.
+ */
+export async function checkCurrentUser(): Promise<SessionCheck> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/auth/me`, {
+      credentials: "include",
+      signal: timeoutSignal(SESSION_CHECK_TIMEOUT_MS),
+    });
+    return await readSessionResponse(res);
+  } catch {
+    return { kind: "unreachable" };
+  }
 }
 
 export function logout() {

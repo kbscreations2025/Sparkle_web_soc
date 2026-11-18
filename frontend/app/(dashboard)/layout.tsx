@@ -11,16 +11,19 @@ import { TopNav } from "@/components/TopNav";
 import { SideNav } from "@/components/nav/SideNav";
 import { QueueRail } from "@/components/studio/QueueRail";
 import { JobToasts } from "@/components/studio/JobToasts";
+import { ReconnectingScreen } from "@/components/auth/ReconnectingScreen";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, sessionUnreachable } = useAuth();
   // Every tool page loaded in the background, so switching between them is instant.
   usePreloadRoutes();
 
-  // The proxy guarantees a signed-in user before this ever renders, so this is
-  // only the brief gap while a signed-out visitor is being sent to /login.
-  // Rendering nothing keeps them from seeing a half-built dashboard.
-  if (!user) return null;
+  // Normally the proxy guarantees a signed-in user before this renders, so no
+  // user means one of two short gaps. Either a signed-out visitor is being
+  // sent to /login (render nothing, rather than a half-built dashboard), or
+  // the server couldn't be reached to check the session. In that case, say so
+  // while the app retries.
+  if (!user) return sessionUnreachable ? <ReconnectingScreen /> : null;
 
   // Wraps the whole dashboard, not one tool: a generation queued on Image
   // Cleaning stays visible after navigating to another tool, and the queue

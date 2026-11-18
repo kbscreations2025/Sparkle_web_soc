@@ -1,18 +1,35 @@
-const { resolveSession } = require("../session");
+const { checkSession } = require("../session");
 const { setAuthCookies, clearAuthCookies, readUserProfile } = require("../cookies");
 const { resolveAppUser } = require("../appUser");
 const { hasPermission } = require("../permissions");
 
-// Two deliberately separate steps: resolveSession proves who this is against
+// Two deliberately separate steps: checkSession proves who this is against
 // the central login, resolveAppUser decides what this application lets them
 // do. Passing the first has never implied the second.
 async function requireAuth(req, res, next) {
   const accessToken = req.cookies.access_token;
-  const session = await resolveSession(accessToken, req.cookies.refresh_token);
+  const session = await checkSession(accessToken, req.cookies.refresh_token);
 
-  if (!session) {
-    clearAuthCookies(res);
-    return res.status(401).json({ status: "error", message: "not authenticated" });
+  // The central login couldn't be reached to check. That's not the same as
+  // it saying no. Ask the client to try again and leave the cookies alone:
+  // clearing them here is what used to sign people out whenever central was
+  // slow, waking up or briefly unreachable.
+  if (session.status === "unavailable") {
+    res.set("Retry-After", "5");
+    return res.status(503).json({
+      status: "error",
+      code: "auth_unavailable",
+      message: "Couldn't reach the sign-in service. Please try again in a moment.",
+    });
+  }
+
+  if (session.status !== "ok") {
+    // Central refused the refresh token, so the session really has ended.
+    // The trusted-device cookie is kept, as on a normal logout: whether the
+    // device is still trusted is central's call, made at the next sign-in.
+    // Clearing it here forced an OTP on every one of these.
+    clearAuthCookies(res, { keepDeviceToken: true });
+    return res.status(401).json({ status: "error", code: "not_authenticated", message: "not authenticated" });
   }
 
   // Only rewrite the cookie when resolveSession actually had to refresh it.

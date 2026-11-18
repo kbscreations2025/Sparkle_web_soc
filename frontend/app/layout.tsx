@@ -4,7 +4,7 @@ import { Inter, Playfair_Display } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { readTheme, THEME_COOKIE } from "@/lib/theme";
-import { USER_HEADER, decodeUser } from "@/lib/session-header";
+import { SESSION_STATE_HEADER, USER_HEADER, decodeUser } from "@/lib/session-header";
 import "./globals.css";
 
 const inter = Inter({
@@ -27,7 +27,11 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   // Set by the proxy, which has already verified the session — so the app can
   // render signed-in on first paint instead of asking the backend again.
-  const initialUser = decodeUser((await headers()).get(USER_HEADER));
+  const requestHeaders = await headers();
+  const initialUser = decodeUser(requestHeaders.get(USER_HEADER));
+  // The proxy couldn't reach the backend to check: the app opens saying it's
+  // reconnecting, rather than blank, while it keeps trying from the browser.
+  const sessionUnreachable = requestHeaders.get(SESSION_STATE_HEADER) === "unreachable";
 
   // The theme lives in a cookie rather than localStorage so the server can
   // stamp it onto <html> directly — no inline script, no flash of the default.
@@ -37,7 +41,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" data-theme={theme} className={`${inter.variable} ${playfair.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-void text-cream font-sans">
         <ThemeProvider initialTheme={theme}>
-          <AuthProvider initialUser={initialUser}>{children}</AuthProvider>
+          <AuthProvider initialUser={initialUser} initialUnreachable={sessionUnreachable}>
+            {children}
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

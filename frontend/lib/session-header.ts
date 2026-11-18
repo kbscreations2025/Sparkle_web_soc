@@ -7,6 +7,14 @@ import type { ApiUser } from "./api";
  */
 export const USER_HEADER = "x-sparkle-user";
 
+/**
+ * Set to "unreachable" when the proxy couldn't reach the backend to check the
+ * session. The page goes through anyway, and the app opens showing that
+ * it's reconnecting instead of blank while it keeps trying in the browser.
+ * Only the proxy sets it; a value sent by the browser is dropped.
+ */
+export const SESSION_STATE_HEADER = "x-sparkle-session";
+
 // Base64 because header values must be ASCII and a name may not be.
 export function encodeUser(user: ApiUser): string {
   return Buffer.from(JSON.stringify(user), "utf8").toString("base64");

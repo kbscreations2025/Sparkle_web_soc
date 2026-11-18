@@ -9,8 +9,18 @@ const client = axios.create({
   },
 });
 
-async function post(path, body) {
-  const { data } = await client.post(path, body);
+/**
+ * A cap on the two calls every signed-in request and every socket sweep makes.
+ * Without it a central login that's asleep or unreachable held each request
+ * open until something else gave up. session.js reads a timeout as "couldn't
+ * check", never as a sign-out, so hitting this costs a "try again", not a
+ * session. Signing in itself stays uncapped: someone waiting on the login form
+ * is better served by a slow answer than an error.
+ */
+const SESSION_CHECK_TIMEOUT_MS = 10 * 1000;
+
+async function post(path, body, options) {
+  const { data } = await client.post(path, body, options);
   return data;
 }
 
@@ -34,9 +44,11 @@ const verifyOtp = ({ email, otp, forceLogoutOthers }) =>
     ...(forceLogoutOthers && { force_logout_others: true }),
   });
 
-const verifyToken = (accessToken) => post("/api/v1/verify-token", { access_token: accessToken });
+const verifyToken = (accessToken) =>
+  post("/api/v1/verify-token", { access_token: accessToken }, { timeout: SESSION_CHECK_TIMEOUT_MS });
 
-const refreshToken = (refreshTokenValue) => post("/api/v1/refresh-token", { refresh_token: refreshTokenValue });
+const refreshToken = (refreshTokenValue) =>
+  post("/api/v1/refresh-token", { refresh_token: refreshTokenValue }, { timeout: SESSION_CHECK_TIMEOUT_MS });
 
 const logout = (refreshTokenValue) => post("/api/v1/logout", { refresh_token: refreshTokenValue });
 

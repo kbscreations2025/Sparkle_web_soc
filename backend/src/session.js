@@ -17,6 +17,21 @@ const loginApi = require("./loginApi");
 const VERIFY_CACHE_MS = 30 * 1000;
 const verifyCache = new Map(); // accessToken -> { promise, expiresAt }
 
+/*
+ * What a session check can come back with. The first two are answers from the
+ * central login; the third means it couldn't be asked.
+ *
+ * They call for opposite responses, so they are never folded together.
+ * "invalid" ends the session: cookies cleared, the user sent to sign in.
+ * "unavailable" must not. The central login sleeps and wakes (it's on Render),
+ * drops a connection now and then, and is reached over a network like
+ * anything else. Treating that as a sign-out is what logged people out in the
+ * middle of their work. Because the trusted-device cookie was cleared with
+ * the rest, they then also needed an OTP to get back in.
+ */
+const INVALID = Object.freeze({ status: "invalid" });
+const UNAVAILABLE = Object.freeze({ status: "unavailable" });
+
 function cachedVerify(accessToken) {
   const hit = verifyCache.get(accessToken);
   if (hit && hit.expiresAt > Date.now()) return hit.promise;
@@ -35,6 +50,54 @@ function rememberVerify(accessToken, promise) {
 }
 
 /**
+ * Whether a failed call is the central login's verdict on the token, rather
+ * than a failure to reach it. A 4xx is central answering: the token is
+ * expired, revoked or malformed. Anything else isn't an answer. That covers
+ * no reply at all (timeout, dropped connection, DNS), a 5xx (down, waking up,
+ * mid-deploy) and a 408 or 429 (asked to come back later).
+ */
+function isVerdict(err) {
+  const status = err?.response?.status;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/** No reply of any kind, and not because the call ran out of time. */
+function isDroppedConnection(err) {
+  return !err?.response && err?.code !== "ECONNABORTED" && err?.code !== "ETIMEDOUT";
+}
+
+const RETRY_DELAY_MS = 300;
+
+/**
+ * Calls central, and once more if the connection dropped before any reply.
+ * A pooled connection the far side already closed ("socket hang up",
+ * ECONNRESET) is the commonest blip, and a second try almost always lands.
+ * A timeout is not retried, because it has already waited its full share.
+ */
+async function callCentral(call) {
+  try {
+    return await call();
+  } catch (err) {
+    if (!isDroppedConnection(err)) throw err;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    return call();
+  }
+}
+
+// One line in the logs per burst rather than one per request: when central is
+// down, every request in flight would otherwise say the same thing.
+const WARN_EVERY_MS = 10 * 1000;
+let lastWarnAt = 0;
+
+function warnUnavailable(step, err) {
+  const now = Date.now();
+  if (now - lastWarnAt < WARN_EVERY_MS) return;
+  lastWarnAt = now;
+  const detail = err?.response ? `HTTP ${err.response.status}` : err?.code || err?.message;
+  console.warn(`[session] could not reach the central login to ${step} (${detail}); keeping the session`);
+}
+
+/**
  * Reads an already-verified session from cache without ever calling central.
  * Safe unlike a raw JWT decode: a forged token can only ever be a cache hit if
  * it is byte-identical to a token central has already vouched for, so this
@@ -47,24 +110,25 @@ function rememberVerify(accessToken, promise) {
 async function peekVerifiedSession(accessToken) {
   const cached = cachedVerify(accessToken);
   if (!cached) return null;
-  const user = await cached;
-  return user ? { user, accessToken } : null;
+  const verdict = await cached;
+  return verdict.status === "ok" ? { user: verdict.user, accessToken } : null;
 }
 
 function safeVerify(accessToken) {
-  if (!accessToken) return Promise.resolve(null);
+  if (!accessToken) return Promise.resolve(INVALID);
 
   const cached = cachedVerify(accessToken);
   if (cached !== undefined) return cached;
 
-  const promise = loginApi
-    .verifyToken(accessToken)
-    .then((result) => (result.status === "success" ? result : null))
-    .catch(() => {
-      // A network hiccup is not a verdict worth keeping: drop the entry so the
-      // next caller retries instead of inheriting the failure for 30 seconds.
-      verifyCache.delete(accessToken);
-      return null;
+  const promise = callCentral(() => loginApi.verifyToken(accessToken))
+    .then((result) => (result?.status === "success" ? { status: "ok", user: result } : INVALID))
+    .catch((err) => {
+      if (isVerdict(err)) return INVALID;
+      // Not a verdict worth keeping: drop the entry so the next caller asks
+      // again instead of inheriting the failure for 30 seconds.
+      if (verifyCache.get(accessToken)?.promise === promise) verifyCache.delete(accessToken);
+      warnUnavailable("verify a session", err);
+      return UNAVAILABLE;
     });
 
   rememberVerify(accessToken, promise);
@@ -72,29 +136,54 @@ function safeVerify(accessToken) {
 }
 
 async function safeRefresh(refreshToken) {
-  if (!refreshToken) return null;
+  if (!refreshToken) return INVALID;
   try {
-    const result = await loginApi.refreshToken(refreshToken);
-    return result.status === "success" ? result : null;
+    const result = await callCentral(() => loginApi.refreshToken(refreshToken));
+    return result?.status === "success" && result.access_token
+      ? { status: "ok", accessToken: result.access_token }
+      : INVALID;
   } catch (err) {
-    return null;
+    if (isVerdict(err)) return INVALID;
+    warnUnavailable("refresh a session", err);
+    return UNAVAILABLE;
   }
 }
 
-// Shared by the REST middleware and the socket layer: an expired access token
-// alone is never a logout, only a failed refresh (refresh_token itself revoked)
-// means the session actually ended.
-async function resolveSession(accessToken, refreshToken) {
+/**
+ * Who this is, as `{ status: "ok", user, accessToken }`, or
+ * `{ status: "invalid" }` when the session has ended, or
+ * `{ status: "unavailable" }` when the central login couldn't be asked.
+ * Shared by the REST middleware and the socket layer.
+ *
+ * An expired access token alone is never a sign-out, because it lapses every
+ * 15 minutes. The session has ended only when central refuses the refresh
+ * token. A verify that couldn't get through returns at once rather than
+ * trying a refresh: central is just as unreachable for that, and a second
+ * timeout would only double the wait.
+ */
+async function checkSession(accessToken, refreshToken) {
   const verified = await safeVerify(accessToken);
-  if (verified) return { user: verified, accessToken };
+  if (verified.status === "ok") return { status: "ok", user: verified.user, accessToken };
+  if (verified.status === "unavailable") return UNAVAILABLE;
 
   const refreshed = await safeRefresh(refreshToken);
-  if (!refreshed) return null;
+  if (refreshed.status !== "ok") return refreshed;
 
-  const reverified = await safeVerify(refreshed.access_token);
-  if (!reverified) return null;
+  const reverified = await safeVerify(refreshed.accessToken);
+  if (reverified.status !== "ok") return reverified;
 
-  return { user: reverified, accessToken: refreshed.access_token };
+  return { status: "ok", user: reverified.user, accessToken: refreshed.accessToken };
 }
 
-module.exports = { resolveSession, peekVerifiedSession };
+/**
+ * The older yes-or-no form: the session, or null for anything else. Kept so a
+ * caller that only needs "is there a session right now" has a simple shape.
+ * Never use it to decide whether to end a session; use checkSession, which
+ * tells "ended" apart from "couldn't check".
+ */
+async function resolveSession(accessToken, refreshToken) {
+  const session = await checkSession(accessToken, refreshToken);
+  return session.status === "ok" ? { user: session.user, accessToken: session.accessToken } : null;
+}
+
+module.exports = { checkSession, resolveSession, peekVerifiedSession };

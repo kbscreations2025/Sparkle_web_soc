@@ -1,22 +1,14 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { ApiUser } from "@/lib/api";
-import { USER_HEADER, encodeUser } from "@/lib/session-header";
+import { SESSION_STATE_HEADER, USER_HEADER, encodeUser } from "@/lib/session-header";
+import { SESSION_CHECK_TIMEOUT_MS, readSessionResponse, timeoutSignal, type SessionCheck } from "@/lib/session-check";
 import { LOGIN_PATH, homeFor, isWrongShell } from "@/lib/shell";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
 
-type SessionCheck = {
-  user: ApiUser | null;
-  /** Set-Cookie lines from the backend, e.g. an access token it just refreshed. */
-  setCookies: string[];
-  /**
-   * Why the backend refused, when it did. A 403 means authenticated but not
-   * allowed in — not provisioned, suspended — which is worth telling them,
-   * since otherwise they log in successfully and land back on the form.
-   */
-  deniedCode?: string;
-};
+/** Plus any Set-Cookie lines from the backend, e.g. an access token it just refreshed. */
+type ProxySessionCheck = SessionCheck & { setCookies: string[] };
 
 /**
  * Verifies against the backend rather than just checking that a cookie exists.
@@ -24,23 +16,21 @@ type SessionCheck = {
  * components talking to a separate API), so an optimistic check would let a
  * stale cookie through to the browser and only fail once the page was already
  * on screen — the flash this whole layer exists to prevent.
+ *
+ * Bounded, so a backend that's asleep or unreachable can't hold the page
+ * hostage: past the timeout the check counts as unreachable, the page goes
+ * through, and the browser keeps trying.
  */
-async function checkSession(request: NextRequest): Promise<SessionCheck> {
+async function checkSession(request: NextRequest): Promise<ProxySessionCheck> {
   try {
     const res = await fetch(`${BACKEND_URL}/api/auth/me`, {
       headers: { cookie: request.headers.get("cookie") ?? "" },
+      signal: timeoutSignal(SESSION_CHECK_TIMEOUT_MS),
     });
     const setCookies = res.headers.getSetCookie();
-
-    if (!res.ok) {
-      const denied = res.status === 403 ? await res.json().catch(() => null) : null;
-      return { user: null, setCookies, deniedCode: denied?.code };
-    }
-
-    const data = await res.json();
-    return { user: data.status === "success" ? data.user : null, setCookies };
+    return { ...(await readSessionResponse(res)), setCookies };
   } catch {
-    return { user: null, setCookies: [] };
+    return { kind: "unreachable", setCookies: [] };
   }
 }
 
@@ -49,11 +39,16 @@ function withCookies(response: NextResponse, setCookies: string[]) {
   return response;
 }
 
-/** Lets the page render, carrying the verified user through to the root layout. */
-function allow(request: NextRequest, user: ApiUser | null) {
+/**
+ * Lets the page render, carrying the verified user through to the root layout
+ * — or, when the session couldn't be checked, word that it couldn't.
+ */
+function allow(request: NextRequest, user: ApiUser | null, { unreachable = false } = {}) {
   const headers = new Headers(request.headers);
   if (user) headers.set(USER_HEADER, encodeUser(user));
   else headers.delete(USER_HEADER);
+  if (unreachable) headers.set(SESSION_STATE_HEADER, "unreachable");
+  else headers.delete(SESSION_STATE_HEADER);
   return NextResponse.next({ request: { headers } });
 }
 
@@ -74,14 +69,25 @@ export async function proxy(request: NextRequest) {
     return isLoginPage ? allow(request, null) : redirectTo(LOGIN_PATH, request);
   }
 
-  const { user, setCookies, deniedCode } = await checkSession(request);
+  const check = await checkSession(request);
 
-  if (!user) {
+  // Couldn't find out: the backend or the central login is slow, asleep or
+  // unreachable. That's no reason to sign anyone out. Sending people to the
+  // login page here is what made a slow connection look like a logout. The
+  // page goes through without a user, and the app retries from the browser,
+  // showing that it's reconnecting, until the backend answers.
+  if (check.kind === "unreachable") {
+    return withCookies(allow(request, null, { unreachable: true }), check.setCookies);
+  }
+
+  if (check.kind === "signed_out") {
     // Carry the reason so the form can say why, rather than silently
     // re-presenting itself to someone whose credentials are perfectly valid.
-    const target = deniedCode ? `${LOGIN_PATH}?denied=${deniedCode}` : LOGIN_PATH;
-    return withCookies(isLoginPage ? allow(request, null) : redirectTo(target, request), setCookies);
+    const target = check.deniedCode ? `${LOGIN_PATH}?denied=${check.deniedCode}` : LOGIN_PATH;
+    return withCookies(isLoginPage ? allow(request, null) : redirectTo(target, request), check.setCookies);
   }
+
+  const { user, setCookies } = check;
 
   // Signed in: send them to their own shell if they're anywhere else. A central
   // super_admin gets the console, everyone else the dashboard.

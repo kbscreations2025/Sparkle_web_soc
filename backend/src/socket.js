@@ -2,7 +2,7 @@ const { Server } = require("socket.io");
 const cookie = require("cookie");
 const config = require("./config");
 const { decodeUserProfile } = require("./cookies");
-const { resolveSession } = require("./session");
+const { checkSession } = require("./session");
 const User = require("./models/user");
 
 const REVALIDATE_INTERVAL_MS = 60 * 1000;
@@ -36,9 +36,13 @@ function initSocket(httpServer) {
 
   io.use(async (socket, next) => {
     const cookies = cookie.parse(socket.handshake.headers.cookie || "");
-    const session = await resolveSession(cookies.access_token, cookies.refresh_token);
+    const session = await checkSession(cookies.access_token, cookies.refresh_token);
 
-    if (!session) return next(new Error("unauthorized"));
+    // Refused either way, but told apart: socket.io doesn't retry a refused
+    // handshake by itself, so the client retries "auth_unavailable" (central
+    // couldn't be asked) and leaves "unauthorized" alone.
+    if (session.status === "unavailable") return next(new Error("auth_unavailable"));
+    if (session.status !== "ok") return next(new Error("unauthorized"));
 
     socket.data.user = session.user;
     socket.data.accessToken = session.accessToken;
@@ -91,7 +95,10 @@ function initSocket(httpServer) {
 
 /**
  * Only a session whose refresh token is truly gone gets disconnected here, not
- * one whose access token just expired between sweeps.
+ * one whose access token just expired between sweeps — and not one that
+ * couldn't be checked. A sweep that can't reach the central login leaves every
+ * socket as it is and asks again next minute. Before, one failed sweep told
+ * every connected user they'd been "signed out elsewhere" at the same moment.
  *
  * This is a narrower rule than the REST requireAuth middleware, which also
  * runs resolveAppUser and refuses a member who is no longer active. Changes to
@@ -114,8 +121,9 @@ async function revalidateAll(io) {
 
     await Promise.all(
       live.map(async (socket) => {
-        const session = await resolveSession(socket.data.accessToken, socket.data.refreshToken);
-        if (!session) {
+        const session = await checkSession(socket.data.accessToken, socket.data.refreshToken);
+        if (session.status === "unavailable") return;
+        if (session.status !== "ok") {
           socket.emit("auth:revoked");
           socket.disconnect(true);
           return;
