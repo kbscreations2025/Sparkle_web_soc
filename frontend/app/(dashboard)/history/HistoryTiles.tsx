@@ -302,13 +302,15 @@ function timeAgoShort(iso: string) {
  */
 const SKELETON_GRID_COLUMNS = "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6";
 
-export function SkeletonGrid({ rows, columns }: { rows: number; columns?: number }) {
+export function SkeletonGrid({ rows, columns, count }: { rows: number; columns?: number; count?: number }) {
   // A size the person picked with the slider is known exactly, so the
-  // stand-in takes the same shape as the grid it hands over to.
+  // stand-in takes the same shape as the grid it hands over to. `count`
+  // overrides rows × columns, for a run of placeholders that is not a whole
+  // number of rows.
   if (columns) {
     return (
       <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP }}>
-        {Array.from({ length: columns * rows }).map((_, i) => (
+        {Array.from({ length: count ?? columns * rows }).map((_, i) => (
           <div key={i} className="aspect-square animate-pulse rounded-lg bg-white/[0.04] md:rounded-xl" />
         ))}
       </div>

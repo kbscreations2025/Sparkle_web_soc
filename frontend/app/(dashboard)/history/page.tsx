@@ -623,6 +623,8 @@ export default function HistoryPage() {
     for (let i = 0; i < visibleItems.length; i += columns) chunks.push(visibleItems.slice(i, i + columns));
     return chunks;
   }, [visibleItems, columns]);
+  /** Empty cells at the end of the last row — where a loading page's placeholders start. */
+  const lastRowGap = (columns - (visibleItems.length % columns)) % columns;
 
   /** Where to put the grid back to, when this visit arrived by Back — see below. */
   const [restoreAnchor] = useState<ScrollAnchor | null>(() =>
@@ -1408,7 +1410,7 @@ export default function HistoryPage() {
               onContinue={handleContinue}
             />
           ) : loading ? (
-            <SkeletonGrid rows={3} columns={chosenColumns} />
+            <SkeletonGrid rows={4} columns={chosenColumns} />
           ) : visibleItems.length === 0 ? (
             <p className="px-2 py-10 text-center text-sm text-faint">
               {search ? `No results for “${correctedSearch ?? search}”.` : "Nothing generated yet."}
@@ -1440,15 +1442,25 @@ export default function HistoryPage() {
                         onDelete={requestDelete}
                       />
                     ))}
+                    {/* While the next page loads, the placeholders carry on
+                        from the last tile — into this row's empty cells —
+                        rather than starting a new line below it. */}
+                    {loadingMore && virtualRow.index === rows.length - 1 &&
+                      Array.from({ length: lastRowGap }).map((_, i) => (
+                        <div key={`gap-${i}`} className="aspect-square animate-pulse rounded-lg bg-white/[0.04] md:rounded-xl" />
+                      ))}
                   </div>
                 </div>
               ))}
             </div>
           )}
 
+          {/* Two full rows of placeholders, below the cells above that carry on
+              from the last tile. The padding is the grid's own gap — the
+              virtualizer's rows have none after the last. */}
           {view === "history" && loadingMore && (
-            <div className="pt-1">
-              <SkeletonGrid rows={1} columns={chosenColumns} />
+            <div style={{ paddingTop: GRID_GAP }}>
+              <SkeletonGrid rows={2} columns={columns} />
             </div>
           )}
         </div>
