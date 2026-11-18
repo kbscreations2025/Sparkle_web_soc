@@ -51,17 +51,18 @@ async function matchColour(output, reference) {
     });
     if (channels.every((channel) => channel.drift < MIN_DRIFT)) return output;
 
-    let pipeline = sharp(outBuf)
+    const pipeline = sharp(outBuf)
       .removeAlpha()
       .linear(
         channels.map((channel) => channel.gain),
         channels.map((channel) => channel.offset)
       );
-    const isPng = output.mimeType === "image/png";
-    pipeline = isPng ? pipeline.png() : pipeline.jpeg({ quality: 95 });
-    const corrected = await pipeline.toBuffer();
+    // Full quality (storage/outputEncoding.js). This was quality 95 at half
+    // colour resolution, the lossiest save anywhere in the app: some pixels
+    // came back off by as much as 20 levels.
+    const corrected = await encodeOutput(pipeline, output.mimeType);
 
-    return { ...output, mimeType: isPng ? "image/png" : "image/jpeg", base64: corrected.toString("base64") };
+    return { ...output, mimeType: corrected.mimeType, base64: corrected.buffer.toString("base64") };
   } catch (err) {
     // A colour fix is a nicety; an image the edit already produced is never lost to it.
     console.error("[color-match] could not match colour:", err.message);

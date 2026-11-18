@@ -1,4 +1,5 @@
 const sharp = require("sharp");
+const { encodeOutput } = require("./outputEncoding");
 
 /**
  * Makes a near-white product-shot background exactly #FFFFFF.
@@ -149,10 +150,8 @@ async function purifyWhiteBackground(buffer, mimeType) {
     if (y < height - 1) push(p + width);
   }
 
-  const raw = sharp(data, { raw: { width, height, channels: 3 } });
-  if (/png/i.test(mimeType)) return { buffer: await raw.png().toBuffer(), mimeType: "image/png" };
-  if (/webp/i.test(mimeType)) return { buffer: await raw.webp({ quality: 95 }).toBuffer(), mimeType: "image/webp" };
-  return { buffer: await raw.jpeg({ quality: 95, chromaSubsampling: "4:4:4" }).toBuffer(), mimeType: "image/jpeg" };
+  // Saved at full quality: only the background was meant to change.
+  return encodeOutput(sharp(data, { raw: { width, height, channels: 3 } }), mimeType);
 }
 
 module.exports = { purifyWhiteBackground };

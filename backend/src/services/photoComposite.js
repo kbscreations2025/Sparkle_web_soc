@@ -1,4 +1,5 @@
 const sharp = require("sharp");
+const { encodeOutput } = require("../storage/outputEncoding");
 
 /**
  * Putting a generated edit back into the photo it was made from.
@@ -624,16 +625,16 @@ async function compositeIntoPhoto({ photo, frame, answer, oldMask, outline }) {
     }
   }
 
-  // A PNG stays lossless; anything else is a near-lossless JPEG, so the
-  // untouched pixels come back as they went in.
-  const encoder = sharp(out, { raw: { width, height, channels: 3 } });
-  const isPng = photo.mimeType === "image/png";
-  const encoded = isPng
-    ? await encoder.png({ compressionLevel: 8 }).toBuffer()
-    : await encoder.jpeg({ quality: 95, chromaSubsampling: "4:4:4" }).toBuffer();
+  // Full quality (storage/outputEncoding.js): a PNG stays lossless, anything
+  // else is a quality-100 JPEG, so the untouched pixels come back as they
+  // went in.
+  const encoded = await encodeOutput(
+    sharp(out, { raw: { width, height, channels: 3 } }),
+    photo.mimeType === "image/png" ? "image/png" : "image/jpeg"
+  );
 
   return {
-    output: { mimeType: isPng ? "image/png" : "image/jpeg", base64: encoded.toString("base64") },
+    output: { mimeType: encoded.mimeType, base64: encoded.buffer.toString("base64") },
     match: score,
     outlinedNew,
   };

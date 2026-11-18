@@ -1,4 +1,5 @@
 const sharp = require("sharp");
+const { encodeOutput } = require("../storage/outputEncoding");
 
 /**
  * Lifting a piece of jewellery off its background — without redrawing it.
@@ -800,16 +801,13 @@ async function composite(cut, { background, shadow = "none", framing = "original
       : { r: 0, g: 0, b: 0, alpha: 0 };
 
   const out = sharp({ create: { width: canvas.width, height: canvas.height, channels: 4, background: base } }).composite(layers);
-  // An opaque result goes out as a high-quality JPEG — a photo at PNG size
-  // is several times the bytes for nothing a viewer can see. Full chroma, so
-  // a brand colour's edge against the metal doesn't smear (see thumbnail.js).
-  // Only a transparent result needs PNG.
+  // An opaque result goes out as a JPEG, at full quality (quality 100, full
+  // chroma; see storage/outputEncoding.js). A photo at PNG size is several
+  // times the bytes for nothing a viewer can see. Only a transparent result
+  // needs PNG.
   return background?.kind === "color"
-    ? {
-        buffer: await out.flatten({ background: base }).jpeg({ quality: 95, chromaSubsampling: "4:4:4", mozjpeg: true }).toBuffer(),
-        mimeType: "image/jpeg",
-      }
-    : { buffer: await out.png({ compressionLevel: 8 }).toBuffer(), mimeType: "image/png" };
+    ? encodeOutput(out.flatten({ background: base }), "image/jpeg")
+    : encodeOutput(out, "image/png");
 }
 
 module.exports = { analyse, cutOut, composite, nearestAspectRatio };
