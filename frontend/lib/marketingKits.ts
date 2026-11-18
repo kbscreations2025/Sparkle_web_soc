@@ -31,6 +31,18 @@ export const KIT_LABEL: Record<MarketingKitKind, string> = {
   on_model: "Styled on Model",
 };
 
+/** The one-word form for a small tile's badge — the full name is on hover. */
+export const KIT_SHORT_LABEL: Record<MarketingKitKind, string> = {
+  brand_story: "Brand",
+  affinity: "Set",
+  campaign: "Kit",
+  collection_story: "Set",
+  festive: "Poster",
+  presentation: "Deck",
+  charms: "Charms",
+  on_model: "Model",
+};
+
 /** The link that reopens one kit. */
 export function kitHref(kit: Pick<MarketingKitSummary, "id" | "kind">) {
   return `${KIT_SURFACE[kit.kind]}?kitId=${kit.id}`;

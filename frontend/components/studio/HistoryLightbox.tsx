@@ -22,7 +22,7 @@ import { kitHref } from "@/lib/marketingKits";
  * and five of them sat in a row.
  */
 const LIGHTBOX_ACTION =
-  "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.10] md:h-8 md:w-8";
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[0.10] md:h-7 md:w-7";
 
 /**
  * The detail view for one History tile: every output image of that
@@ -116,7 +116,7 @@ export function HistoryLightbox({
   return (
     <div
       ref={frameRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-2 backdrop-blur-xl md:p-5 lg:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-2 backdrop-blur-xl md:p-3 lg:p-4"
       onClick={onClose}
       role="presentation"
     >
@@ -124,7 +124,7 @@ export function HistoryLightbox({
         className="relative flex max-h-[94vh] max-w-[96vw] flex-col items-center"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="mb-2 flex w-full flex-wrap items-center justify-between gap-2 md:mb-3 md:gap-4">
+        <div className="mb-2 flex w-full flex-wrap items-center justify-between gap-2 md:mb-2 md:gap-4">
           {/*
             On a phone the close button leaves the pill and sits alone at the
             top right, where a thumb expects it — it is the most-used control
@@ -146,9 +146,6 @@ export function HistoryLightbox({
                   {[modelLabel, item.quality].filter(Boolean).join(" · ")}
                 </span>
               )}
-              {/* Keyed by thread, so opening another result starts a fresh
-                  editor rather than carrying over a half-typed value. */}
-              <DesignNoChip key={item.conversationId} value={item.designNo ?? null} onSave={onDesignNoSave} />
             </div>
 
             <button
@@ -167,7 +164,7 @@ export function HistoryLightbox({
               {timeLabel} · by {item.userName}
               {item.outputs.length > 1 ? ` · ${activeIndex + 1}/${item.outputs.length}` : ""}
             </p>
-            <div className="flex items-center gap-0.5 rounded-full border border-white/15 bg-white/[0.04] p-1 md:gap-1">
+            <div className="flex items-center gap-0.5 rounded-full border border-white/15 bg-white/[0.04] p-1 md:gap-1 md:p-0.5">
               {canContinue && (
                 <button
                   type="button"
@@ -425,8 +422,14 @@ export function HistoryLightbox({
 
       {/* Zoom is for a still. A video has its own controls and text has
           nothing to magnify, so the bar is absent rather than inert. */}
+      {/* The design number sits at the right of this row, level with the
+          zoom bar, which stays centred: an empty spacer balances it on the
+          left. Keyed by thread, so opening another result starts a fresh
+          editor rather than carrying over a half-typed value. */}
+      <div className="mt-2 flex w-full items-center gap-2">
+        <div className="min-w-0 flex-1" />
       {active?.type !== "video" && active && (
-        <div className="mt-2 flex items-center gap-0.5 rounded-full border border-white/15 bg-black/60 px-1 py-0.5 backdrop-blur-sm">
+        <div className="flex items-center gap-0.5 rounded-full border border-white/15 bg-black/60 px-1 py-0.5 backdrop-blur-sm">
           <button
             type="button"
             onClick={zoom.zoomOut}
@@ -455,6 +458,10 @@ export function HistoryLightbox({
           </button>
         </div>
       )}
+        <div className="flex min-w-0 flex-1 justify-end">
+          <DesignNoChip key={item.conversationId} value={item.designNo ?? null} onSave={onDesignNoSave} />
+        </div>
+      </div>
       </div>
     </div>
   );

@@ -2,22 +2,23 @@
 
 import { memo } from "react";
 import Link from "next/link";
-import { Copy, Download, Eye, MessageCircle, Newspaper, Trash2 } from "lucide-react";
+import { Copy, Download, MessageCircle, Newspaper, Trash2 } from "lucide-react";
 import type { HistoryItem, MarketingKitSummary } from "@/lib/api";
 import { downloadImage, downloadName } from "@/lib/image";
 import { TOOL_SHORT_LABELS, toolBadgeStyle } from "@/lib/nav";
-import { describeKit, kitBadgeStyle, kitHref } from "@/lib/marketingKits";
+import { KIT_SHORT_LABEL, describeKit, kitBadgeStyle, kitHref } from "@/lib/marketingKits";
 import { cn } from "@/lib/utils";
 import { AssetThumb } from "@/components/studio/AssetThumb";
-import { TileActionsMenu, firstName } from "@/components/studio/TileActionsMenu";
+import { TILE_PILL, TILE_PILL_BUTTON, TileActionsMenu, firstName } from "@/components/studio/TileActionsMenu";
 
 /*
  * The History page's grid tiles — one generation, one saved kit — and the
  * skeleton that stands in for them while they load.
  *
  * Kept to the least chrome that still tells tiles apart: the tool badge top
- * left; the size and one ⋮ menu top right (chat, download, delete — the
- * lightbox has the same, full size, one tap away); who made it, by first name,
+ * left; top right the size, the chat button (the action used most) and one
+ * ⋮ menu for download and delete — the lightbox has the same, full size, one
+ * tap away; who made it, by first name,
  * bottom left. The same on every screen — a phone's tile is as small as a
  * desktop's at ten to a row.
  */
@@ -27,14 +28,23 @@ export const GRID_GAP = 10;
 
 /**
  * The narrowest a tile may get — what its chrome needs across the top (a
- * clipped tool badge, the size, the ⋮) with a little picture between. The
- * size slider stops short of it: on a narrower grid, fewer to a row.
+ * short tool badge, the size, the chat button and the ⋮) with a little
+ * picture between. The size slider stops short of it: on a narrower grid,
+ * fewer to a row.
  */
-export const MIN_TILE_WIDTH = 96;
+export const MIN_TILE_WIDTH = 124;
+
+/**
+ * The same floor on a phone, lower so three fit across (a 390px phone has
+ * about 360px of grid). The chips on a tile scale with its width and the
+ * action pill has its own minimum, so a tile this narrow still carries
+ * its chrome — the creator's name just ends in "…" sooner.
+ */
+export const MIN_TILE_WIDTH_PHONE = 100;
 
 /** The small dark chips over a picture — size, name, count. */
 const TILE_CHIP =
-  "rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]";
+  "rounded-full bg-black/55 px-[0.6em] py-[0.2em] text-[clamp(6px,6cqw,11px)] font-medium leading-tight text-white/85 backdrop-blur-sm";
 
 /**
  * What a tile shows when the run produced words instead of pictures.
@@ -131,6 +141,7 @@ function KitTile({
   // has loaded; until then (and for every other kind) the tile opens the kit.
   const item = OPENS_AS_RESULT.has(kit.kind) ? items[kit.id] : undefined;
   const cover = item?.outputs[0];
+  const chat = Boolean(item && (canContinue(item) || canView(item)));
   const picture = kit.previewUrl ? (
     /* eslint-disable-next-line @next/next/no-img-element -- small grid tile, lazy-loaded natively; next/image adds no value at this size */
     <img
@@ -150,7 +161,7 @@ function KitTile({
   return (
     <div
       title={kit.title || "Untitled kit"}
-      className="group relative aspect-square overflow-hidden rounded-lg border border-white/[0.06] transition-colors hover:border-white/20 md:rounded-xl"
+      className="group relative aspect-square overflow-hidden [container-type:inline-size] rounded-lg border border-white/[0.06] transition-colors hover:border-white/20 md:rounded-xl"
     >
       {item ? (
         <button
@@ -170,21 +181,38 @@ function KitTile({
       <div className="pointer-events-none absolute left-1.5 right-1.5 top-1.5 flex items-center justify-between gap-1 md:left-2 md:right-2 md:top-2">
         {/* The same badge the results tiles carry, in Marketing Kit's own
             colour, so a kit is recognisable at a glance in either tab. */}
-        <span
-          className="min-w-0 truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
-          style={kitBadgeStyle(kit.kind)}
-        >
-          {describeKit(kit)}
+        <span className="flex min-w-0 items-center">
+          <span
+            title={describeKit(kit)}
+            className="min-w-0 truncate rounded-full px-[0.55em] py-[0.15em] text-[clamp(6px,6cqw,11px)] font-semibold leading-tight backdrop-blur-sm"
+            style={kitBadgeStyle(kit.kind)}
+          >
+            {KIT_SHORT_LABEL[kit.kind] ?? describeKit(kit)}
+          </span>
+          {/* How many pieces — beside the badge as a results tile shows its
+              image count. A Brand Story carries none: it is one narrative. */}
+          {kit.kind !== "brand_story" && kit.pieceCount > 1 && (
+            <span
+              title={describeKit(kit)}
+              className={cn(TILE_CHIP, "ml-0.5 hidden shrink-0 items-center gap-[0.2em] py-[0.1em] @[150px]:flex")}
+            >
+              <Copy className="h-[1em] w-[1em]" /> {kit.pieceCount}
+            </span>
+          )}
         </span>
 
-        {/* The same ⋮ an image tile has. A teammate's kit is readable but
-            not theirs to remove — the server refuses it, so no Delete. */}
-        <div className="pointer-events-auto">
+        {/* The same chat button and ⋮ an image tile has. A teammate's kit is
+            readable but not theirs to remove — the server refuses it, so no
+            Delete. */}
+        {(chat || cover || kit.isOwn !== false) && (
+        <div className={cn(TILE_PILL, "pointer-events-auto")}>
+          {item && chat && (
+            <TileChatButton own={canContinue(item)} ownerName={item.userName} onOpen={() => onContinue(item)} />
+          )}
           <TileActionsMenu
+            inPill
             title={kit.title || "Untitled kit"}
             actions={[
-              item && canContinue(item) && { icon: MessageCircle, label: "Continue chat", onSelect: () => onContinue(item) },
-              item && canView(item) && { icon: Eye, label: "View chat", onSelect: () => onContinue(item) },
               item &&
                 cover && {
                   icon: Download,
@@ -195,6 +223,7 @@ function KitTile({
             ]}
           />
         </div>
+        )}
       </div>
 
       <div className="pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
@@ -213,11 +242,38 @@ function KitTile({
           happened, and the reason is the only thing that explains why there
           is nothing to open. */}
       {kit.status === "failed" && (
-        <p className="pointer-events-none absolute inset-x-1.5 bottom-8 truncate rounded bg-error/80 px-1.5 py-0.5 text-[8px] font-medium text-white md:inset-x-2 md:bottom-10 md:text-[10px]">
+        <p className="pointer-events-none absolute inset-x-1.5 bottom-8 md:bottom-10 truncate rounded bg-error/80 px-1.5 py-0.5 text-[clamp(7px,6.5cqw,11px)] font-medium text-white md:inset-x-2">
           {kit.error || "Could not be saved"}
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * Opens a tile's chat — Continue on the viewer's own run, View (read-only) on
+ * a colleague's. Out beside the ⋮ rather than inside it, being what a tile
+ * is most often opened for.
+ */
+function TileChatButton({ own, ownerName, onOpen }: { own: boolean; ownerName: string; onOpen: () => void }) {
+  const label = own ? "Continue chat" : `View ${ownerName}'s chat (read-only)`;
+  // A chat icon either way — it opens a chat; whether it can be added to is
+  // what the tooltip and the page it opens say.
+  const Icon = MessageCircle;
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={(event) => {
+        // The tile is clickable; opening the chat must not also open it.
+        event.stopPropagation();
+        onOpen();
+      }}
+      className={TILE_PILL_BUTTON}
+    >
+      <Icon size="1em" />
+    </button>
   );
 }
 
@@ -319,9 +375,12 @@ export const HistoryTile = memo(
 
     return (
       <div
-        className="group relative aspect-square cursor-pointer overflow-hidden rounded-lg border border-white/[0.06] transition-colors hover:border-white/20 md:rounded-xl"
+        // Not clipped itself — the quality badge sits out on the corner's
+        // border — only the picture inside is, to the tile's rounding.
+        className="group relative aspect-square cursor-pointer [container-type:inline-size] rounded-lg border border-white/[0.06] transition-colors hover:border-white/20 md:rounded-xl"
         onClick={() => onOpen(item)}
       >
+        <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
         {/* The small copy, not the original: a full page of results is tens
             of megabytes at full size and under a megabyte here. The original
             is still what the download link and the lightbox below point at.
@@ -341,81 +400,99 @@ export const HistoryTile = memo(
         ) : (
           <TextResultCover text={item.text} />
         )}
+        </div>
 
         <div className="absolute left-1.5 right-1.5 top-1.5 flex items-center justify-between gap-1 md:left-2 md:right-2 md:top-2">
           {/* The tool's short form — "Clean", "T2I" — since the colour already
               says which tool at a glance; the full name is on hover, and in
               the lightbox. */}
-          <span
-            title={toolLabel}
-            className="min-w-0 truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
-            style={toolBadgeStyle(item.tool)}
-          >
-            {TOOL_SHORT_LABELS[item.tool] ?? toolLabel}
-          </span>
-
-          <div className="flex shrink-0 items-center gap-1">
+          <span className="flex min-w-0 items-center">
+          <span className="relative flex min-w-0">
+            <span
+              title={toolLabel}
+              className="min-w-0 truncate rounded-full px-[0.55em] py-[0.15em] text-[clamp(6px,6cqw,11px)] font-semibold leading-tight backdrop-blur-sm"
+              style={toolBadgeStyle(item.tool)}
+            >
+              {TOOL_SHORT_LABELS[item.tool] ?? toolLabel}
+            </span>
             {/* The output size — "4K", "1K", the video's resolution. Same
                 fact the lightbox prints beside the model name, up here too
                 so a grid can be scanned for it without opening anything.
-                Absent on a text result, which has no size. */}
+                Pinned to the tool badge's top-right corner, like a count on
+                an icon, so it costs the row no width. Absent on a text
+                result, which has no size. */}
             {item.quality && (
-              <span className="rounded-full bg-black/55 px-1 py-0.5 text-[7px] font-semibold text-white/85 backdrop-blur-sm md:text-[8px]">
+              <span className="pointer-events-none absolute left-[calc(100%-8px)] -top-1 z-10 whitespace-nowrap rounded-full bg-black/80 px-[0.35em] text-[clamp(5px,4.4cqw,8px)] font-semibold leading-[1.5] text-white/90 ring-1 ring-white/30 md:left-[calc(100%-10px)] md:-top-1.5">
                 {item.quality}
               </span>
             )}
+          </span>
+          {/* How many images this run produced, beside the tool that made
+              them — information about the tile, so with the badge rather than
+              the controls. Clear of the size pinned on the badge's corner. */}
+          {item.outputs.length > 1 && (
+            <span
+              title={`${item.outputs.length} images`}
+              // The same dark chip as the creator's name below.
+              className={cn(TILE_CHIP, "ml-0.5 mt-2 flex shrink-0 items-center gap-[0.2em] py-[0.1em]")}
+            >
+              <Copy className="h-[1em] w-[1em]" /> {item.outputs.length}
+            </span>
+          )}
+          </span>
 
-            {/* Everything else a tile can do, behind one button rather than
-                a row of them over the picture. */}
-            <TileActionsMenu
-              title={`${toolLabel} · ${item.userName}`}
-              busy={deleting}
-              actions={[
-                canContinue && { icon: MessageCircle, label: "Continue chat", onSelect: () => onContinue(item) },
-                // Same destination as Continue — the tool page sees the
-                // thread is not the viewer's and opens it without a composer.
-                canView && { icon: Eye, label: "View chat", onSelect: () => onContinue(item) },
-                // Absent on a text result — there is no file to save. The
-                // full-size original, never the grid thumbnail, under its
-                // real extension, so a clip arrives as a playable .mp4.
-                cover && {
-                  icon: Download,
-                  label: "Download",
-                  onSelect: () => downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type)),
-                },
-                // Own results, or a colleague's with org.results.delete — on
-                // any other tile the server would refuse, so it isn't offered.
-                canDelete && { icon: Trash2, label: "Delete", onSelect: () => onDelete(item), danger: true },
-              ]}
-            />
+          <div className="flex shrink-0 items-center">
+
+            {/* The chat — the action people reach for most — and a ⋮ for
+                the rest, sharing one pill. Continue for their own run; View
+                for a colleague's, the same destination opened read-only. */}
+            {(canContinue || canView || cover || canDelete || deleting) && (
+              <div className={TILE_PILL}>
+                {(canContinue || canView) && (
+                  <TileChatButton own={canContinue} ownerName={item.userName} onOpen={() => onContinue(item)} />
+                )}
+                <TileActionsMenu
+                  inPill
+                  title={`${toolLabel} · ${item.userName}`}
+                  busy={deleting}
+                  actions={[
+                    // Absent on a text result — there is no file to save. The
+                    // full-size original, never the grid thumbnail, under its
+                    // real extension, so a clip arrives as a playable .mp4.
+                    cover && {
+                      icon: Download,
+                      label: "Download",
+                      onSelect: () => downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type)),
+                    },
+                    // Own results, or a colleague's with org.results.delete — on
+                    // any other tile the server would refuse, so it isn't offered.
+                    canDelete && { icon: Trash2, label: "Delete", onSelect: () => onDelete(item), danger: true },
+                  ]}
+                />
+              </div>
+            )}
           </div>
         </div>
 
         <div className="pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
-          <div className="flex min-w-0 flex-col items-start gap-0.5">
-            {/* The label this was searched by — on the tile so a page of
-                matches can be told apart without opening each one. */}
-            {item.designNo && (
-              <span
-                title={`Design no. ${item.designNo}`}
-                className="pointer-events-auto max-w-full truncate rounded-full bg-gold/80 px-1.5 py-0.5 text-[7px] font-semibold text-black backdrop-blur-sm md:text-[9px]"
-              >
-                #{item.designNo}
-              </span>
-            )}
-            {/* First name only — the whole of it crowded the chip on a small
-                tile. The tooltip has the rest. */}
-            <span title={item.userName} className={cn(TILE_CHIP, "pointer-events-auto max-w-full truncate")}>
-              {firstName(item.userName)}
-            </span>
-          </div>
-
-          {/* How many images this run produced. Down here rather than up with
-              the actions: it is information about the tile, not a control, and
-              a long name truncates before it rather than pushing it off. */}
-          {item.outputs.length > 1 && (
-            <span className={cn(TILE_CHIP, "flex shrink-0 items-center gap-0.5")}>
-              <Copy size={9} className="md:h-2.5 md:w-2.5" /> {item.outputs.length}
+          {/* First name only — the whole of it crowded the chip on a small
+              tile. The tooltip has the rest. */}
+          <span title={item.userName} className={cn(TILE_CHIP, "pointer-events-auto min-w-0 max-w-[34%] shrink-0 truncate")}>
+            {firstName(item.userName)}
+          </span>
+          {/* The label this was searched by — on the tile so a page of
+              matches can be told apart without opening each one. Its own row,
+              the width of the tile: these are long ("2026-11-18 12-21-50
+              (B,Radius8…)") and sharing a row with the creator cut them to a
+              few letters. Fixed colours, not theme tokens: it sits on a photo,
+              and the theme's gold flips to dark brown in the light theme,
+              which is mud on black glass. */}
+          {item.designNo && (
+            <span
+              title={`Design no. ${item.designNo}`}
+              className="pointer-events-auto ml-auto block min-w-0 truncate rounded-md bg-black/70 px-[0.55em] py-[0.2em] text-[clamp(7px,7.8cqw,14px)] font-semibold leading-tight text-white shadow-sm ring-1 ring-white/15 backdrop-blur-md"
+            >
+              {item.designNo}
             </span>
           )}
         </div>

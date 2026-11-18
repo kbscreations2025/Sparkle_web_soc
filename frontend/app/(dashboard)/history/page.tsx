@@ -40,7 +40,7 @@ import {
   type DateRange,
 } from "./HistoryFilters";
 import { TileSizeSlider } from "@/components/studio/TileSizeSlider";
-import { GRID_GAP, HistoryTile, KitsGrid, MIN_TILE_WIDTH, OPENS_AS_RESULT, SkeletonGrid } from "./HistoryTiles";
+import { GRID_GAP, HistoryTile, KitsGrid, MIN_TILE_WIDTH, MIN_TILE_WIDTH_PHONE, OPENS_AS_RESULT, SkeletonGrid } from "./HistoryTiles";
 
 const HISTORY_PERMISSION = "result.read.own";
 /** Opening a colleague's chat, read-only — see grants.js. */
@@ -346,7 +346,7 @@ export default function HistoryPage() {
   /** The most to a row this width allows — the slider's far end. */
   const maxColumns =
     gridWidth > 0
-      ? Math.max(columnsMin, Math.min(COLUMNS_MAX, Math.floor((gridWidth + GRID_GAP) / (MIN_TILE_WIDTH + GRID_GAP))))
+      ? Math.max(columnsMin, Math.min(COLUMNS_MAX, Math.floor((gridWidth + GRID_GAP) / ((tabletUp ? MIN_TILE_WIDTH : MIN_TILE_WIDTH_PHONE) + GRID_GAP))))
       : COLUMNS_MAX;
 
   /** The slider's choice, once it applies — held to what fits, and the skeletons take its shape too. */

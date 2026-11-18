@@ -37,6 +37,7 @@ export function TileActionsMenu({
   title,
   actions,
   busy = false,
+  inPill = false,
   className,
 }: {
   /** What the sheet says it is about — the tile's subject. */
@@ -44,6 +45,8 @@ export function TileActionsMenu({
   actions: (TileMenuAction | false | null | undefined)[];
   /** An action on this tile is running (a delete): a spinner in place of the ⋮, and no menu. */
   busy?: boolean;
+  /** Drawn as one button of a TILE_PILL, beside others, rather than a circle of its own. */
+  inPill?: boolean;
   className?: string;
 }) {
   const items = actions.filter(Boolean) as TileMenuAction[];
@@ -237,19 +240,37 @@ export function TileActionsMenu({
         aria-label={busy ? "Working…" : `Actions for ${title}`}
         title={busy ? "Working…" : "More actions"}
         className={cn(
-          // A finger-sized target on a phone, a small one where there is a
-          // mouse and the tile is mostly picture.
-          "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white/90 backdrop-blur-sm transition-colors hover:bg-black/75 disabled:opacity-70 md:h-5 md:w-5",
-          open && "bg-black/75",
+          inPill ? TILE_PILL_BUTTON : TILE_ROUND_BUTTON,
+          open && (inPill ? "bg-white/25" : "bg-black/75"),
           className
         )}
       >
-        {busy ? <Loader2 size={11} className="animate-spin" /> : <MoreVertical size={12} />}
+        {busy ? <Loader2 size="0.9em" className="animate-spin" /> : <MoreVertical size="1em" />}
       </button>
       {menu && typeof document !== "undefined" && createPortal(menu, document.body)}
     </>
   );
 }
+
+/**
+ * The round dark button a tile's controls are drawn as — the ⋮, and any one
+ * action common enough to sit beside it. A finger-sized target on a phone, a
+ * small one where there is a mouse and the tile is mostly picture.
+ */
+export const TILE_ROUND_BUTTON =
+  "flex h-[1.9em] w-[1.9em] shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/55 text-[clamp(11.5px,8.5cqw,18px)] text-white/90 backdrop-blur-sm transition-colors hover:bg-black/75 disabled:opacity-70";
+
+/**
+ * Several of a tile's controls in one dark pill — one border, one blur — for
+ * when more than one sits in the corner: two circles side by side cost twice
+ * the chrome and a gap between, over a small picture.
+ */
+export const TILE_PILL =
+  "flex h-[1.9em] shrink-0 items-center rounded-full border border-white/20 bg-black/55 px-[0.15em] text-[clamp(11.5px,8.5cqw,18px)] text-white/90 backdrop-blur-sm";
+
+/** One button inside a TILE_PILL. */
+export const TILE_PILL_BUTTON =
+  "flex h-[1.55em] w-[1.75em] items-center justify-center rounded-full transition-colors hover:bg-white/25 disabled:opacity-70";
 
 /** The first word of a name — "Divya Pajave" is "Divya" — for chips too small for the whole of it. */
 export function firstName(name: string) {
