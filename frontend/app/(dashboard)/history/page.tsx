@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { io } from "socket.io-client";
+import { acquireSocket, releaseSocket } from "@/lib/socket";
 import { ArrowUp, History, Newspaper } from "lucide-react";
 import {
-  BACKEND_URL,
   deleteHistoryItem,
   deleteMarketingKit,
   fetchHistory,
@@ -22,7 +21,7 @@ import { conversationHref, TOOL_LABELS, workspacePathFor } from "@/lib/nav";
 import { usePageToolbar } from "@/lib/page-toolbar-context";
 import { useAuth } from "@/lib/auth-context";
 import { can } from "@/lib/permissions";
-import { getPageCache, pageCacheKey, setPageCache } from "@/lib/pageCache";
+import { getPageCache, getPersistedPageCache, pageCacheKey, setPageCache } from "@/lib/pageCache";
 import { cn } from "@/lib/utils";
 import { HistoryLightbox } from "@/components/studio/HistoryLightbox";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
@@ -148,6 +147,24 @@ type HistorySnapshot = {
   canReadTeam: boolean;
   correctedSearch?: string | null;
 };
+
+/**
+ * How much of a grid is kept on the device: about two screens. That's enough
+ * to open straight onto the grid after a reload or a new sign-in, and small
+ * enough for a few filter views to fit comfortably in storage.
+ */
+const PERSISTED_ITEMS = 48;
+
+/**
+ * The part of a snapshot worth keeping on the device. Cut at a page
+ * boundary of sorts: the cursor becomes the last kept item's time, so
+ * scrolling past them asks the server for exactly what comes next.
+ */
+function persistedSnapshot(snapshot: HistorySnapshot): HistorySnapshot {
+  if (snapshot.items.length <= PERSISTED_ITEMS) return snapshot;
+  const items = snapshot.items.slice(0, PERSISTED_ITEMS);
+  return { ...snapshot, items, nextCursor: items[items.length - 1].createdAt };
+}
 
 /** A comma-separated filter from the query string — empty when it is absent. */
 function listParam(params: { get(name: string): string | null }, name: string) {
@@ -465,8 +482,11 @@ export default function HistoryPage() {
     const onlySearchChanged = lastFiltersRef.current === filters;
     lastFiltersRef.current = filters;
     // Seen this exact question before: show that answer now and refresh it
-    // quietly, rather than blanking the grid to a skeleton.
-    const cached = getPageCache<HistorySnapshot>(key);
+    // quietly, rather than blanking the grid to a skeleton. From the device
+    // too, so a reload or a new sign-in opens straight onto the grid. Its
+    // thumbnails are already in the browser's cache, so they paint at once,
+    // even offline.
+    const cached = getPersistedPageCache<HistorySnapshot>(key);
     if (cached) {
       dataKeyRef.current = key;
       setItems(cached.items);
@@ -553,7 +573,11 @@ export default function HistoryPage() {
    */
   useEffect(() => {
     if (loading || !dataKeyRef.current) return;
-    setPageCache<HistorySnapshot>(dataKeyRef.current, { items, nextCursor, serverTotal, canReadTeam, correctedSearch });
+    setPageCache<HistorySnapshot>(
+      dataKeyRef.current,
+      { items, nextCursor, serverTotal, canReadTeam, correctedSearch },
+      { persist: persistedSnapshot }
+    );
   }, [loading, items, nextCursor, serverTotal, canReadTeam, correctedSearch]);
 
   const loadMore = useCallback(async () => {
@@ -586,16 +610,24 @@ export default function HistoryPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // Last visit's lists, from the device, until the fresh ones arrive.
+    if (!cachedFacets) {
+      const persisted = getPersistedPageCache<{ members: string[]; qualities: string[] }>(facetsKey);
+      if (persisted) {
+        setFacetMembers(persisted.members);
+        setFacetQualities(persisted.qualities);
+      }
+    }
     fetchHistoryFacets("team").then((res) => {
       if (cancelled || res.status !== "success") return;
       setFacetMembers(res.members ?? []);
       setFacetQualities(res.qualities ?? []);
-      setPageCache(facetsKey, { members: res.members ?? [], qualities: res.qualities ?? [] });
+      setPageCache(facetsKey, { members: res.members ?? [], qualities: res.qualities ?? [] }, { persist: true });
     });
     return () => {
       cancelled = true;
     };
-  }, [facetsKey]);
+  }, [facetsKey, cachedFacets]);
 
   // Kits are still filtered in the browser, so their authors have to be
   // offered too — the facets call only covers generations.
@@ -799,18 +831,24 @@ export default function HistoryPage() {
     };
   }, []);
 
-  // Infinite scroll driven by the virtualizer's own rendered range, rather
-  // than a separate sentinel/IntersectionObserver — the moment scrolling
-  // brings the last few rows into range, the next page is already loading.
+  // Infinite scroll driven by the virtualizer itself, rather than a separate
+  // sentinel/IntersectionObserver. Once the bottom of the screen comes within
+  // three rows of the end, the next page is already loading.
+  //
+  // The visible range, not the rendered one. The virtualizer also mounts six
+  // rows past the screen (overscan), and counting those made opening History
+  // chain pages 2–4 straight away on a wide screen. Those requests and their
+  // thumbnails competed with the first screen's, on exactly the slow
+  // connections where that hurts.
   useEffect(() => {
     // Only while the grid is the thing on screen: the virtualizer's last
     // rendered range survives a switch to the kits tab, and acting on it
     // there would fetch another page nobody is looking at.
     if (view !== "history") return;
-    const last = virtualRows[virtualRows.length - 1];
-    if (!last || last.index < rows.length - 3) return;
+    const visibleEnd = rowVirtualizer.range?.endIndex ?? virtualRows[virtualRows.length - 1]?.index;
+    if (visibleEnd === undefined || visibleEnd < rows.length - 3) return;
     loadMore();
-  }, [view, virtualRows, rows.length, loadMore]);
+  }, [view, virtualRows, rows.length, loadMore, rowVirtualizer]);
 
   const loadedImages = useMemo(
     () => visibleItems.reduce((sum, item) => sum + item.outputs.length, 0),
@@ -943,15 +981,17 @@ export default function HistoryPage() {
   useEffect(() => {
     if (!userId) return;
 
-    const socket = io(BACKEND_URL, { withCredentials: true });
-    socket.on("history:generation", (item: HistoryItem) => {
+    // The tab's shared connection (lib/socket.ts), not one of its own.
+    const socket = acquireSocket();
+    const onGeneration = (item: HistoryItem) => {
       // A design-number search is the server's to match — the tenant ping
       // that comes with this result fetches it if it belongs.
       if (queryRef.current.search) return;
       // Always prepended to the one dataset — whether it's currently *shown*
       // is up to `visibleItems`, which reacts to it the moment it lands.
       setItems((current) => (current.some((row) => row.id === item.id) ? current : [item, ...current]));
-    });
+    };
+    socket.on("history:generation", onGeneration);
 
     /*
      * Someone in the organization finished or deleted something. The ping
@@ -964,7 +1004,7 @@ export default function HistoryPage() {
      * and one request for all of them is the right answer to that.
      */
     let timer: ReturnType<typeof setTimeout> | null = null;
-    socket.on("history:changed", (event: { kind: "added" | "removed"; id?: string }) => {
+    const onChanged = (event: { kind: "added" | "removed"; id?: string }) => {
       if (event.kind === "removed" && event.id) {
         const gone = event.id;
         setItems((current) => current.filter((row) => row.id !== gone));
@@ -974,11 +1014,14 @@ export default function HistoryPage() {
       }
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => fetchNewerRef.current(), 800);
-    });
+    };
+    socket.on("history:changed", onChanged);
 
     return () => {
       if (timer) clearTimeout(timer);
-      socket.disconnect();
+      socket.off("history:generation", onGeneration);
+      socket.off("history:changed", onChanged);
+      releaseSocket();
     };
   }, [userId]);
 

@@ -1,9 +1,23 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { io } from "socket.io-client";
-import { BACKEND_URL, cancelJob, fetchJobs, type QueuedJob } from "./api";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { cancelJob, fetchJobs, type QueuedJob } from "./api";
 import { useAuth } from "./auth-context";
+import { acquireSocket, releaseSocket } from "./socket";
+
+function subscribeToVisibility(onChange: () => void) {
+  document.addEventListener("visibilitychange", onChange);
+  return () => document.removeEventListener("visibilitychange", onChange);
+}
+
+/** Whether this tab is in view. Assumed so on the server and during hydration. */
+function usePageVisible() {
+  return useSyncExternalStore(
+    subscribeToVisibility,
+    () => document.visibilityState !== "hidden",
+    () => true
+  );
+}
 
 /** Live states, as the backend defines them. */
 const ACTIVE = new Set(["queued", "running"]);
@@ -108,9 +122,9 @@ const JobsContext = createContext<JobsContextValue>({
   jobs: [],
   activeJobs: [],
   connected: false,
-  track: () => {},
-  refresh: async () => {},
-  onJobSettled: () => () => {},
+  track: () => { },
+  refresh: async () => { },
+  onJobSettled: () => () => { },
 });
 
 /**
@@ -246,21 +260,30 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the rule can't see past the await inside `refresh`: its setState runs a network round-trip later, not synchronously during this effect, so there is no cascading render to avoid
     refresh();
 
-    const socket = io(BACKEND_URL, { withCredentials: true });
+    // The tab's shared connection (lib/socket.ts), not one of its own.
+    const socket = acquireSocket();
 
-    socket.on("connect", () => {
+    const onConnect = () => {
       setConnected(true);
       // A reconnect means updates were missed while the socket was down, so
       // catch up rather than waiting for the next one to arrive.
       refresh();
-    });
-    socket.on("disconnect", () => setConnected(false));
+    };
+    const onDisconnect = () => setConnected(false);
     // `upsert` notes the status change and announces a finish, so the socket
     // path needs nothing of its own here.
-    socket.on("job:updated", (job: QueuedJob) => upsert(job));
+    const onJob = (job: QueuedJob) => upsert(job);
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("job:updated", onJob);
+    // Shared, so it may already be up, with its "connect" already gone by.
+    if (socket.connected) setConnected(true);
 
     return () => {
-      socket.disconnect();
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("job:updated", onJob);
+      releaseSocket();
     };
   }, [userId, upsert, refresh]);
 
@@ -278,12 +301,26 @@ export function JobsProvider({ children }: { children: ReactNode }) {
    * down and rebuild it every time.
    */
   const hasActive = activeJobs.length > 0;
+  /*
+   * Not while the tab is hidden. Nobody is watching the rail there, and a
+   * background tab polling every few seconds spends the connection, and on a
+   * phone the battery, on a view no one can see. Coming back into view
+   * catches up at once (below), so nothing looks stale.
+   */
+  const visible = usePageVisible();
   useEffect(() => {
-    if (!hasActive || !userId) return;
+    if (!hasActive || !userId || !visible) return;
 
     const timer = setInterval(refresh, connected ? POLL_CONNECTED_MS : POLL_OFFLINE_MS);
     return () => clearInterval(timer);
-  }, [hasActive, connected, userId, refresh]);
+  }, [hasActive, connected, userId, refresh, visible]);
+
+  // Back in view: catch up straight away, instead of on the next tick.
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    if (visible && !wasVisible.current && userId) refresh();
+    wasVisible.current = visible;
+  }, [visible, userId, refresh]);
 
   const value = useMemo(
     () => ({ jobs, activeJobs, connected, track: (job: QueuedJob) => upsert(job), refresh, onJobSettled }),

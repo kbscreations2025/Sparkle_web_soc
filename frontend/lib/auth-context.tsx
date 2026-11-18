@@ -2,8 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { io } from "socket.io-client";
-import { checkCurrentUser, logout as apiLogout, clearLocalSession, BACKEND_URL, type ApiUser } from "./api";
+import { checkCurrentUser, logout as apiLogout, clearLocalSession, type ApiUser } from "./api";
+import { acquireSocket, releaseSocket } from "./socket";
 import { LOGIN_PATH } from "./shell";
 import { clearPageCache } from "./pageCache";
 
@@ -35,9 +35,6 @@ const AuthContext = createContext<AuthContextValue>({
 
 /** Retries of an unreachable session check start at 2s and double, up to this. */
 const MAX_RETRY_MS = 15_000;
-
-/** Before re-dialling a socket the server turned away only because it couldn't check the session. */
-const SOCKET_RETRY_MS = 5_000;
 
 export function AuthProvider({
   initialUser,
@@ -90,6 +87,7 @@ export function AuthProvider({
         setUser(result.user);
       } else if (result.kind === "signed_out") {
         setSessionUnreachable(false);
+        clearPageCache();
         router.replace(result.deniedCode ? `${LOGIN_PATH}?denied=${result.deniedCode}` : LOGIN_PATH);
       } else {
         setSessionUnreachable(true);
@@ -116,6 +114,14 @@ export function AuthProvider({
     };
   }, [user, loggingOut, pathname, router, retryKey]);
 
+  // Reaching the login page means no one is signed in here (the proxy sends a
+  // signed-in visitor straight on). So whatever the last person left on this
+  // device goes too, including when their session simply ran out rather than
+  // ending with Logout.
+  useEffect(() => {
+    if (pathname === LOGIN_PATH) clearPageCache();
+  }, [pathname]);
+
   // Keyed on the id, not the object: every /me response is a fresh object, and
   // depending on it would drop and re-dial the socket for the same person.
   const userId = user?.user_id;
@@ -125,25 +131,22 @@ export function AuthProvider({
   useEffect(() => {
     if (!userId) return;
 
-    const socket = io(BACKEND_URL, { withCredentials: true });
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    // The tab's shared connection (see lib/socket.ts), which also retries a
+    // handshake turned away only because the session couldn't be checked.
+    const socket = acquireSocket();
 
-    socket.on("connect", () => setLiveConnected(true));
-    socket.on("disconnect", () => setLiveConnected(false));
-
-    // Turned away only because the server couldn't reach the central login to
-    // check the session, which is not a sign-out. socket.io doesn't retry a
-    // refused handshake on its own. Without this socket, a sign-out from
-    // elsewhere wouldn't reach this tab, so dial again shortly.
-    socket.on("connect_error", (err) => {
-      if (err.message !== "auth_unavailable") return;
-      clearTimeout(retryTimer);
-      retryTimer = setTimeout(() => socket.connect(), SOCKET_RETRY_MS);
-    });
+    const onConnect = () => setLiveConnected(true);
+    const onDisconnect = () => setLiveConnected(false);
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    // Another part of the app may have opened it first, so it can already be
+    // up, with its "connect" already gone by.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing once with an external connection that may predate this effect; the events above keep it current after
+    if (socket.connected) setLiveConnected(true);
 
     // Sent only once the central login has refused this session's refresh
     // token. A sweep that couldn't reach central sends nothing.
-    socket.on("auth:revoked", () => {
+    const onRevoked = () => {
       setUser(null);
       clearPageCache();
       // Clearing the cookies is what actually ends it here. The access token
@@ -157,11 +160,14 @@ export function AuthProvider({
       clearLocalSession()
         .catch(() => {})
         .finally(() => router.replace(`${LOGIN_PATH}?denied=signed_out_elsewhere`));
-    });
+    };
+    socket.on("auth:revoked", onRevoked);
 
     return () => {
-      clearTimeout(retryTimer);
-      socket.disconnect();
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("auth:revoked", onRevoked);
+      releaseSocket();
     };
   }, [userId, router]);
 

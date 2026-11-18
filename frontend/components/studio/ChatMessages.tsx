@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import Image from "next/image";
 import { Download, RotateCcw } from "lucide-react";
 import type { ChatMsg } from "./chat";
 import { Lightbox } from "./Lightbox";
+import { ThumbImage } from "./ThumbImage";
 import { doubleTap } from "@/lib/doubleTap";
 import { downloadAllImages, downloadImage } from "@/lib/image";
 import { cn } from "@/lib/utils";
@@ -103,9 +103,12 @@ export function ChatMessages({
  * desktop, and one fixed size cannot suit both.
  */
 function Thumb({ src, className, sizes }: { src: string; className: string; sizes: string }) {
+  // The stored thumbnail, not the original: a reopened thread of 4K results
+  // was pulling several megabytes per 48px tile. Clicking, previewing and
+  // downloading still use the original `src`.
   return (
     <div className={cn("relative shrink-0 overflow-hidden rounded-md border border-white/10 bg-surface-float", className)}>
-      <Image src={src} alt="" fill sizes={sizes} className="object-cover" />
+      <ThumbImage src={src} alt="" sizes={sizes} className="object-cover" />
     </div>
   );
 }

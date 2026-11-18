@@ -10,6 +10,7 @@ import { conversationHref, TOOL_LABELS } from "@/lib/nav";
 import { kitHref } from "@/lib/marketingKits";
 import { useDismissable } from "@/lib/useEscapeKey";
 import { cn } from "@/lib/utils";
+import { useThumbnail } from "@/lib/thumbnail";
 import { JobProgressBar } from "./JobProgressBar";
 
 /** A Marketing Kit job's type → which of the three surfaces it came from. */
@@ -326,12 +327,16 @@ function RowShell({
  */
 function Thumb({ src, status, progress }: { src: string | null; status: QueuedJob["status"]; progress: number }) {
   const busy = status === "queued" || status === "running";
+  // When the row falls back to the result's url (a run with no inline
+  // preview), that's the full-size original; this draws its stored thumbnail
+  // instead. An inline preview passes through untouched.
+  const [shown, onError] = useThumbnail(src);
 
   return (
     <span className="relative block h-9 w-9 shrink-0 overflow-hidden rounded-md border border-white/10 bg-surface-float">
-      {src ? (
+      {shown ? (
         // eslint-disable-next-line @next/next/no-img-element -- a 36px thumbnail that is usually an inline data URI; next/image would add a proxy hop and buy nothing
-        <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
+        <img src={shown} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" onError={onError} />
       ) : (
         <span className="flex h-full w-full items-center justify-center">
           <ImageIcon size={13} className="text-faint/50" />

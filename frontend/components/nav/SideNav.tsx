@@ -152,7 +152,7 @@ export function SideNav() {
               />
             ) : (
               <Image
-                src="/logo/sparkle5.png"
+                src="/logo/sparkle5.webp"
                 alt="Sparkle"
                 width={128}
                 height={36}

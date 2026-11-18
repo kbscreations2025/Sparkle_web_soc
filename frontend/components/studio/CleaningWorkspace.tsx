@@ -8,6 +8,7 @@ import { Loader2, PenLine, Sparkles, Wand2 } from "lucide-react";
 import { UploadZone, type UploadItem } from "@/components/studio/UploadZone";
 import { GenerationStage } from "@/components/studio/GenerationStage";
 import { ChatMessages } from "@/components/studio/ChatMessages";
+import { ThumbImage } from "@/components/studio/ThumbImage";
 import { ChatInputBar } from "@/components/studio/ChatInputBar";
 import { ReadOnlyChatNotice } from "@/components/studio/ReadOnlyChatNotice";
 import { StudioSplitLayout } from "@/components/studio/StudioSplitLayout";
@@ -32,7 +33,7 @@ import { fingerprintDataUrl, fingerprintFile } from "@/lib/fingerprint";
 import { libraryOriginOf } from "@/lib/library";
 import { workspacePathFor } from "@/lib/nav";
 import { ConfirmDialog } from "@/components/studio/ConfirmDialog";
-import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
+import { compressImage, makeThumbnail, toEditableImage, editPreview } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
@@ -275,15 +276,9 @@ export function CleaningWorkspace<TModel extends string>({
       const resumedModel = resolveModelId(modelOptions, last.model);
       if (resumedModel) setModel(resumedModel);
 
-      // The stage paints instantly from the R2 URL above; swapped for the
-      // data URI the backend actually requires once it's ready, since a
-      // refine call sends whatever `cleaned` currently holds. A read-only
-      // thread is never refined, so it keeps the url and skips the download.
-      if (cleaned && !readOnly) {
-        urlToDataUrl(cleaned)
-          .then((dataUrl) => updateJob(conversationId, { cleaned: dataUrl }))
-          .catch((err) => console.error("could not prepare resumed image for editing:", err));
-      }
+      // The stage keeps the stored url. A refine sends it as a reference the
+      // backend fetches itself (see toEditableImage), so nothing is
+      // downloaded here just because a thread was opened.
     })();
 
     return () => {
@@ -638,15 +633,10 @@ export function CleaningWorkspace<TModel extends string>({
     };
 
     try {
-      // A completed job hands back a stored url, but the backend edits bytes,
-      // not links — so a result that hasn't been converted yet is fetched now.
-      // Same conversion resuming a thread from History already does.
-      let editable = source;
-      if (!editable.startsWith("data:")) {
-        editable = await urlToDataUrl(editable);
-        // Only the clean result is cached back; a marked-up copy is this turn's alone.
-        if (source === job.cleaned) updateJob(job.id, { cleaned: editable });
-      }
+      // A completed job hands back a stored url, sent as a reference the
+      // backend fetches itself rather than downloaded and re-uploaded here.
+      // Not cached back onto the job: `stored:` isn't something the stage can show.
+      const editable = await toEditableImage(source);
 
       const result = await refineImage({
         refineImage: editable,
@@ -658,7 +648,7 @@ export function CleaningWorkspace<TModel extends string>({
         parentGenerationId: job.generationId,
         // The image being refined, so the rail shows the piece rather than the
         // photo this thread originally started from.
-        preview: await makeThumbnail(editable),
+        preview: await editPreview(editable),
       });
 
       if (result.status === "queued" && result.job) {
@@ -835,10 +825,10 @@ export function CleaningWorkspace<TModel extends string>({
                           job.id === selectedId ? "border-gold/50" : "border-white/10 hover:border-gold/25"
                         )}
                       >
-                        <Image
+                        {/* The stored thumbnail at 60px, not the cleaned original. */}
+                        <ThumbImage
                           src={job.cleaned ?? job.preview ?? job.original}
                           alt={job.name}
-                          fill
                           sizes="60px"
                           className="object-cover"
                         />

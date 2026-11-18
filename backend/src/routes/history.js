@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 const express = require("express");
 const { Readable } = require("stream");
-const config = require("../config");
 const { requireAuth, requirePermission } = require("../middleware/auth");
 const { hasPermission, reachFilter } = require("../permissions");
 const Generation = require("../models/generation");
@@ -11,42 +10,13 @@ const { designNoKey, readDetails, publicDetails } = require("../details");
 const { correctTerms } = require("../services/promptVocabulary");
 const { GENERATION_TOOLS, toPublicAsset } = require("../generations");
 const { deleteObject } = require("../storage/r2");
+const { isOwnPublicUrl } = require("../storage/ownUrl");
 const { logRequestAudit } = require("../auditLog");
 const { emitToTenant } = require("../socket");
 
 const router = express.Router();
 
-/**
- * Whether a url really points at this app's own public bucket.
- *
- * Both routes below hand a caller-supplied url to `fetch`, so this check is
- * the only thing standing between them and an open relay that will make the
- * server request anything a signed-in user names.
- *
- * Compared by parsed origin, not by string prefix: `startsWith` accepts
- * `https://pub-xxxx.r2.dev.attacker.example/…`, which begins with the
- * configured url and is an entirely different host. Parsing also rejects a
- * protocol swap and anything that isn't a url at all.
- */
-function isOwnPublicUrl(value) {
-  if (typeof value !== "string" || !config.r2.publicUrl) return false;
-
-  let candidate;
-  let base;
-  try {
-    candidate = new URL(value);
-    base = new URL(config.r2.publicUrl);
-  } catch {
-    return false;
-  }
-
-  if (candidate.origin !== base.origin) return false;
-
-  // A public url configured with a path prefix confines us to that subtree;
-  // one pointing at the bucket root ("/") imposes no further restriction.
-  const basePath = base.pathname.replace(/\/+$/, "");
-  return basePath === "" || candidate.pathname.startsWith(`${basePath}/`);
-}
+// The own-bucket check that guards both fetching routes below lives in storage/ownUrl.js.
 
 /**
  * Strips anything that would let a filename escape the browser's downloads

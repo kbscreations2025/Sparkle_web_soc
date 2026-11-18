@@ -1,7 +1,9 @@
 const http = require("http");
 const express = require("express");
 const cors = require("cors");
+const compression = require("compression");
 const cookieParser = require("cookie-parser");
+const { multipartBody } = require("./middleware/inlineImages");
 const config = require("./config");
 const { connectDb } = require("./db");
 const authRoutes = require("./routes/auth");
@@ -41,8 +43,20 @@ const app = express();
 // proxy deployment — rather than blindly trusting an arbitrary chain.
 app.set("trust proxy", 1);
 
-app.use(cors({ origin: config.frontendOrigin, credentials: true }));
+// `maxAge` lets the browser remember a CORS preflight for two hours (Chrome's
+// ceiling) instead of its default five seconds. Every POST and DELETE from
+// the frontend needs one, and without this each was an extra round trip:
+// roughly a third of a second on a phone connection.
+app.use(cors({ origin: config.frontendOrigin, credentials: true, maxAge: 2 * 60 * 60 }));
+// Gzip for every compressible response. History's JSON repeats four long R2
+// links per item, so a page shrinks to a fraction of its size, which matters
+// most on a slow connection. Images and video are already compressed, and
+// the middleware skips them by content type.
+app.use(compression());
 app.use(express.json({ limit: config.jsonBodyLimit }));
+// Uploads sent as binary file parts rather than base64 inside JSON; handed on
+// to the routes in the same shape as before. See middleware/inlineImages.js.
+app.use(multipartBody);
 app.use(cookieParser());
 
 // Reports Redis too: the API answers fine without it, but every queued

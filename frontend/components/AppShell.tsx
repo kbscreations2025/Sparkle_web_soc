@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { MotionConfig } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { ConnectionBanner } from "@/components/ConnectionBanner";
 
 /**
  * The fixed nav's height, and the padding that clears it. Both live here
@@ -45,6 +46,10 @@ export function AppShell({
         {/* `min-w-0`: without it a wide child (a results grid, a long row of
             model cards) stretches this column and pushes the sidebar off. */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* Above the header, in both shells: says so when the connection
+              is down rather than leaving pages to spin. Takes no space
+              while all is well. */}
+          <ConnectionBanner />
           {nav}
           <main className={cn("flex flex-1 flex-col min-h-0 overflow-hidden", !sidebar && NAV_OFFSET)}>
             {children}

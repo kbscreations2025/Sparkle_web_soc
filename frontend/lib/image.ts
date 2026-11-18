@@ -160,6 +160,34 @@ function readAsDataUrl(file: File): Promise<string> {
  * CORS headers permitting a browser to read the response, but there's no
  * such restriction server-to-server.
  */
+/**
+ * An image ready to send as the one to edit. A picked photo (`data:`) goes as
+ * it is. A stored result goes as `stored:<url>`, and the backend fetches it
+ * from the bucket itself (backend/src/middleware/inlineImages.js).
+ *
+ * That replaces `urlToDataUrl` for edits. It downloaded the whole image as
+ * base64 and the request then uploaded it straight back: twice the image's
+ * size, plus a third, over the user's connection, for bytes already on the
+ * server. Anything else (a url that isn't a stored image) still goes the old
+ * way.
+ *
+ * Never display the result: `stored:` is not a url a browser can load.
+ */
+export async function toEditableImage(src: string): Promise<string> {
+  if (src.startsWith("data:")) return src;
+  if (/^https:\/\//.test(src) && src.includes("/tenants/")) return `stored:${src}`;
+  return urlToDataUrl(src);
+}
+
+/**
+ * The queue's small preview of an image being edited. A stored image's preview
+ * is left to the backend, which has the bytes (the bucket's images can't be
+ * read back from a page); a picked photo is shrunk here as before.
+ */
+export function editPreview(editable: string): Promise<string | null> {
+  return editable.startsWith("stored:") ? Promise.resolve(editable) : makeThumbnail(editable);
+}
+
 export async function urlToDataUrl(url: string): Promise<string> {
   const res = await fetch(`${BACKEND_URL}/api/history/image-data?url=${encodeURIComponent(url)}`, {
     credentials: "include",

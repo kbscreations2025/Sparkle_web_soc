@@ -9,6 +9,7 @@ import { useJobs } from "@/lib/jobs-context";
 import { conversationHref, TOOL_LABELS } from "@/lib/nav";
 import { formatDuration } from "@/lib/job-progress";
 import { cn } from "@/lib/utils";
+import { useThumbnail } from "@/lib/thumbnail";
 
 /**
  * Tells the user when queued work finishes, wherever they happen to be.
@@ -61,7 +62,11 @@ export function JobToasts() {
 function JobToast({ job, onDismiss }: { job: QueuedJob; onDismiss: () => void }) {
   const failed = job.status !== "completed";
   const href = conversationHref(job.tool, job.result?.conversationId, job.result?.modelLabel, job.request?.mode);
-  const preview = job.result?.outputUrl ?? job.preview;
+  // The result's stored thumbnail, not the result itself: this icon is 36px
+  // and the result is often a 4K original. `job.preview` (the input photo)
+  // only when there's no result to show.
+  const [resultThumb, onResultThumbError] = useThumbnail(job.result?.outputUrl);
+  const preview = resultThumb ?? job.preview;
   const count = job.result?.outputUrls?.length ?? 0;
 
   useEffect(() => {
@@ -73,7 +78,12 @@ function JobToast({ job, onDismiss }: { job: QueuedJob; onDismiss: () => void })
     <>
       {preview && !failed ? (
         // eslint-disable-next-line @next/next/no-img-element -- a remote result thumbnail at a fixed tiny size; next/image adds nothing
-        <img src={preview} alt="" className="h-9 w-9 shrink-0 rounded-md border border-white/10 object-cover" />
+        <img
+          src={preview}
+          alt=""
+          onError={onResultThumbError}
+          className="h-9 w-9 shrink-0 rounded-md border border-white/10 object-cover"
+        />
       ) : (
         <span
           className={cn(

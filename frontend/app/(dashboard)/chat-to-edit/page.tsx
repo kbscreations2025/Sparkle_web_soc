@@ -25,7 +25,7 @@ import {
   type ImageEditModelId,
   type ReferenceRole,
 } from "@/lib/api";
-import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
+import { compressImage, toEditableImage, editPreview } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useAuth } from "@/lib/auth-context";
 import { useCreditGuard } from "@/lib/credit-guard";
@@ -184,16 +184,9 @@ export default function ChatToEditPage() {
       parentGenerationId.current = last.id;
       const resumedModel = resolveModelId(IMAGE_EDIT_MODELS, last.model);
       if (resumedModel) setModel(resumedModel);
-
-      // The stage paints instantly from the R2 URL above; swapped for the
-      // data URI the backend actually requires once it's ready, since the
-      // next edit sends whatever `currentImage` currently holds. Not needed
-      // for a read-only thread, which never sends an edit.
-      if (resumedImage && !thread.readOnly) {
-        urlToDataUrl(resumedImage)
-          .then((dataUrl) => setCurrentImage((current) => (current === resumedImage ? dataUrl : current)))
-          .catch((err) => console.error("could not prepare resumed image for editing:", err));
-      }
+      // The stage keeps the stored url. The next edit sends it as a reference
+      // the backend fetches itself (see toEditableImage), so nothing is
+      // downloaded here just because a thread was opened.
     })();
 
     return () => {
@@ -264,9 +257,9 @@ export default function ChatToEditPage() {
     setBusy(true);
 
     try {
-      // The backend edits bytes, not links: a result shown from its stored url
-      // (every finished turn, and a resumed thread) is fetched here.
-      const editable = baseImage.startsWith("data:") ? baseImage : await urlToDataUrl(baseImage);
+      // A result shown from its stored url (every finished turn, and a
+      // resumed thread) goes as a reference the backend fetches itself.
+      const editable = await toEditableImage(baseImage);
       const result = await chatEdit({
         image: editable,
         referenceImages: refsThisTurn,
@@ -278,7 +271,7 @@ export default function ChatToEditPage() {
         conversationId: conversationId.current,
         parentGenerationId: parentGenerationId.current,
         // So the queue rail shows this photo rather than a bare spinner.
-        preview: await makeThumbnail(editable),
+        preview: await editPreview(editable),
       });
 
       if (result.status === "queued" && result.job) {

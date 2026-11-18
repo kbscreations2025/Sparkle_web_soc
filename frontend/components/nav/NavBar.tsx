@@ -48,7 +48,7 @@ export function NavLogo({ href = "/", title = "Dashboard" }: { href?: string; ti
       {/* Sized to what it actually renders (h-8 at 200:56), so the srcset
           asks for a ~128px variant instead of a 640px one. */}
       <Image
-        src="/logo/sparkle5.png"
+        src="/logo/sparkle5.webp"
         alt="Sparkle"
         width={114}
         height={32}

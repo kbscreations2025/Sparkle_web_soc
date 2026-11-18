@@ -21,7 +21,7 @@ import {
   type ReplacementCategory,
   type ReplacementSize,
 } from "@/lib/api";
-import { compressImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
+import { compressImage, toEditableImage, editPreview } from "@/lib/image";
 import { useGenerationWorkspace, type RefineRequest } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
@@ -56,9 +56,9 @@ const REFINE_HINTS = ["Make the piece smaller", "Make the metal shinier", "Add m
 
 type Slot = "photo" | "piece";
 
-/** A stored url (a reopened run) is fetched back into bytes, which is what the model edits. */
+/** A stored url (a reopened run) goes as a reference the backend fetches itself — see toEditableImage. */
 function asDataUrl(src: string) {
-  return src.startsWith("data:") ? Promise.resolve(src) : urlToDataUrl(src);
+  return toEditableImage(src);
 }
 
 /**
@@ -177,7 +177,7 @@ export default function ReplacementPage() {
       workspace.setError("Could not load your photos — add them again");
       return;
     }
-    const preview = await makeThumbnail(original);
+    const preview = await editPreview(original);
     const text = description.trim();
     workspace.generate(
       () =>

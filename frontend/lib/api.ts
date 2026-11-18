@@ -1,5 +1,6 @@
 import type { DeckCategory } from "./affinity";
 import { SESSION_CHECK_TIMEOUT_MS, readSessionResponse, timeoutSignal, type SessionCheck } from "./session-check";
+import { reportReachable } from "./connection";
 
 export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
 
@@ -53,15 +54,140 @@ export type AuthPayload = {
   otp_expires_at?: string;
 };
 
+/**
+ * How long a GET may wait for an answer before it counts as failed. Long
+ * enough for a slow phone connection and a cold server; short enough that a
+ * dead connection shows as a problem instead of a spinner that never ends.
+ */
+const GET_TIMEOUT_MS = 20_000;
+
+/**
+ * Waits before each retry of a GET. Only GETs are retried: asking again is
+ * harmless. A POST might already have started a generation and spent
+ * credits, so it is never repeated behind the user's back.
+ */
+const RETRY_DELAYS_MS = [1000, 3000];
+
+/**
+ * Answers worth asking again: a proxy or host in front of the backend that
+ * couldn't reach it (502), a backend that is starting up or couldn't reach
+ * the sign-in service (503), or one that took too long (504).
+ */
+const RETRY_STATUSES = new Set([502, 503, 504]);
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Below this a body can't be carrying a photo, so it isn't worth inspecting. */
+const MULTIPART_MIN_CHARS = 16 * 1024;
+const BASE64_DATA_URI = /^data:([^;,]+);base64,/;
+
+function dataUriToBlob(uri: string, mimeType: string): Blob {
+  const binary = atob(uri.slice(uri.indexOf(",") + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
+/**
+ * A JSON body carrying images, re-sent as multipart: each `data:` URI becomes
+ * a binary file part, and the rest stays JSON in a `__json` field with
+ * `__file:<n>` where each image was. The backend puts it back together, so
+ * routes see the same body as before (backend/src/middleware/inlineImages.js).
+ *
+ * Base64 makes every image a third bigger, and photos are most of what this
+ * app sends: a 6MB picture went up as 8MB. A multipart POST is also a
+ * "simple" request, so it skips the CORS preflight the JSON one needed. Any
+ * other body is returned as it was.
+ */
+function encodeBody(body: RequestInit["body"]): RequestInit["body"] {
+  if (typeof body !== "string" || body.length < MULTIPART_MIN_CHARS || !body.includes('"data:')) return body;
+
+  const files: Blob[] = [];
+  const swap = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      const match = BASE64_DATA_URI.exec(value);
+      if (!match) return value;
+      files.push(dataUriToBlob(value, match[1]));
+      return `__file:${files.length - 1}`;
+    }
+    if (Array.isArray(value)) return value.map(swap);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, swap(child)]));
+    }
+    return value;
+  };
+
+  let json: unknown;
+  try {
+    json = swap(JSON.parse(body));
+  } catch {
+    return body;
+  }
+  if (files.length === 0) return body;
+
+  const form = new FormData();
+  form.append("__json", JSON.stringify(json));
+  files.forEach((file, index) => form.append(`file${index}`, file, `file${index}`));
+  return form;
+}
+
 async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<ApiResult<T>> {
-  const res = await fetch(`${BACKEND_URL}${path}`, {
-    ...options,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
+  const isGet = (options.method ?? "GET").toUpperCase() === "GET";
+  const body = encodeBody(options.body);
+
+  let res: Response;
+  for (let attempt = 0; ; attempt += 1) {
+    const canRetry = isGet && attempt < RETRY_DELAYS_MS.length;
+    try {
+      res = await fetch(`${BACKEND_URL}${path}`, {
+        ...options,
+        body,
+        credentials: "include",
+        // A caller's own signal wins: it can cancel, and its timing is its business.
+        signal: options.signal ?? (isGet ? timeoutSignal(GET_TIMEOUT_MS) : undefined),
+        // The JSON header only when there is a JSON body. On a GET it bought
+        // nothing and cost a CORS preflight, a whole extra round trip before
+        // every History page, facet list and job poll. A GET without it is a
+        // "simple" request the browser sends straight away.
+        // Multipart sets its own Content-Type, boundary included.
+        headers: {
+          ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}),
+          ...options.headers,
+        },
+      });
+    } catch (err) {
+      // Cancelled by the caller: theirs to handle, as before.
+      if (options.signal?.aborted) throw err;
+      if (canRetry && navigator.onLine) {
+        await wait(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      /*
+       * No answer at all: offline, a dropped connection, or no reply within
+       * the timeout. Returned in the `{ status }` shape every caller already
+       * handles rather than thrown. A throw went unhandled wherever a caller
+       * had no try/catch, leaving a spinner running and nothing said.
+       */
+      reportReachable(false);
+      const timedOut = err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError");
+      return {
+        status: "error",
+        code: "network_error",
+        message: timedOut
+          ? "Sparkle took too long to answer. Check your connection and try again."
+          : "Couldn't reach Sparkle. Check your connection and try again.",
+      } as unknown as ApiResult<T>;
+    }
+
+    if (canRetry && RETRY_STATUSES.has(res.status)) {
+      await wait(RETRY_DELAYS_MS[attempt]);
+      continue;
+    }
+    break;
+  }
+
+  // An answer, even an error, means the server is reachable.
+  reportReachable(!RETRY_STATUSES.has(res.status));
 
   /*
    * A reply that isn't JSON is still an answer, and callers all expect the

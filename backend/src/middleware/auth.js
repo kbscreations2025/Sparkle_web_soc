@@ -2,6 +2,7 @@ const { checkSession } = require("../session");
 const { setAuthCookies, clearAuthCookies, readUserProfile } = require("../cookies");
 const { resolveAppUser } = require("../appUser");
 const { hasPermission } = require("../permissions");
+const { resolveStoredImages, InlineImageError } = require("./inlineImages");
 
 // Two deliberately separate steps: checkSession proves who this is against
 // the central login, resolveAppUser decides what this application lets them
@@ -54,6 +55,22 @@ async function requireAuth(req, res, next) {
   req.appUser = resolved.user;
   req.dbUser = resolved.dbUser;
   req.isSuperAdmin = resolved.isSuperAdmin;
+
+  // Images named as `stored:<url>` (a past result being edited) are fetched
+  // here, after the caller is known, so the route sees the data URI it always
+  // has. See middleware/inlineImages.js.
+  if (req.method !== "GET") {
+    try {
+      await resolveStoredImages(req);
+    } catch (err) {
+      if (err instanceof InlineImageError) {
+        return res.status(err.status).json({ status: "error", code: err.code, message: err.message });
+      }
+      console.error("resolveStoredImages failed:", err.message);
+      return res.status(500).json({ status: "error", message: "Couldn't load the image. Please try again." });
+    }
+  }
+
   next();
 }
 

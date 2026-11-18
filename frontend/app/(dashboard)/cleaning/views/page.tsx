@@ -20,13 +20,14 @@ import {
   type ProductViewCategory,
   type ProductViewId,
 } from "@/lib/api";
-import { compressImage, downloadImage, makeThumbnail, urlToDataUrl } from "@/lib/image";
+import { compressImage, downloadImage, toEditableImage, editPreview } from "@/lib/image";
 import { useGenerationWorkspace } from "@/lib/useGenerationWorkspace";
 import { useAuth } from "@/lib/auth-context";
 import { useModelQuality } from "@/lib/useModelQuality";
 import { can } from "@/lib/permissions";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
 import { cn } from "@/lib/utils";
+import { ThumbImage } from "@/components/studio/ThumbImage";
 
 const PERMISSION = "tool.cleaning.run";
 const MODEL_OPTIONS = toModelOptions(IMAGE_EDIT_MODELS);
@@ -203,15 +204,11 @@ export default function ProductViewsPage() {
   async function handleGenerate() {
     if (locked || !hasKeyPhoto || toGenerate.length === 0) return;
     const requested = toGenerate;
-    // A photo put back from a reopened run is a stored url; the model needs its bytes.
+    // A photo put back from a reopened run is a stored url, sent as a
+    // reference the backend fetches itself (see toEditableImage).
     let images: string[];
     try {
-      images = await Promise.all(
-        placed.map((view) => {
-          const photo = photos[view.id]!;
-          return photo.startsWith("data:") ? photo : urlToDataUrl(photo);
-        })
-      );
+      images = await Promise.all(placed.map((view) => toEditableImage(photos[view.id]!)));
     } catch {
       workspace.setError("Could not load your photos — add them again");
       return;
@@ -221,7 +218,7 @@ export default function ProductViewsPage() {
     // The run plays out in the chat, like every other tool: results arrive on
     // the stage and can be refined there. "Back to views" returns to the boxes.
     setRefining(requested[0]);
-    const preview = await makeThumbnail(images[0]);
+    const preview = await editPreview(images[0]);
     workspace.generate(
       () =>
         generateProductViews({
@@ -387,7 +384,7 @@ export default function ProductViewsPage() {
                             aria-label={`Open the generated ${view.label.toLowerCase()} view`}
                             className="absolute inset-0"
                           >
-                            <Image src={result} alt={`${view.label} — generated`} fill sizes="160px" className="object-contain" />
+                            <ThumbImage src={result} alt={`${view.label} — generated`} sizes="160px" className="object-contain" />
                           </button>
                           <div className="absolute right-1.5 top-1.5 flex gap-1">
                             <button
@@ -419,7 +416,7 @@ export default function ProductViewsPage() {
                         </div>
                       ) : photo ? (
                         <>
-                          <Image src={photo} alt={`${view.label} — your photo`} fill sizes="160px" className="object-contain" />
+                          <ThumbImage src={photo} alt={`${view.label} — your photo`} sizes="160px" className="object-contain" />
                           <button
                             type="button"
                             hidden={locked}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Eye, EyeOff, Loader2 } from "lucide-react";
 
@@ -17,12 +17,57 @@ interface AuthShellProps {
  * visible area by the bar's height and scrolls. The dynamic viewport unit is
  * whatever is actually on screen.
  */
+/** The background clip: 7MB. */
+const BACKGROUND_VIDEO = "/bg_video/shared_1.mp4";
+/**
+ * A soft, blurred still in the clip's own colours (5KB). It's there from the
+ * first paint, where there used to be black until the clip arrived, and it
+ * stays as the whole background where the clip isn't played.
+ */
+const BACKGROUND_POSTER = "/bg_video/shared_1-poster.webp";
+
+/**
+ * Whether to play the background clip at all. Not on a slow connection (2G or
+ * 3G as the browser reports it), with data saver on, or with reduced motion
+ * asked for. Seven megabytes of decoration on 3G is most of a minute of the
+ * sign-in page fighting its own background for bandwidth.
+ *
+ * Decided in the browser only: the server can't know the connection, so it
+ * (and hydration) render without the clip. Leaving the source off the
+ * server's HTML is what stops the download from starting before this has had
+ * a say.
+ */
+function shouldPlayBackgroundVideo() {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } })
+    .connection;
+  const slow = ["slow-2g", "2g", "3g"].includes(connection?.effectiveType ?? "");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return !slow && !connection?.saveData && !reducedMotion;
+}
+
+const subscribeNever = () => () => {};
+
+function useBackgroundVideo() {
+  return useSyncExternalStore(subscribeNever, shouldPlayBackgroundVideo, () => false);
+}
+
 export function AuthShell({ eyebrow, children }: AuthShellProps) {
+  const playVideo = useBackgroundVideo();
+
   return (
     <div className="relative min-h-dvh flex flex-col lg:flex-row overflow-hidden bg-black">
-      <video autoPlay muted loop playsInline className="absolute inset-0 w-full h-full object-cover opacity-90">
-        <source src="/bg_video/shared_1.mp4" type="video/mp4" />
-      </video>
+      {/* `src` on the element rather than a <source> child: a source added
+          after mount isn't loaded until load() is called, but setting `src`
+          starts it, and autoplay (muted) then plays it. */}
+      <video
+        src={playVideo ? BACKGROUND_VIDEO : undefined}
+        poster={BACKGROUND_POSTER}
+        autoPlay
+        muted
+        loop
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover opacity-90"
+      />
 
       <div
         className="absolute inset-0"

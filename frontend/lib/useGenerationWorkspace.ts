@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { turnImages, type ChatMsg } from "@/components/studio/chat";
 import { fetchConversationForTool, type ApiResult, type ConversationTurn, type QueuedResult } from "@/lib/api";
-import { urlToDataUrl } from "@/lib/image";
+import { toEditableImage } from "@/lib/image";
 import { useAttachments } from "@/lib/useAttachments";
 import { useCreditGuard } from "@/lib/credit-guard";
 import { useJobs } from "@/lib/jobs-context";
@@ -312,12 +312,12 @@ export function useGenerationWorkspace({
       setDeliveredCount(0);
       setError("");
 
-      // A stored result is a url, but the model edits bytes — so one that
-      // hasn't been converted yet is fetched now.
+      // A stored result goes as a reference the backend fetches itself, not
+      // downloaded here and uploaded straight back (see toEditableImage).
       let editable = source;
       if (!editable.startsWith("data:")) {
         try {
-          editable = await urlToDataUrl(editable);
+          editable = await toEditableImage(editable);
         } catch {
           setHistory((current) => [
             ...current,
