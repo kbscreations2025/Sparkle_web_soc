@@ -25,6 +25,13 @@ export type NavItem = {
 export type Tool = NavItem & {
   description: string;
   image?: string;
+  /**
+   * The tool's name where there is room for only a word — History's tile
+   * badges, over a picture a hundred pixels wide. The usual initialism for an
+   * "X to Y" tool ("T2I"), a short word for the rest; the badge keeps the
+   * tool's colour and the full name on hover, so it is never a guess.
+   */
+  shortLabel: string;
 };
 
 /**
@@ -41,6 +48,7 @@ export const TOOLS: Tool[] = [
   {
     id: "cleaning",
     label: "Image Cleaning",
+    shortLabel: "Clean",
     icon: Wand2,
     description: "Remove distractions, studio-grade results",
     image: "/dashboard/cleaning.png",
@@ -50,6 +58,7 @@ export const TOOLS: Tool[] = [
   {
     id: "life_style",
     label: "Lifestyle",
+    shortLabel: "Life",
     icon: Leaf,
     description: "Consistent character across all renders",
     image: "/dashboard/lyfestyle.png",
@@ -59,6 +68,7 @@ export const TOOLS: Tool[] = [
   {
     id: "image_to_video",
     label: "Image to Video",
+    shortLabel: "I2V",
     icon: Film,
     description: "Animate stills into cinematic loops",
     image: "/dashboard/video.png",
@@ -68,6 +78,7 @@ export const TOOLS: Tool[] = [
   {
     id: "text_to_image",
     label: "Text to Image",
+    shortLabel: "T2I",
     icon: Type,
     description: "Describe it, AI renders it",
     image: "/dashboard/image.png",
@@ -77,6 +88,7 @@ export const TOOLS: Tool[] = [
   {
     id: "text_to_sketch",
     label: "Text to Sketch",
+    shortLabel: "T2S",
     icon: PenTool,
     description: "Describe it, AI sketches it",
     image: "/dashboard/sketch2.png",
@@ -86,6 +98,7 @@ export const TOOLS: Tool[] = [
   {
     id: "sketch_to_image",
     label: "Sketch to Image",
+    shortLabel: "S2I",
     icon: ImageIcon,
     description: "Upload a sketch, AI renders it",
     image: "/dashboard/image2.png",
@@ -95,6 +108,7 @@ export const TOOLS: Tool[] = [
   {
     id: "image_to_text",
     label: "Image to Text",
+    shortLabel: "I2T",
     icon: ScanText,
     description: "Upload an image, AI describes it",
     image: "/dashboard/image3.jpg",
@@ -104,6 +118,7 @@ export const TOOLS: Tool[] = [
   {
     id: "image_to_sketch",
     label: "Image to Sketch",
+    shortLabel: "I2S",
     icon: PenLine,
     description: "Upload an image, AI sketches it",
     image: "/dashboard/sketch.png",
@@ -113,6 +128,7 @@ export const TOOLS: Tool[] = [
   {
     id: "marketing_kit",
     label: "Marketing Kit",
+    shortLabel: "Kit",
     icon: Newspaper,
     description: "PDF + images, descriptions, specs & captions",
     image: "/dashboard/marketkit.png",
@@ -122,6 +138,7 @@ export const TOOLS: Tool[] = [
   {
     id: "chat_to_edit",
     label: "Chat to Edit",
+    shortLabel: "Edit",
     icon: MessageSquare,
     description: "Iteratively refine a jewellery image, one message at a time",
     image: "/dashboard/chatToEdit.png",
@@ -131,6 +148,7 @@ export const TOOLS: Tool[] = [
   {
     id: "product_background",
     label: "Product Background",
+    shortLabel: "BG",
     icon: Package,
     description: "Transparent, white, any colour or a styled scene",
     image: "/dashboard/product-background.jpg",
@@ -165,6 +183,11 @@ export function useNavItems() {
 
 /** Tool key → display name, for anywhere that has an id and needs to name it. */
 export const TOOL_LABELS: Record<string, string> = Object.fromEntries(TOOLS.map((tool) => [tool.id, tool.label]));
+
+/** Tool key → the one-word name for a badge with no room — see `Tool.shortLabel`. */
+export const TOOL_SHORT_LABELS: Record<string, string> = Object.fromEntries(
+  TOOLS.map((tool) => [tool.id, tool.shortLabel])
+);
 
 /**
  * One fixed colour per tool, so the same tool always reads the same colour
@@ -283,5 +306,5 @@ export function conversationHref(
  * granting one would reveal a pill that leads nowhere.
  */
 export const UPCOMING_TOOLS: Tool[] = [
-  { id: "virtual_try_on", label: "Virtual Try On", icon: Gem, description: "See jewellery on a model instantly" },
+  { id: "virtual_try_on", label: "Virtual Try On", shortLabel: "Try On", icon: Gem, description: "See jewellery on a model instantly" },
 ];

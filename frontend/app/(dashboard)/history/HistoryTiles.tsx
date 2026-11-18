@@ -2,73 +2,39 @@
 
 import { memo } from "react";
 import Link from "next/link";
-import { Copy, Download, Eye, Loader2, MessageCircle, Newspaper, Trash2 } from "lucide-react";
+import { Copy, Download, Eye, MessageCircle, Newspaper, Trash2 } from "lucide-react";
 import type { HistoryItem, MarketingKitSummary } from "@/lib/api";
 import { downloadImage, downloadName } from "@/lib/image";
-import { toolBadgeStyle } from "@/lib/nav";
+import { TOOL_SHORT_LABELS, toolBadgeStyle } from "@/lib/nav";
 import { describeKit, kitBadgeStyle, kitHref } from "@/lib/marketingKits";
 import { cn } from "@/lib/utils";
 import { AssetThumb } from "@/components/studio/AssetThumb";
+import { TileActionsMenu, firstName } from "@/components/studio/TileActionsMenu";
 
 /*
  * The History page's grid tiles — one generation, one saved kit — and the
  * skeleton that stands in for them while they load.
+ *
+ * Kept to the least chrome that still tells tiles apart: the tool badge top
+ * left; the size and one ⋮ menu top right (chat, download, delete — the
+ * lightbox has the same, full size, one tap away); who made it, by first name,
+ * bottom left. The same on every screen — a phone's tile is as small as a
+ * desktop's at ten to a row.
  */
-
-/**
- * The tile's actions sit in one pill rather than as separate circles.
- *
- * Three buttons each carrying their own border, background and blur cost
- * three times the chrome and two gaps between them, over a picture that is
- * only ~160px wide. Pooling them into a single container pays for that once
- * — the same grouping the lightbox toolbar uses.
- */
-const TILE_ACTION_GROUP =
-  "flex h-4 shrink-0 items-center rounded-full border border-white/20 bg-black/55 px-0.5 backdrop-blur-sm md:h-5";
-
-/**
- * One action inside that pill.
- *
- * Larger on a phone than on a desktop, which is the opposite of how these
- * usually scale — and deliberate. A finger needs the target; a cursor does
- * not, and at `md` the grid has more columns of the same-sized tile, so
- * every pixel the buttons take is covering the picture.
- *
- * Still short of the 32px the chips aim for: three of these plus the tool
- * and quality badges have to fit across a ~170px tile, and the tile itself
- * is the primary target — tapping it opens the lightbox, where the same
- * three actions are full size.
- *
- * No `lg` step: tiles do not get bigger at wide viewports, the grid just
- * adds a column.
- */
-const TILE_ACTION_BUTTON =
-  "flex h-3.5 w-4 items-center justify-center rounded-full transition-colors hover:bg-white/25 md:h-4 md:w-5";
-const TILE_ACTION_ICON = "h-2.5 w-2.5 text-white/85 md:h-3 md:w-3";
 
 /** Row gap between tiles, kept as one constant since both the CSS grid and the row-height estimate must agree. */
 export const GRID_GAP = 10;
 
 /**
- * From this many to a row (the size slider), a tile is too narrow for its
- * badges and action pill — they would run past its edge. A dense tile shows
- * the picture alone and brings the chrome back on hover; the design number
- * stays, being what a page of search results is told apart by.
+ * The narrowest a tile may get — what its chrome needs across the top (a
+ * clipped tool badge, the size, the ⋮) with a little picture between. The
+ * size slider stops short of it: on a narrower grid, fewer to a row.
  */
-export const DENSE_FROM_COLUMNS = 8;
+export const MIN_TILE_WIDTH = 96;
 
-/** Chrome a dense tile fades out until it is hovered or focused. */
-const DENSE_FADE = "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100";
-
-/**
- * The same, for chrome holding buttons: faded is not enough, since an
- * invisible Continue or Delete would still catch a click meant for the
- * picture. Clickable again once the tile is hovered and they show.
- */
-const DENSE_HIDDEN = cn(
-  DENSE_FADE,
-  "pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
-);
+/** The small dark chips over a picture — size, name, count. */
+const TILE_CHIP =
+  "rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]";
 
 /**
  * What a tile shows when the run produced words instead of pictures.
@@ -146,7 +112,7 @@ export function KitsGrid({
   return (
     <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: GRID_GAP }}>
       {kits.map((kit) => (
-        <KitTile key={kit.id} kit={kit} onDelete={onDelete} dense={columns >= DENSE_FROM_COLUMNS} {...actions} />
+        <KitTile key={kit.id} kit={kit} onDelete={onDelete} {...actions} />
       ))}
     </div>
   );
@@ -155,13 +121,12 @@ export function KitsGrid({
 function KitTile({
   kit,
   onDelete,
-  dense,
   items,
   canContinue,
   canView,
   onOpen,
   onContinue,
-}: { kit: MarketingKitSummary; onDelete: (kit: MarketingKitSummary) => void; dense: boolean } & KitResultActions) {
+}: { kit: MarketingKitSummary; onDelete: (kit: MarketingKitSummary) => void } & KitResultActions) {
   // Campaign Kit and Festive Poster open the results viewer once their run
   // has loaded; until then (and for every other kind) the tile opens the kit.
   const item = OPENS_AS_RESULT.has(kit.kind) ? items[kit.id] : undefined;
@@ -202,94 +167,46 @@ function KitTile({
         </Link>
       )}
 
-      <div
-        className={cn(
-          "pointer-events-none absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2",
-          dense && DENSE_FADE
-        )}
-      >
+      <div className="pointer-events-none absolute left-1.5 right-1.5 top-1.5 flex items-center justify-between gap-1 md:left-2 md:right-2 md:top-2">
         {/* The same badge the results tiles carry, in Marketing Kit's own
             colour, so a kit is recognisable at a glance in either tab. */}
         <span
-          className="max-w-[60%] truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
+          className="min-w-0 truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
           style={kitBadgeStyle(kit.kind)}
         >
           {describeKit(kit)}
         </span>
 
-        {/* A teammate's kit is readable but not theirs to remove — the
-            server refuses it, so the tile doesn't offer it. */}
-        {(item || kit.isOwn !== false) && (
-          <div
-            className={cn(
-              TILE_ACTION_GROUP,
-              dense
-                ? "pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
-                : "pointer-events-auto"
-            )}
-          >
-            {/* The same chat and download buttons an image tile has. */}
-            {item && canContinue(item) && (
-              <button
-                type="button"
-                title="Continue this conversation"
-                onClick={() => onContinue(item)}
-                className={TILE_ACTION_BUTTON}
-              >
-                <MessageCircle size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-            {item && canView(item) && (
-              <button
-                type="button"
-                title={`View ${item.userName}'s chat (read-only)`}
-                onClick={() => onContinue(item)}
-                className={TILE_ACTION_BUTTON}
-              >
-                <Eye size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-            {item && cover && (
-              <button
-                type="button"
-                title="Download"
-                onClick={() => downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type))}
-                className={TILE_ACTION_BUTTON}
-              >
-                <Download size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-            {kit.isOwn !== false && (
-              <button
-                type="button"
-                onClick={() => onDelete(kit)}
-                title="Delete"
-                aria-label={`Delete ${kit.title || "this kit"}`}
-                className={cn(TILE_ACTION_BUTTON, "hover:bg-error/75")}
-              >
-                <Trash2 size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-          </div>
-        )}
+        {/* The same ⋮ an image tile has. A teammate's kit is readable but
+            not theirs to remove — the server refuses it, so no Delete. */}
+        <div className="pointer-events-auto">
+          <TileActionsMenu
+            title={kit.title || "Untitled kit"}
+            actions={[
+              item && canContinue(item) && { icon: MessageCircle, label: "Continue chat", onSelect: () => onContinue(item) },
+              item && canView(item) && { icon: Eye, label: "View chat", onSelect: () => onContinue(item) },
+              item &&
+                cover && {
+                  icon: Download,
+                  label: "Download",
+                  onSelect: () => downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type)),
+                },
+              kit.isOwn !== false && { icon: Trash2, label: "Delete", onSelect: () => onDelete(kit), danger: true },
+            ]}
+          />
+        </div>
       </div>
 
-      <div
-        className={cn(
-          "pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2",
-          dense && DENSE_FADE
-        )}
-      >
+      <div className="pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
         {/* Who made it, in the same corner and the same chip the results
             tiles use for it — the kit's own name is the badge above and the
             tooltip on the tile, so this corner stays the one place you look
-            to see whose work a tile is. */}
-        <span className="truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]">
-          {kit.userName}
+            to see whose work a tile is. First name only: the whole of it
+            crowds a small tile, and the tooltip has the rest. */}
+        <span title={kit.userName} className={cn(TILE_CHIP, "min-w-0 truncate")}>
+          {firstName(kit.userName)}
         </span>
-        <span className="shrink-0 rounded-full bg-black/55 px-1.5 py-0.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:px-2 md:text-[10px]">
-          {timeAgoShort(kit.updatedAt)}
-        </span>
+        <span className={cn(TILE_CHIP, "shrink-0")}>{timeAgoShort(kit.updatedAt)}</span>
       </div>
 
       {/* A kit whose save failed is shown rather than hidden — the run
@@ -374,8 +291,6 @@ type HistoryTileProps = {
   /** Their own result, or a colleague's with org.results.delete. */
   canDelete: boolean;
   deleting: boolean;
-  /** Too many to a row for the chrome — see DENSE_FROM_COLUMNS. */
-  dense: boolean;
   onOpen: (item: HistoryItem) => void;
   onContinue: (item: HistoryItem) => void;
   onDelete: (item: HistoryItem) => void;
@@ -396,7 +311,6 @@ export const HistoryTile = memo(
     canView,
     canDelete,
     deleting,
-    dense,
     onOpen,
     onContinue,
     onDelete,
@@ -428,124 +342,71 @@ export const HistoryTile = memo(
           <TextResultCover text={item.text} />
         )}
 
-        <div
-          className={cn(
-            "absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 md:left-2 md:right-2 md:top-2",
-            dense && DENSE_HIDDEN
-          )}
-        >
-          <div className="flex min-w-0 items-center gap-1">
-            <span
-              className="max-w-[55%] truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
-              style={toolBadgeStyle(item.tool)}
-            >
-              {toolLabel}
-            </span>
+        <div className="absolute left-1.5 right-1.5 top-1.5 flex items-center justify-between gap-1 md:left-2 md:right-2 md:top-2">
+          {/* The tool's short form — "Clean", "T2I" — since the colour already
+              says which tool at a glance; the full name is on hover, and in
+              the lightbox. */}
+          <span
+            title={toolLabel}
+            className="min-w-0 truncate rounded-full px-1 py-0.5 text-[7px] font-semibold backdrop-blur-sm md:px-1.5 md:text-[9px] lg:text-[10px]"
+            style={toolBadgeStyle(item.tool)}
+          >
+            {TOOL_SHORT_LABELS[item.tool] ?? toolLabel}
+          </span>
 
+          <div className="flex shrink-0 items-center gap-1">
             {/* The output size — "4K", "1K", the video's resolution. Same
                 fact the lightbox prints beside the model name, up here too
                 so a grid can be scanned for it without opening anything.
                 Absent on a text result, which has no size. */}
             {item.quality && (
-              <span className="shrink-0 rounded-full bg-black/55 px-1 py-0.5 text-[6px] font-semibold text-white/85 backdrop-blur-sm md:text-[8px]">
+              <span className="rounded-full bg-black/55 px-1 py-0.5 text-[7px] font-semibold text-white/85 backdrop-blur-sm md:text-[8px]">
                 {item.quality}
               </span>
             )}
-          </div>
 
-          <div className={TILE_ACTION_GROUP}>
-            {canContinue && (
-              <button
-                type="button"
-                title="Continue this conversation"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onContinue(item);
-                }}
-                className={TILE_ACTION_BUTTON}
-              >
-                <MessageCircle size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-
-            {/* Same destination as Continue — the tool page sees the thread
-                is not the viewer's and opens it without a composer. */}
-            {canView && (
-              <button
-                type="button"
-                title={`View ${item.userName}'s chat (read-only)`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onContinue(item);
-                }}
-                className={TILE_ACTION_BUTTON}
-              >
-                <Eye size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-
-            {/* Absent on a text result — there is no file to save, and a
-                button that does nothing when pressed reads as broken. */}
-            {cover && (
-              <button
-                type="button"
-                title="Download"
-                onClick={(event) => {
-                  // The tile is clickable; downloading must not also open it.
-                  event.stopPropagation();
-                  // The full-size original, never the grid thumbnail — and
-                  // saved under its real extension, so a clip arrives as a
-                  // playable .mp4 rather than an .jpg nothing will open.
-                  downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type));
-                }}
-                className={TILE_ACTION_BUTTON}
-              >
-                <Download size={10} className={TILE_ACTION_ICON} />
-              </button>
-            )}
-
-            {/* Own results, or a colleague's with org.results.delete — on any
-                other tile the server would refuse, so there is no button. */}
-            {canDelete && (
-              <button
-                type="button"
-                title="Delete"
-                disabled={deleting}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDelete(item);
-                }}
-                className={cn(TILE_ACTION_BUTTON, "hover:bg-error/75 disabled:opacity-50")}
-              >
-                {deleting ? (
-                  <Loader2 size={10} className={cn(TILE_ACTION_ICON, "animate-spin")} />
-                ) : (
-                  <Trash2 size={10} className={TILE_ACTION_ICON} />
-                )}
-              </button>
-            )}
+            {/* Everything else a tile can do, behind one button rather than
+                a row of them over the picture. */}
+            <TileActionsMenu
+              title={`${toolLabel} · ${item.userName}`}
+              busy={deleting}
+              actions={[
+                canContinue && { icon: MessageCircle, label: "Continue chat", onSelect: () => onContinue(item) },
+                // Same destination as Continue — the tool page sees the
+                // thread is not the viewer's and opens it without a composer.
+                canView && { icon: Eye, label: "View chat", onSelect: () => onContinue(item) },
+                // Absent on a text result — there is no file to save. The
+                // full-size original, never the grid thumbnail, under its
+                // real extension, so a clip arrives as a playable .mp4.
+                cover && {
+                  icon: Download,
+                  label: "Download",
+                  onSelect: () => downloadImage(cover.url, downloadName(cover.url, `${item.tool}-${item.id}`, cover.type)),
+                },
+                // Own results, or a colleague's with org.results.delete — on
+                // any other tile the server would refuse, so it isn't offered.
+                canDelete && { icon: Trash2, label: "Delete", onSelect: () => onDelete(item), danger: true },
+              ]}
+            />
           </div>
         </div>
 
-        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
+        <div className="pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-end justify-between gap-1 md:bottom-2 md:left-2 md:right-2">
           <div className="flex min-w-0 flex-col items-start gap-0.5">
             {/* The label this was searched by — on the tile so a page of
                 matches can be told apart without opening each one. */}
             {item.designNo && (
               <span
                 title={`Design no. ${item.designNo}`}
-                className="max-w-full truncate rounded-full bg-gold/80 px-1.5 py-0.5 text-[7px] font-semibold text-black backdrop-blur-sm md:text-[9px]"
+                className="pointer-events-auto max-w-full truncate rounded-full bg-gold/80 px-1.5 py-0.5 text-[7px] font-semibold text-black backdrop-blur-sm md:text-[9px]"
               >
                 #{item.designNo}
               </span>
             )}
-            <span
-              className={cn(
-                "max-w-full truncate rounded-full bg-black/55 px-1.5 py-0.5 text-[7px] font-medium text-white/85 backdrop-blur-sm md:text-[9px]",
-                dense && DENSE_FADE
-              )}
-            >
-              {item.userName}
+            {/* First name only — the whole of it crowded the chip on a small
+                tile. The tooltip has the rest. */}
+            <span title={item.userName} className={cn(TILE_CHIP, "pointer-events-auto max-w-full truncate")}>
+              {firstName(item.userName)}
             </span>
           </div>
 
@@ -553,12 +414,7 @@ export const HistoryTile = memo(
               the actions: it is information about the tile, not a control, and
               a long name truncates before it rather than pushing it off. */}
           {item.outputs.length > 1 && (
-            <span
-              className={cn(
-                "flex h-5 shrink-0 items-center gap-0.5 rounded-full bg-black/55 px-1.5 text-[8px] font-medium text-white/85 backdrop-blur-sm md:h-6 md:text-[10px]",
-                dense && DENSE_FADE
-              )}
-            >
+            <span className={cn(TILE_CHIP, "flex shrink-0 items-center gap-0.5")}>
               <Copy size={9} className="md:h-2.5 md:w-2.5" /> {item.outputs.length}
             </span>
           )}
@@ -572,6 +428,5 @@ export const HistoryTile = memo(
     prev.canContinue === next.canContinue &&
     prev.canView === next.canView &&
     prev.canDelete === next.canDelete &&
-    prev.deleting === next.deleting &&
-    prev.dense === next.dense
+    prev.deleting === next.deleting
 );
