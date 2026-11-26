@@ -1,6 +1,6 @@
 const { ASPECT_TEXT } = require("./textToImage");
 const { buildReferenceNote } = require("./shared");
-const { ANATOMY_NOTE, REALISM_NOTE, SCALE_NOTE } = require("./lifestyle");
+const { ANATOMY_NOTE, REALISM_NOTE, SCALE_NOTE, HANDS_NOTE } = require("./lifestyle");
 
 /**
  * Styled on Model: any mix of jewellery — a matching set, several pendants to
@@ -111,7 +111,7 @@ const POSES = [
   {
     label: "Hands crossed",
     shows: ["hand"],
-    text: "CROP: only her hands, close to the camera — no face. One hand laid gently over the other, fingers long and relaxed, against her black top; warm light rakes across the knuckles so the rings and bracelets are the whole picture. Nude, glossy manicure.",
+    text: "CROP: only her hands, close to the camera — no face. One hand laid gently over the other, fingers long and relaxed, against her black top; warm light rakes across the knuckles so the rings and bracelets are the whole picture. Her own short natural nails with a sheer nude polish, real creases at the knuckles.",
   },
   {
     label: "Arms folded at the shoulder",
@@ -139,7 +139,7 @@ const POSES = [
   {
     label: "Pendant between the fingers",
     shows: ["neck", "hand"],
-    text: "CROP: from her chin down to her chest — her face above the chin is out of frame. Her fingers lift the chain towards the camera, holding it between thumb and forefinger just below the neckline so the pendant or charms dangle sharp in front of her softly blurred chest and an ivory robe. Nude manicure, warm light.",
+    text: "CROP: from her chin down to her chest — her face above the chin is out of frame. Her fingers lift the chain towards the camera, holding it between thumb and forefinger just below the neckline so the pendant or charms dangle sharp in front of her softly blurred chest and an ivory robe. Short, natural nails, warm light.",
   },
   {
     label: "Pulling the chain",
@@ -242,8 +242,11 @@ const PLACEMENT_RULES = `HOW EACH KIND IS WORN — AND ITS REAL SIZE
 /**
  * Her wardrobe, grooming and the closeness of the camera — from the brand's
  * references. Each pose names its own outfit; this is the palette around it.
+ * Nails used to be "a nude or soft-pink manicure" (and two poses said "nude,
+ * glossy manicure"), which came back as long, glassy, fake-looking nails; they
+ * are now her own natural nails, and HANDS_NOTE spells out what real looks like.
  */
-const STYLING = `- STYLING: necklines that open the neck and collarbones for the jewellery — a crisp white or pleated shirt unbuttoned into a deep V, a cream linen shirt, a fitted black tee or V-neck, an open black blazer, a fine knit in cream, olive or soft blue slipping off one shoulder, a silk slip top with thin straps, an ivory robe. Natural, glowing make-up, glossy nude lips, a nude or soft-pink manicure.
+const STYLING = `- STYLING: necklines that open the neck and collarbones for the jewellery — a crisp white or pleated shirt unbuttoned into a deep V, a cream linen shirt, a fitted black tee or V-neck, an open black blazer, a fine knit in cream, olive or soft blue slipping off one shoulder, a silk slip top with thin straps, an ivory robe. Natural, glowing make-up, glossy nude lips; her own natural nails, short to medium, bare or in a sheer nude or soft-pink polish.
 - INTIMATE AND CLOSE: the camera a hand's length away — her lips, jaw, neck, collarbones and fingertips filling the frame, the sensual closeness of a modern fine-jewellery campaign.`;
 
 /**
@@ -251,7 +254,7 @@ const STYLING = `- STYLING: necklines that open the neck and collarbones for the
  * stops at: an adult, always dressed, never explicit.
  */
 const MODEL_BLOCK = `THE MODEL
-- One strikingly beautiful adult woman, clearly in her mid-twenties to thirties: a toned figure, glowing sun-warmed skin, a long elegant neck, defined collarbones, slender hands with softly manicured nails, hair styled away from her ears and neck wherever jewellery sits.
+- One strikingly beautiful adult woman, clearly in her mid-twenties to thirties: a toned figure, glowing sun-warmed skin, a long elegant neck, defined collarbones, slender, real hands with her own natural nails, hair styled away from her ears and neck wherever jewellery sits.
 - Hot, glamorous and confident — the sultry allure of a high-fashion jewellery campaign: softly parted, glossy lips, a heavy-lidded or knowing gaze, a slow touch at her jaw, neck or collarbone. Seductive in the way a luxury ad is, never vulgar.
 - CANDID, NOT POSED: caught mid-movement, like an off-guard frame from a real editorial shoot — a turn of the head, a hand halfway through her hair, a breath, a half-smile. Mostly tight crops below the chin or just under the eyes, the way jewellery campaigns frame it.
 ${STYLING}
@@ -358,6 +361,7 @@ ${sceneBlock({ brief, tone, pose, index, total: count, chosenModel: Boolean(mode
 ${FOCUS_BLOCK}
 ${ANATOMY_NOTE}
 ${REALISM_NOTE}
+${HANDS_NOTE}
 
 ${NO_TEXT}
 
@@ -377,7 +381,7 @@ function buildOnModelRefinePrompt({ instruction, referenceCount = 0 }) {
   return (
     `Apply this change to this jewellery editorial photograph (the first image): ${instruction}.` +
     buildReferenceNote(referenceCount) +
-    " Keep the model's face, identity and body exactly as they are unless the change is about them. Keep every jewellery piece exactly as it is — same design, stones, metal, size and placement. Keep the colour grade unless the change is about it. She stays clearly dressed: no nudity, no sheer fabric, no lingerie. Add no text. Only apply the requested change. " +
+    " Keep the model's face, identity and body exactly as they are unless the change is about them. Keep every jewellery piece exactly as it is — same design, stones, metal, size and placement. Keep the colour grade unless the change is about it. She stays clearly dressed: no nudity, no sheer fabric, no lingerie. Her hands keep real, natural nails — short to medium, real texture, never long, glossy or plastic-looking. Add no text. Only apply the requested change. " +
     ANATOMY_NOTE
   );
 }

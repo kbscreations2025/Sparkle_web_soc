@@ -85,6 +85,13 @@ export function AffinityWorkspace({ kind = "affinity" }: { kind?: "affinity" | "
 
   const job = jobId ? (jobs.find((entry) => entry.id === jobId) ?? null) : null;
   const loadKitId = openKitId ?? resultKitId;
+  /**
+   * Set when a run's copy was too large to come back inline. The job runner
+   * keeps only a result's ids past 32KB (backend/src/worker.js,
+   * withinResultBudget), so the kit it saved is restored instead, as if
+   * reopened.
+   */
+  const restoreRun = useRef(false);
 
   /** A kit reopened from the rail, or the one a run just wrote. */
   useEffect(() => {
@@ -92,7 +99,15 @@ export function AffinityWorkspace({ kind = "affinity" }: { kind?: "affinity" | "
     let cancelled = false;
 
     fetchMarketingKit(loadKitId).then((res) => {
-      if (cancelled || res.status !== "success" || !res.kit?.affinity) return;
+      if (cancelled) return;
+      if (res.status !== "success" || !res.kit?.affinity) {
+        if (restoreRun.current) {
+          restoreRun.current = false;
+          setStatus("failed");
+          setError("The catalog was written, but couldn't be loaded here. Open it from History.");
+        }
+        return;
+      }
       const saved = res.kit.affinity;
       setKit(res.kit);
 
@@ -103,9 +118,12 @@ export function AffinityWorkspace({ kind = "affinity" }: { kind?: "affinity" | "
         updateMarketingKit(res.kit.id, { items });
       }
 
-      // A freshly written deck is already on screen; only a reopened one has
-      // to be restored from storage.
-      if (loadKitId !== openKitId) return;
+      // A freshly written deck is already on screen; only a reopened one (or
+      // one whose copy was too large to come back inline) has to be restored
+      // from storage.
+      if (loadKitId !== openKitId && !restoreRun.current) return;
+      restoreRun.current = false;
+      setError("");
 
       setCollectionName(saved.collectionName);
       setTagline(saved.tagline);
@@ -158,6 +176,10 @@ export function AffinityWorkspace({ kind = "affinity" }: { kind?: "affinity" | "
       setDesignKey((key) => key + 1);
       setStatus("done");
       if (withNotes.some((item, i) => item !== result.items[i])) pendingNotes.current = withNotes;
+    } else if (settled.result?.kitId) {
+      // Written and saved, just too large to come back inline: restored from
+      // the saved kit by the loader above. Status stays "writing" until then.
+      restoreRun.current = true;
     } else {
       setStatus("failed");
       setError("The model returned no catalog copy");

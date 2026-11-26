@@ -57,12 +57,22 @@ const clip = (text: string) => {
 };
 
 /**
- * Smaller than an ordinary upload: up to thirty pictures travel in one
- * request beside every document's text, under the API's 25MB body limit, and
- * a slide never shows a picture larger than 1600px anyway.
+ * What the deck keeps of each picture. These are the photographs the client
+ * sees, on a projector or a big screen, so they are kept close to the
+ * original: up to 2048px on the long side, a size a full-width slide still
+ * shows sharply at twice its resolution, and JPEG quality 92. At 1600px and
+ * quality 82 the fine detail of a piece (prongs, pavé, engraving) went soft.
+ *
+ * Re-encoded rather than sent untouched, because drawing a phone photo here
+ * applies its EXIF rotation. PowerPoint ignores that flag, so an untouched
+ * photo could come out sideways in the export. Since uploads are sent as
+ * binary parts, the request carries these as they are, and the model is
+ * shown smaller copies made on the server (backend/src/jobs/presentation.js).
  */
-const DECK_SIDE = 1600;
-const DECK_QUALITY = 0.82;
+const DECK_SIDE = 2048;
+const DECK_QUALITY = 0.92;
+/** A PDF page drawn at twice its size, so its text and line art stay crisp on a slide. */
+const PDF_PAGE_SCALE = 2;
 
 function shrink(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -219,7 +229,7 @@ async function readPdf(file: File, room: number) {
     // A scanned page or a picture page: its look is the content, so it is
     // rendered and shown to the model instead.
     if (text.length < SPARSE_PAGE_CHARS && images.length < Math.min(room, MAX_RENDERED_PAGES)) {
-      const viewport = rendered.getViewport({ scale: 1.25 });
+      const viewport = rendered.getViewport({ scale: PDF_PAGE_SCALE });
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
       canvas.height = viewport.height;
@@ -228,7 +238,7 @@ async function readPdf(file: File, room: number) {
       context.fillStyle = "#ffffff";
       context.fillRect(0, 0, canvas.width, canvas.height);
       await rendered.render({ canvasContext: context, viewport, canvas }).promise;
-      images.push({ src: canvas.toDataURL("image/jpeg", 0.85), label: `${file.name} · page ${page}` });
+      images.push({ src: canvas.toDataURL("image/jpeg", DECK_QUALITY), label: `${file.name} · page ${page}` });
     }
   }
   if (pdf.numPages > MAX_PDF_PAGES) parts.push(`… ${pdf.numPages - MAX_PDF_PAGES} more pages not read`);

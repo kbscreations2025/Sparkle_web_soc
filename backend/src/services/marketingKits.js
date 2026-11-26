@@ -542,7 +542,10 @@ async function listKits({ dbUser, kind, cursor, limit, scope }) {
 async function getKit({ dbUser, id }) {
   if (!mongoose.Types.ObjectId.isValid(id)) return null;
   const kit = await MarketingKit.findOne({ ...reachFilter(dbUser, true), _id: id });
-  return kit ? toPublicKit(kit) : null;
+  // `isOwn`, as on a listing: a teammate's kit opens read-only. Only the
+  // owner may save to it (see updateKit), and without this the editor kept
+  // trying and showed "kit not found" for a deck that was right there.
+  return kit ? { ...toPublicKit(kit), isOwn: String(kit.userId) === String(dbUser._id) } : null;
 }
 
 /**

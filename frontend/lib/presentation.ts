@@ -252,8 +252,32 @@ function pictures(slide: OutlineSlide, ctx: Ctx) {
   return (slide.images ?? []).filter((n) => Number.isInteger(n) && n >= 1 && n <= ctx.imageCount).map((n) => n - 1);
 }
 
-function photo(pieceIndex: number, x: number, y: number, w: number, h: number, radius = 0) {
-  return imageElement({ x, y, w, h, pieceIndex, fit: "cover", radius, name: "Picture" });
+/** What a picture sits on: white, the backdrop most product photographs already have. */
+const PHOTO_MAT = "#FFFFFF";
+
+/**
+ * A picture placed the way a presentation designer places a product shot:
+ * whole, never cropped, centred on a clean white mat with room around it.
+ *
+ * These used to fill their box ("cover"), which cut off whatever didn't fit
+ * the slot's shape: the edge of a piece, a clasp, the second earring.
+ * Pictures here are the client's jewellery, so every detail stays in frame.
+ * The mat fills the slot, so a picture of any shape still lines up with the
+ * layout. The editor's Fit/Fill switch can still fill a frame where someone
+ * wants that.
+ */
+function photo(
+  pieceIndex: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  { pad = 0, radius = 0 }: { pad?: number; radius?: number } = {}
+): DesignElement[] {
+  return [
+    shapeElement({ x, y, w, h, fill: PHOTO_MAT, radius, name: "Picture mat" }),
+    imageElement({ x: x + pad, y: y + pad, w: w - pad * 2, h: h - pad * 2, pieceIndex, fit: "contain", radius: 0, name: "Picture" }),
+  ];
 }
 
 /** A text box sized to its words: `max` shrinks toward `min` until it fits `h`. */
@@ -353,7 +377,7 @@ function titleSlide(slide: OutlineSlide, ctx: Ctx): Built {
   const { p } = ctx;
   const elements: DesignElement[] = [];
   const textW = (cover !== undefined ? 600 : 960) - MARGIN_X;
-  if (cover !== undefined) elements.push(photo(cover, 640, 0, 640, SLIDE_H));
+  if (cover !== undefined) elements.push(...photo(cover, 640, 0, 640, SLIDE_H, { pad: 56 }));
 
   // Title and subtitle stacked by their real heights, the block centred a
   // little above the middle — a fixed slot left a gap under a short title.
@@ -379,7 +403,7 @@ function sectionSlide(slide: OutlineSlide, ctx: Ctx, sectionNumber: number): Bui
   const elements: DesignElement[] = [];
   // A photo sits beside the words, whole — laid under a shade it only muddied.
   const textW = (cover !== undefined ? 640 : 1000) - MARGIN_X;
-  if (cover !== undefined) elements.push(photo(cover, 700, 0, SLIDE_W - 700, SLIDE_H));
+  if (cover !== undefined) elements.push(...photo(cover, 700, 0, SLIDE_W - 700, SLIDE_H, { pad: 56 }));
   const title = words(slide.title, { x: MARGIN_X, y: 0, w: textW, h: 170 }, { font: ctx.heading, color: p.featureInk, max: 56, min: 34, lineHeight: 1.1, name: "Title" });
   const titleH = heightAt(slide.title, textW, title.type === "text" ? title.fontSize : 56, ctx.heading, 1.1);
   const subtitleH = slide.subtitle ? heightAt(slide.subtitle, textW, 20, ctx.body, 1.45) : 0;
@@ -407,7 +431,7 @@ function imageSideSlide(slide: OutlineSlide, ctx: Ctx, side: "left" | "right"): 
   const textX = side === "left" ? imageW + 72 : MARGIN_X;
   const textW = SLIDE_W - imageW - 72 - MARGIN_X;
   const head = header(slide, ctx, textW, textX);
-  const elements: DesignElement[] = [photo(cover, imageX, 0, imageW, SLIDE_H), ...head.elements];
+  const elements: DesignElement[] = [...photo(cover, imageX, 0, imageW, SLIDE_H, { pad: 44 }), ...head.elements];
   elements.push(...bodyAndBullets(slide, { x: textX, y: head.bottom, w: textW, h: SLIDE_H - 80 - head.bottom }, ctx));
   elements.push(
     textElement({ x: side === "left" ? SLIDE_W - MARGIN_X - 80 : imageX - 120, y: SLIDE_H - 44, w: 80, h: 20, text: String(ctx.number).padStart(2, "0"), fontFamily: ctx.body, fontSize: 11, color: ctx.p.muted, align: "right", opacity: 0.8, name: "Page number" })
@@ -418,15 +442,20 @@ function imageSideSlide(slide: OutlineSlide, ctx: Ctx, side: "left" | "right"): 
 function imageFullSlide(slide: OutlineSlide, ctx: Ctx): Built {
   const [cover] = pictures(slide, ctx);
   if (cover === undefined) return sectionSlide(slide, ctx, ctx.number);
+  const { p } = ctx;
+  // The picture whole on the mat, with the words on a solid band beneath
+  // it. A full-bleed photo with a shade over its lower third hid exactly
+  // the part of the piece the shade covered.
+  const band = 190;
   const elements: DesignElement[] = [
-    photo(cover, 0, 0, SLIDE_W, SLIDE_H),
-    shapeElement({ x: 0, y: SLIDE_H - 260, w: SLIDE_W, h: 260, fill: "#000000", opacity: 0.45, name: "Shade" }),
-    words(slide.title, { x: MARGIN_X, y: SLIDE_H - 220, w: 900, h: 110 }, { font: ctx.heading, color: "#FFFFFF", max: 48, min: 30, lineHeight: 1.1, name: "Title" }),
+    ...photo(cover, 0, 0, SLIDE_W, SLIDE_H - band, { pad: 40 }),
+    shapeElement({ x: 0, y: SLIDE_H - band, w: SLIDE_W, h: band, fill: p.feature, name: "Caption band" }),
+    words(slide.title, { x: MARGIN_X, y: SLIDE_H - band + 34, w: 900, h: 80 }, { font: ctx.heading, color: p.featureInk, max: 40, min: 26, lineHeight: 1.1, name: "Title" }),
   ];
   if (slide.subtitle || slide.body) {
-    elements.push(words(slide.subtitle || slide.body || "", { x: MARGIN_X, y: SLIDE_H - 102, w: 900, h: 56 }, { font: ctx.body, color: "#F2F2F2", max: 18, min: 13, lineHeight: 1.4, name: "Caption" }));
+    elements.push(words(slide.subtitle || slide.body || "", { x: MARGIN_X, y: SLIDE_H - 66, w: 900, h: 44 }, { font: ctx.body, color: p.featureMuted, max: 16, min: 12, lineHeight: 1.4, name: "Caption" }));
   }
-  return { background: "#000000", elements };
+  return { background: PHOTO_MAT, elements };
 }
 
 function gallerySlide(slide: OutlineSlide, ctx: Ctx): Built {
@@ -447,7 +476,7 @@ function gallerySlide(slide: OutlineSlide, ctx: Ctx): Built {
     // The last row centred when it is short.
     const inRow = row === rows - 1 ? shots.length - row * cols : cols;
     const offset = ((cols - inRow) * (w + gap)) / 2;
-    elements.push(photo(index, MARGIN_X + offset + col * (w + gap), top + row * (h + gap), w, h, 8));
+    elements.push(...photo(index, MARGIN_X + offset + col * (w + gap), top + row * (h + gap), w, h, { pad: 12, radius: 8 }));
   });
   return { background: ctx.p.bg, elements: [...elements, ...footer(ctx)] };
 }
@@ -558,14 +587,15 @@ function closingSlide(slide: OutlineSlide, ctx: Ctx): Built {
   const { p } = ctx;
   const [cover] = pictures(slide, ctx);
   const elements: DesignElement[] = [];
-  if (cover !== undefined) {
-    elements.push(photo(cover, 0, 0, SLIDE_W, SLIDE_H));
-    elements.push(shapeElement({ x: 0, y: 0, w: SLIDE_W, h: SLIDE_H, fill: p.feature, opacity: 0.7, name: "Shade" }));
-  }
-  elements.push(words(slide.title || "Thank you", { x: 140, y: 250, w: SLIDE_W - 280, h: 130 }, { font: ctx.heading, color: p.featureInk, max: 60, min: 34, align: "center", lineHeight: 1.1, name: "Title" }));
-  elements.push(shapeElement({ x: SLIDE_W / 2 - 28, y: 396, w: 56, h: 3, fill: p.featureMuted, name: "Accent" }));
+  // With a picture, it sits whole on its own panel and the words take the
+  // other half. Laid under a 70% shade, it was only a muddy texture.
+  const area = cover !== undefined ? { x: 80, w: 480 } : { x: 140, w: SLIDE_W - 280 };
+  const details = cover !== undefined ? { x: 80, w: 480 } : { x: 200, w: SLIDE_W - 400 };
+  if (cover !== undefined) elements.push(...photo(cover, 640, 0, 640, SLIDE_H, { pad: 56 }));
+  elements.push(words(slide.title || "Thank you", { x: area.x, y: 250, w: area.w, h: 130 }, { font: ctx.heading, color: p.featureInk, max: 60, min: 34, align: "center", lineHeight: 1.1, name: "Title" }));
+  elements.push(shapeElement({ x: area.x + area.w / 2 - 28, y: 396, w: 56, h: 3, fill: p.featureMuted, name: "Accent" }));
   const line = [slide.subtitle, slide.body].filter(Boolean).join("\n");
-  if (line) elements.push(words(line, { x: 200, y: 424, w: SLIDE_W - 400, h: 110 }, { font: ctx.body, color: p.featureMuted, max: 18, min: 13, align: "center", lineHeight: 1.5, name: "Details" }));
+  if (line) elements.push(words(line, { x: details.x, y: 424, w: details.w, h: 110 }, { font: ctx.body, color: p.featureMuted, max: 18, min: 13, align: "center", lineHeight: 1.5, name: "Details" }));
   return { background: p.feature, elements };
 }
 

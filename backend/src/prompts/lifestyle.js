@@ -22,6 +22,24 @@ const ANATOMY_NOTE = `ANATOMY — CRITICAL, DO NOT SKIP: The model is a single o
 const REALISM_NOTE = `REALISM — CRITICAL: This must read as an authentic photograph captured on a real DSLR/mirrorless camera with a fast prime lens, never as a CGI render or an AI-generated image. Skin must show natural, believable texture — visible pores, fine hairs, subtle natural asymmetry and imperfections — never smoothed to a plastic, waxy, or airbrushed finish. Avoid oversaturated colors, artificial HDR glow, or an unnaturally perfect "beauty filter" sheen. Light must behave physically: soft natural falloff, believable shadows, realistic specular highlights on skin and metal. The final image should be indistinguishable from a professionally shot, unedited lifestyle or editorial photograph.`;
 
 /**
+ * Hands and nails were the giveaway in Marketing Kit's Styled on Model and
+ * Charm Shots (Nov 2026): long, glossy, identical "salon" nails that read as
+ * plastic and AI-made — and the old wording ("nude, glossy manicure", "softly
+ * manicured nails") pushed the model towards them. Real campaign hands have
+ * the model's own short-to-medium nails with real texture, so that is what
+ * this asks for, and it lists the tells to avoid. Written to work whether or
+ * not a hand is in the shot, so it never invites one into a still life.
+ * Used by prompts/onModel.js and prompts/charmStory.js; Lifestyle's own
+ * prompts don't include it yet.
+ */
+const HANDS_NOTE = `REAL HANDS AND NAILS — CRITICAL, wherever a hand is in the photo: it is a real woman's own hand, photographed — never the flawless, glossy nails that give an AI image away.
+- Nails: her own natural nails, short to medium length, in a soft natural shape (gently rounded or softly squared) that follows each fingertip and is in proportion to her fingers. Bare and buffed, or a sheer nude, soft pink or classic pale polish with a soft, natural sheen, applied the way real polish looks — thin, not a thick glassy coat.
+- Real texture: faint natural ridges on the nail, visible natural cuticles, pink nail beds with a natural pale free edge, each nail very slightly different from the next; real skin on the fingers — knuckle creases, fine lines, the odd tiny imperfection.
+- Believable hands: each finger the right length and thickness, bending at its real joints, in proportion to the hand and to the jewellery on it; exactly five fingers per hand, none extra, missing, merged or bent the wrong way.
+- Never: long, pointed, stiletto, coffin or acrylic-extension nails; mirror-glossy, plastic, gel-shine or perfectly identical nails; nail art, chrome, glitter or bold colour; airbrushed, poreless or waxy fingers.
+- The nails stay quiet — the eye goes to the jewellery, never to the manicure.`;
+
+/**
  * Without this, a model shows the jewelry and the scene at equal weight —
  * every petal as crisp as the stones — which reads as a flat product-catalog
  * composite rather than a photograph someone actually stood behind a camera
@@ -565,6 +583,8 @@ module.exports = {
   MODESTY_NOTE,
   // Shared with Marketing Kit's Styled on Model (prompts/onModel.js), which renders a model too.
   REALISM_NOTE,
+  // Shared with Styled on Model and Charm Shots (prompts/charmStory.js).
+  HANDS_NOTE,
   SCALE_NOTE,
   buildLifestylePrompt,
   buildLifestyleSetPrompt,

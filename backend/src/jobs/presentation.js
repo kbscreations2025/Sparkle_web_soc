@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const sharp = require("sharp");
 const { registerJobHandler } = require("./registry");
 const { runTextJob, ModelRefusedError, inlineData } = require("./textRunner");
 const kits = require("../services/marketingKits");
@@ -109,12 +110,38 @@ function parseJson(output) {
   }
 }
 
+/**
+ * The longest side of the copy of each picture the model is shown.
+ *
+ * The model only looks at the pictures to decide which goes on which slide,
+ * and Gemini refuses a request with more than about 20MB of inline images.
+ * The deck itself keeps the full-quality uploads (up to 2048px, see
+ * frontend/lib/presentationFiles.ts), so thirty of those would not fit.
+ * The model gets smaller copies; what is stored and shown is untouched.
+ */
+const MODEL_SIDE = 1024;
+
+async function copyForModel(image) {
+  try {
+    const buffer = await sharp(Buffer.from(image.base64, "base64"), { failOn: "none" })
+      .rotate()
+      .resize({ width: MODEL_SIDE, height: MODEL_SIDE, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    return { mimeType: "image/jpeg", base64: buffer.toString("base64") };
+  } catch {
+    // Not one sharp can read: the model gets it as it came.
+    return image;
+  }
+}
+
 /*
  * ── Build ───────────────────────────────────────────────────────────────────
  */
-registerJobHandler(PRESENTATION_JOB, (context) => {
+registerJobHandler(PRESENTATION_JOB, async (context) => {
   const kitId = new mongoose.Types.ObjectId();
   const { data } = context;
+  const modelImages = await Promise.all(data.images.map(copyForModel));
   const prompt = buildPresentationPrompt({
     brief: data.brief,
     style: data.style,
@@ -138,7 +165,7 @@ registerJobHandler(PRESENTATION_JOB, (context) => {
       ...(data.images.length
         ? [
             { text: `IMAGES (${data.images.length}) — numbered in order; refer to them by number:` },
-            ...data.images.flatMap((image, n) => [{ text: `IMAGE ${n + 1} — ${image.label || "uploaded picture"}:` }, inlineData(image)]),
+            ...data.images.flatMap((image, n) => [{ text: `IMAGE ${n + 1} — ${image.label || "uploaded picture"}:` }, inlineData(modelImages[n])]),
           ]
         : []),
       { text: prompt },

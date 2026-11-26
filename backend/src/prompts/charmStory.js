@@ -1,5 +1,6 @@
 const { ASPECT_TEXT } = require("./textToImage");
 const { buildReferenceNote } = require("./shared");
+const { HANDS_NOTE } = require("./lifestyle");
 
 /**
  * Charm Shots: separate charm photos threaded together onto ONE chain and
@@ -35,6 +36,7 @@ const CHARM_METALS = {
  * necklace poured into open palms, and (from the later set) quiet still lifes
  * — raking sunlight on warm paper, marble flat lays, seamless studio
  * backdrops, colour-block paper — with the necklace small in the frame.
+ * `hands: true` marks the scenes with a hand in them, which get HANDS_NOTE.
  */
 const CHARM_SCENES = [
   {
@@ -85,11 +87,13 @@ const CHARM_SCENES = [
   {
     id: "hand",
     label: "Held in hand",
+    hands: true,
     text: "A woman's slender bare forearm raised in front of a plain off-white painted wall; the chain hangs from between her fingers in two long lines that meet at the bottom, where all the charms have slid down together into one small natural bunch. Soft daylight from a window to one side, so the wall falls off gently from light to slightly darker. Framed fairly tight on the lower half of the chain so the bunch of charms is sharp and the hand at the top is softer.",
   },
   {
     id: "palms",
     label: "In open palms",
+    hands: true,
     text: "Two hands held together, palms up and slightly cupped, the necklace just poured into them: the chain coiled loosely in a small heap and the charms lying close together in a loose little group in the middle of the palms, touching, each one face-up. Dark navy knitwear out of focus behind the hands. Soft window light from above.",
   },
   {
@@ -188,7 +192,7 @@ const PHOTO_BLOCK = `A REAL PHOTOGRAPH — IT MUST NOT LOOK AI-GENERATED
 - Real depth of field: focus is on the charms; the chain and the background soften gradually. Not everything in the frame is razor-sharp.
 - A candid, editorial composition — relaxed and slightly imperfect, not perfectly centred or symmetrical, never staged-looking.
 - The charms are the subject of the photo and clearly in focus, but they sit naturally in the scene at their real size.
-- Where hands or skin appear: natural, softly manicured nails, no face.`;
+- Where a person appears: no face.`;
 
 const NO_TEXT = "NO TEXT — no words, letters, numbers, logos or watermarks anywhere in the image.";
 
@@ -218,6 +222,13 @@ function buildCharmStoryShots(options, sourceImages, count) {
 
   return Array.from({ length: count }, (_, index) => {
     const scene = scenes[index % scenes.length];
+    /*
+     * Hands in the held/palms shots came back with long, glossy, AI-looking
+     * nails ("softly manicured nails" was all the prompt said), so those shots
+     * get the full real-hands note. A brief may put a hand in any shot, so it
+     * goes in then too; plain still lifes leave it out so no hand is invited.
+     */
+    const hands = scene.hands || brief ? `\n\n${HANDS_NOTE}` : "";
     return {
       id: `look${index + 1}`,
       label: brief ? `Look ${index + 1}` : scene.label,
@@ -234,7 +245,7 @@ ${sceneBlock({
   total: count,
 })}
 
-${PHOTO_BLOCK}
+${PHOTO_BLOCK}${hands}
 
 ${NO_TEXT}
 
@@ -248,7 +259,7 @@ function buildCharmStoryRefinePrompt({ instruction, referenceCount = 0 }) {
   return (
     `Apply this change to this jewellery photograph (the first image): ${instruction}.` +
     buildReferenceNote(referenceCount) +
-    " Keep every charm exactly as it is — same design, stones, metal and proportions — on the one chain, bunched together as they are. Keep it looking like a real, natural photograph, not AI-generated. Add no text. Only apply the requested change."
+    " Keep every charm exactly as it is — same design, stones, metal and proportions — on the one chain, bunched together as they are. Keep it looking like a real, natural photograph, not AI-generated; any hand keeps real, natural nails — short to medium, real texture, never long, glossy or plastic-looking. Add no text. Only apply the requested change."
   );
 }
 

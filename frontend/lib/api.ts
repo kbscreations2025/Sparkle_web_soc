@@ -1815,7 +1815,7 @@ export type MarketingKitSummary = {
   generationId?: string | null;
   pieceCount: number;
   userName: string;
-  /** Absent outside a listing; only the owner may edit or delete a kit. */
+  /** Only the owner may edit or delete a kit. Sent with a listing and with a single kit. */
   isOwn?: boolean;
   createdAt: string;
   updatedAt: string;

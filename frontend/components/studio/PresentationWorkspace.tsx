@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowUp, Download, FileDown, FileSpreadsheet, FileText, ImageIcon, Loader2, MessageSquare, Presentation as PresentationIcon, RotateCcw, Sparkles, Upload, X } from "lucide-react";
+import { ArrowUp, CalendarClock, Download, FileDown, FileSpreadsheet, FileText, ImageIcon, Loader2, MessageSquare, Presentation as PresentationIcon, RotateCcw, Sparkles, Upload, X } from "lucide-react";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { Chip } from "@/components/studio/OptionChips";
 import { DeckEditor } from "@/components/studio/deck-editor/DeckEditor";
 import { PrintDeck } from "@/components/studio/deck-editor/PrintDeck";
 import { JobProgressBar } from "@/components/studio/JobProgressBar";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
-import { buildPresentation, editPresentation, fetchMarketingKit, updateMarketingKit } from "@/lib/api";
+import { buildPresentation, editPresentation, fetchMarketingKit, updateMarketingKit, type QueuedJob } from "@/lib/api";
+import { describeJob, useNow } from "@/lib/job-progress";
 import { isDesign, type DeckDesign } from "@/lib/deckDesign";
 import { exportDesignPptx } from "@/lib/exportAffinity";
 import { makeThumbnail } from "@/lib/image";
@@ -65,11 +67,13 @@ type Message = { role: "user" | "assistant"; text: string };
  */
 export function PresentationWorkspace() {
   const { user } = useAuth();
-  const { jobs, track } = useJobs();
+  const { jobs, track, refresh } = useJobs();
   const creditGuard = useCreditGuard();
   const router = useRouter();
   const searchParams = useSearchParams();
   const openKitId = searchParams.get("kitId");
+  /** A deck still being built, named in the address so a reload or a link comes back to it. */
+  const openJobId = searchParams.get("job");
 
   // ── inputs
   const [sources, setSources] = useState<PresentationSource[]>([]);
@@ -85,7 +89,15 @@ export function PresentationWorkspace() {
 
   // ── run and result
   const [error, setError] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(openJobId);
+  /** The build request is still on its way up (files and all), before there's a job to show. */
+  const [starting, setStarting] = useState(false);
+  /**
+   * Whether the queue has been read since this page opened on a `?job=` link.
+   * Until then a job that isn't listed may simply not have loaded yet; after,
+   * it has left the queue (finished long ago, or not this person's).
+   */
+  const [queueChecked, setQueueChecked] = useState(false);
   const [kitId, setKitId] = useState<string | null>(null);
   const [outline, setOutline] = useState<PresentationOutline | null>(null);
   /** The deck's pictures, as stored — what `pieceIndex` in the design points at. */
@@ -94,6 +106,24 @@ export function PresentationWorkspace() {
   const [designKey, setDesignKey] = useState(0);
   const latestDesign = useRef<DeckDesign | null>(null);
   const [loadingKit, setLoadingKit] = useState(Boolean(openKitId));
+  /**
+   * A deck a run just built but couldn't hand back inline, opened from where
+   * it was saved instead. The job runner keeps only a result's ids once it
+   * passes 32KB (backend/src/worker.js, withinResultBudget), and a long deck
+   * passes that easily. The deck itself is always saved first.
+   */
+  const [builtKitId, setBuiltKitId] = useState<string | null>(null);
+  const kitToOpen = openKitId ?? builtKitId;
+  /** Same for an edit: its outline is re-read from the saved deck. */
+  const [reloadAfterEdit, setReloadAfterEdit] = useState(false);
+  /**
+   * When the deck on screen was made, and by whom. Shown above it, and
+   * `isOwn` decides whether it can be saved: only the owner may change a kit,
+   * so a teammate's deck opens view-only instead of failing every autosave
+   * with "kit not found".
+   */
+  const [deckInfo, setDeckInfo] = useState<{ createdAt: string; userName?: string; isOwn: boolean } | null>(null);
+  const readOnly = deckInfo?.isOwn === false;
 
   // ── chat
   const [messages, setMessages] = useState<Message[]>([]);
@@ -109,40 +139,53 @@ export function PresentationWorkspace() {
   const editJob = editJobId ? (jobs.find((entry) => entry.id === editJobId) ?? null) : null;
   const pieces = useMemo(() => imagesAsPieces(deckImages), [deckImages]);
 
-  /** A saved deck reopened from History or the queue. */
+  /** A saved deck reopened from History or the queue, or one a run just built (see builtKitId). */
   useEffect(() => {
-    if (!openKitId || openKitId === kitId) return;
+    if (!kitToOpen || kitToOpen === kitId) return;
     let cancelled = false;
-    fetchMarketingKit(openKitId).then((res) => {
+    fetchMarketingKit(kitToOpen).then((res) => {
       if (cancelled) return;
       setLoadingKit(false);
+      setBuiltKitId(null);
       const saved = res.status === "success" ? res.kit?.presentation : null;
       if (!saved || !isOutline(saved.outline)) {
         setError("That presentation could not be opened");
         return;
       }
       const urls = saved.images.map((image) => image.url);
-      setKitId(openKitId);
+      const savedDesign = isDesign(saved.design) ? saved.design : null;
+      const shownDesign = savedDesign ?? buildPresentationDesign(saved.outline, urls.length);
+      // Whatever went wrong before this is over: the deck is here.
+      setError("");
+      setKitId(kitToOpen);
       setOutline(saved.outline);
       setDeckImages(urls);
-      setDesign(isDesign(saved.design) ? saved.design : buildPresentationDesign(saved.outline, urls.length));
+      setDesign(shownDesign);
+      latestDesign.current = shownDesign;
       setDesignKey((key) => key + 1);
       setMessages(saved.messages.map(({ role, text }) => ({ role, text })));
+      const isOwn = res.kit?.isOwn !== false;
+      setDeckInfo({ createdAt: res.kit!.createdAt, userName: res.kit!.userName, isOwn });
+      // A first open lays the deck out; kept, so it reopens exactly like this.
+      // Only by its owner, the one person allowed to save it.
+      if (!savedDesign && isOwn) updateMarketingKit(kitToOpen, { design: shownDesign });
     });
     return () => {
       cancelled = true;
     };
-  }, [openKitId, kitId]);
+  }, [kitToOpen, kitId]);
 
   /** Saves the laid-out slides, so the deck reopens exactly as it is now. */
   const saveDesign = useCallback(
     async (next: DeckDesign) => {
       latestDesign.current = next;
-      if (!kitId) return;
+      // A teammate's deck can be rearranged on screen, but only its owner can
+      // save it: nothing is sent, and the bar above says so.
+      if (!kitId || readOnly) return;
       const res = await updateMarketingKit(kitId, { design: next });
       if (res.status !== "success") setError(res.message || "Could not save that edit");
     },
-    [kitId]
+    [kitId, readOnly]
   );
 
   useSettledJob(job, (settled) => {
@@ -152,7 +195,16 @@ export function PresentationWorkspace() {
       return;
     }
     const result = settled.result?.result as { outline?: unknown; images?: { url: string }[] } | undefined;
+    const newKitId = settled.result?.kitId ? String(settled.result.kitId) : null;
     if (!result || !isOutline(result.outline)) {
+      // Built and saved, just too large to come back inline (see builtKitId):
+      // opened from where it was saved. "No slides" was shown here for every
+      // long deck, with the deck sitting in History all along.
+      if (newKitId) {
+        setLoadingKit(true);
+        setBuiltKitId(newKitId);
+        return;
+      }
       setError("The model returned no slides — please try again");
       return;
     }
@@ -160,13 +212,14 @@ export function PresentationWorkspace() {
     // A deck whose save failed still shows, from the pictures it was sent.
     const shown = urls.length ? urls : images.map((image) => image.src);
     const built = buildPresentationDesign(result.outline, shown.length);
-    const newKitId = settled.result?.kitId ? String(settled.result.kitId) : null;
     setOutline(result.outline);
     setDeckImages(shown);
     setDesign(built);
     latestDesign.current = built;
     setDesignKey((key) => key + 1);
     setMessages([]);
+    // Just made, by this person: theirs to change.
+    setDeckInfo({ createdAt: settled.finishedAt ?? new Date().toISOString(), isOwn: true });
     if (newKitId) {
       setKitId(newKitId);
       updateMarketingKit(newKitId, { design: built });
@@ -180,6 +233,25 @@ export function PresentationWorkspace() {
     if (kitId && kitId !== openKitId) router.replace(`/marketing-kit/presentation?kitId=${kitId}`);
   }, [kitId, openKitId, router]);
 
+  // A build that failed goes back to the form, so its `?job=` goes too —
+  // otherwise a reload would reopen the building view of a finished failure.
+  useEffect(() => {
+    if (openJobId && !jobId && !kitId) router.replace("/marketing-kit/presentation");
+  }, [openJobId, jobId, kitId, router]);
+
+  // Opened on a `?job=` link: read the queue once, so a job that has left it
+  // can be told apart from one that simply hasn't loaded yet.
+  useEffect(() => {
+    if (!openJobId) return;
+    let cancelled = false;
+    refresh().finally(() => {
+      if (!cancelled) setQueueChecked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [openJobId, refresh]);
+
   useSettledJob(editJob, (settled) => {
     setEditJobId(null);
     if (settled.status !== "completed") {
@@ -188,6 +260,12 @@ export function PresentationWorkspace() {
     }
     const result = settled.result?.result as { outline?: unknown; reply?: string } | undefined;
     if (!result || !isOutline(result.outline)) {
+      // Saved, just too large to come back inline: the edited outline is
+      // re-read from the deck (see the effect below), not reported as empty.
+      if (settled.result?.kitId) {
+        setReloadAfterEdit(true);
+        return;
+      }
       setMessages((list) => [...list, { role: "assistant", text: "That edit came back empty — please try again." }]);
       return;
     }
@@ -199,6 +277,39 @@ export function PresentationWorkspace() {
     setMessages((list) => [...list, { role: "assistant", text: result.reply || "Done — the deck is updated." }]);
     if (kitId) updateMarketingKit(kitId, { design: next });
   });
+
+  // An edit too large to come back inline (see builtKitId): its outline is
+  // read back from the saved deck and applied exactly as an inline one is.
+  useEffect(() => {
+    if (!reloadAfterEdit || !kitId) return;
+    let cancelled = false;
+    fetchMarketingKit(kitId).then((res) => {
+      if (cancelled) return;
+      setReloadAfterEdit(false);
+      const saved = res.status === "success" ? res.kit?.presentation : null;
+      if (!saved || !isOutline(saved.outline)) {
+        setMessages((list) => [
+          ...list,
+          { role: "assistant", text: "The deck was updated, but couldn't be reloaded here. Reopen it from History to see the change." },
+        ]);
+        return;
+      }
+      const next = rebuildDesign(saved.outline, deckImages.length, outline, latestDesign.current ?? design);
+      setOutline(saved.outline);
+      setDesign(next);
+      latestDesign.current = next;
+      setDesignKey((key) => key + 1);
+      const last = saved.messages[saved.messages.length - 1];
+      setMessages((list) => [
+        ...list,
+        { role: "assistant", text: last?.role === "assistant" && last.text ? last.text : "Done — the deck is updated." },
+      ]);
+      updateMarketingKit(kitId, { design: next });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadAfterEdit, kitId, deckImages.length, outline, design]);
 
   // The thread follows the newest message.
   useEffect(() => {
@@ -236,26 +347,35 @@ export function PresentationWorkspace() {
 
   async function handleBuild() {
     setError("");
-    const preview = images[0] ? await makeThumbnail(images[0].src) : null;
-    const res = await buildPresentation({
-      sources: sources.map(({ name, kind, text }) => ({ name, kind, text })),
-      images: images.map(({ src, label }) => ({ src, label })),
-      brief,
-      style,
-      length,
-      preview,
-    });
-    if (res.status === "queued" && res.job) {
-      setJobId(res.job.id);
-      track(res.job);
-    } else if (!creditGuard(res)) {
-      setError(res.message || "Could not start this presentation");
+    setStarting(true);
+    try {
+      const preview = images[0] ? await makeThumbnail(images[0].src) : null;
+      const res = await buildPresentation({
+        sources: sources.map(({ name, kind, text }) => ({ name, kind, text })),
+        images: images.map(({ src, label }) => ({ src, label })),
+        brief,
+        style,
+        length,
+        preview,
+      });
+      if (res.status === "queued" && res.job) {
+        // Straight to the deck's own page, showing it being built, rather
+        // than leaving the form on screen with a spinner in its button. The
+        // address names the job, so a reload comes back here too.
+        setJobId(res.job.id);
+        track(res.job);
+        router.replace(`/marketing-kit/presentation?job=${res.job.id}`);
+      } else if (!creditGuard(res)) {
+        setError(res.message || "Could not start this presentation");
+      }
+    } finally {
+      setStarting(false);
     }
   }
 
   async function sendEdit(text: string) {
     const instruction = text.trim();
-    if (!instruction || !kitId || editJobId) return;
+    if (!instruction || !kitId || editJobId || readOnly) return;
     setDraft("");
     setMessages((list) => [...list, { role: "user", text: instruction }]);
     const res = await editPresentation({ kitId, instruction });
@@ -289,6 +409,7 @@ export function PresentationWorkspace() {
     latestDesign.current = null;
     setMessages([]);
     setEditJobId(null);
+    setDeckInfo(null);
     router.replace("/marketing-kit/presentation");
   }
 
@@ -322,12 +443,12 @@ export function PresentationWorkspace() {
 
   if (!can(user, PERMISSION)) return <ToolAccessNotice tool="Marketing Kit" />;
 
-  const building = Boolean(jobId);
   const hasInput = sources.length > 0 || images.length > 0 || brief.trim().length >= 10;
 
   // ── The deck, with the chat beside it ─────────────────────────────────────
   if (showingDeck && design) {
-    const editing = Boolean(editJobId);
+    // Still "updating" while a large edit's outline is being read back.
+    const editing = Boolean(editJobId) || reloadAfterEdit;
     const chat = (
       <div className="flex min-h-0 flex-1 flex-col">
         <div ref={threadRef} className="thin-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
@@ -359,7 +480,7 @@ export function PresentationWorkspace() {
           {editing && editJob && <JobProgressBar percent={editJob.progress} />}
         </div>
 
-        {!editing && (
+        {!editing && !readOnly && (
           <div className="flex flex-wrap gap-1.5 px-3 pb-2">
             {EDIT_SUGGESTIONS.map((suggestion) => (
               <button
@@ -385,13 +506,15 @@ export function PresentationWorkspace() {
               }
             }}
             rows={2}
-            placeholder={editing ? "Wait for this edit to finish…" : "Ask for a change…"}
-            disabled={editing || !kitId}
+            placeholder={
+              readOnly ? "Only the person who made this deck can change it" : editing ? "Wait for this edit to finish…" : "Ask for a change…"
+            }
+            disabled={editing || !kitId || readOnly}
             className="thin-scrollbar max-h-32 min-h-[40px] flex-1 resize-none rounded-lg border border-white/10 bg-surface-raised px-2.5 py-2 text-base text-cream outline-none placeholder:text-faint focus:border-gold/40 disabled:opacity-60 md:text-[12px]"
           />
           <button
             type="submit"
-            disabled={editing || !draft.trim() || !kitId}
+            disabled={editing || !draft.trim() || !kitId || readOnly}
             aria-label="Send"
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gold text-[#2A1E0C] transition-opacity disabled:opacity-40"
           >
@@ -405,6 +528,7 @@ export function PresentationWorkspace() {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
         <ErrorBanner message={error} />
+        {deckInfo && <DeckInfoBar {...deckInfo} />}
         <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden lg:flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <DeckEditor key={designKey} initial={design} pieces={pieces} onSave={saveDesign} latestRef={latestDesign} />
@@ -437,6 +561,23 @@ export function PresentationWorkspace() {
           {printing && <PrintDeck design={printing} pieces={pieces} onDone={endPrint} />}
         </div>
       </div>
+    );
+  }
+
+  // ── Being built ────────────────────────────────────────────────────────────
+  // Its own page from the moment Build is pressed, until the deck replaces it.
+  if (jobId) {
+    return (
+      <BuildingView
+        job={job}
+        missing={!job && queueChecked}
+        brief={brief}
+        sourceNames={sources.map((source) => source.name)}
+        pictures={images.map((image) => image.src)}
+        styleLabel={STYLE_OPTIONS.find((option) => option.id === style)?.label}
+        lengthLabel={LENGTH_OPTIONS.find((option) => option.id === length)?.label}
+        onStartOver={reset}
+      />
     );
   }
 
@@ -582,23 +723,176 @@ export function PresentationWorkspace() {
 
             <RunButton
               onClick={handleBuild}
-              disabled={!hasInput || building || reading}
-              icon={building || reading ? <Loader2 size={14} className="animate-spin" /> : <PresentationIcon size={14} />}
+              disabled={!hasInput || starting || reading}
+              icon={starting || reading ? <Loader2 size={14} className="animate-spin" /> : <PresentationIcon size={14} />}
             >
-              {building
-                ? "Designing your presentation…"
+              {starting
+                ? "Sending your files…"
                 : reading
                   ? "Reading your files…"
                   : hasInput
                     ? "Build the presentation"
                     : "Add files or describe the presentation to begin"}
             </RunButton>
-            {building && job && <JobProgressBar percent={job.progress} />}
           </>
         )}
       </div>
       <Lightbox src={previewSrc} onClose={() => setPreviewSrc(null)} />
     </div>
+  );
+}
+
+/**
+ * The deck's page while it's being built: what's happening and how far
+ * along, placeholders where the slides will appear, and what was asked for.
+ *
+ * Shown from the moment Build is pressed. Before, the form stayed up with a
+ * spinner in its button, which read as nothing having happened yet. The
+ * build runs in the queue, so leaving is fine, and the page says so.
+ */
+function BuildingView({
+  job,
+  missing,
+  brief,
+  sourceNames,
+  pictures,
+  styleLabel,
+  lengthLabel,
+  onStartOver,
+}: {
+  job: QueuedJob | null;
+  /** Opened on a link to a job that isn't in the queue any more. */
+  missing: boolean;
+  brief: string;
+  sourceNames: string[];
+  pictures: string[];
+  styleLabel?: string;
+  lengthLabel?: string;
+  onStartOver: () => void;
+}) {
+  const active = Boolean(job && (job.status === "queued" || job.status === "running"));
+  const now = useNow(active);
+  const status = job ? describeJob(job, now).label : "Starting…";
+  // Only what this tab still holds: after a reload the request itself is gone.
+  const asked = [
+    sourceNames.length ? `${sourceNames.length} file${sourceNames.length === 1 ? "" : "s"}` : null,
+    pictures.length ? `${pictures.length} picture${pictures.length === 1 ? "" : "s"}` : null,
+    styleLabel ? `Style: ${styleLabel}` : null,
+    lengthLabel ? `Length: ${lengthLabel}` : null,
+  ].filter(Boolean);
+  const hasSummary = Boolean(brief.trim() || sourceNames.length || pictures.length);
+
+  if (missing) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+        <PresentationIcon size={26} className="text-gold/80" />
+        <div className="space-y-1.5">
+          <h1 className="text-lg font-semibold text-cream">This presentation isn&apos;t building any more</h1>
+          <p className="mx-auto max-w-sm text-[13px] leading-relaxed text-muted">
+            It may have finished a while ago. Finished decks are kept in History, under Marketing Kits.
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-2">
+          <Link
+            href="/history?view=kits"
+            className="rounded-lg border border-gold/30 bg-gold/10 px-4 py-2 text-[13px] font-medium text-gold transition-colors hover:bg-gold/15"
+          >
+            Open History
+          </Link>
+          <button
+            type="button"
+            onClick={onStartOver}
+            className="rounded-lg border border-white/10 bg-surface-raised px-4 py-2 text-[13px] font-medium text-cream transition-colors hover:border-white/20"
+          >
+            Make a new one
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-7">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <section className="space-y-3">
+          <div className="flex items-start gap-3">
+            <Loader2 size={18} className="mt-1 shrink-0 animate-spin text-gold" />
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-cream">Building your presentation</h1>
+              <p className="mt-0.5 text-[12px] text-muted" role="status">
+                {status}
+              </p>
+            </div>
+          </div>
+          {job && <JobProgressBar percent={job.progress} />}
+          <p className="text-[11.5px] leading-relaxed text-faint">
+            You can leave this page. It keeps building in your queue, and opens right here when it&apos;s ready.
+          </p>
+        </section>
+
+        {/* Where the slides will be. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-hidden>
+          {Array.from({ length: 6 }, (_, index) => (
+            <div
+              key={index}
+              className="aspect-video animate-pulse rounded-lg border border-white/10 bg-white/[0.04]"
+              style={{ animationDelay: `${index * 120}ms` }}
+            />
+          ))}
+        </div>
+
+        {hasSummary && (
+          <section className="space-y-2 rounded-xl border border-white/10 bg-surface-raised/50 p-4">
+            <p className="text-[12px] font-semibold text-cream">What you asked for</p>
+            {brief.trim() && <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-muted">{brief.trim()}</p>}
+            {asked.length > 0 && <p className="text-[11px] text-faint">{asked.join(" · ")}</p>}
+            {pictures.length > 0 && (
+              <ul className="flex flex-wrap gap-1.5 pt-1">
+                {pictures.slice(0, 12).map((src, index) => (
+                  <li key={index} className="h-10 w-10 overflow-hidden rounded-md border border-white/10 bg-white">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- local data URI preview */}
+                    <img src={src} alt="" className="h-full w-full object-cover" />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A slim line above the deck: when it was made, and for a teammate's deck,
+ * who made it and that it can only be looked at. In the viewer's own time
+ * zone and language, e.g. "Made on 26 Nov 2026, 10:29 am".
+ */
+function DeckInfoBar({ createdAt, userName, isOwn }: { createdAt: string; userName?: string; isOwn: boolean }) {
+  const made = new Date(createdAt);
+  const when = Number.isNaN(made.getTime())
+    ? null
+    : made.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  return (
+    <p className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-b border-white/[0.06] px-4 py-1.5 text-[11px] text-faint sm:px-5">
+      <CalendarClock size={12} className="shrink-0" aria-hidden />
+      {when && (
+        <span>
+          Made on <time dateTime={made.toISOString()} className="text-muted">{when}</time>
+        </span>
+      )}
+      {!isOwn && (
+        <>
+          {userName && (
+            <span>
+              by <span className="text-muted">{userName}</span>
+            </span>
+          )}
+          <span aria-hidden>·</span>
+          <span className="text-gold">View only, changes here aren&apos;t saved</span>
+        </>
+      )}
+    </p>
   );
 }
 
