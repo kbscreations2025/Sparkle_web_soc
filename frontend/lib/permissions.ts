@@ -15,8 +15,13 @@ function grantMatches(grant: string, required: string): boolean {
   return grantParts.every((part, i) => part === "*" || part === requiredParts[i]);
 }
 
-export function can(user: ApiUser | null, required: string | undefined): boolean {
+/**
+ * `required` may be a list, meaning any one of them is enough: the backend's
+ * `requireAnyPermission`, for a tool more than one grant opens.
+ */
+export function can(user: ApiUser | null, required: string | readonly string[] | undefined): boolean {
   if (!required) return true; // an item with no permission is open to everyone
+  if (typeof required !== "string") return required.some((grant) => can(user, grant));
   if (!user) return false;
   if (user.isSuperAdmin) return true;
   /*

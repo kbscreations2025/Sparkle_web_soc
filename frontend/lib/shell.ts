@@ -13,6 +13,15 @@ export function homeFor(user: ApiUser): string {
   return user.isSuperAdmin ? ADMIN_ROOT : DASHBOARD_ROOT;
 }
 
+/**
+ * A shared Live Lookbook (`/l/<slug>`): the one page anyone may open without
+ * signing in. Exactly one segment under /l, nothing more, so this can't be
+ * stretched to cover another route.
+ */
+export function isPublicPath(pathname: string): boolean {
+  return /^\/l\/[^/]+\/?$/.test(pathname);
+}
+
 export function isAdminPath(pathname: string): boolean {
   return pathname === ADMIN_ROOT || pathname.startsWith(`${ADMIN_ROOT}/`);
 }

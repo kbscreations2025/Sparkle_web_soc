@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import type { ApiUser } from "@/lib/api";
 import { SESSION_STATE_HEADER, USER_HEADER, encodeUser } from "@/lib/session-header";
 import { SESSION_CHECK_TIMEOUT_MS, readSessionResponse, timeoutSignal, type SessionCheck } from "@/lib/session-check";
-import { LOGIN_PATH, homeFor, isWrongShell } from "@/lib/shell";
+import { LOGIN_PATH, homeFor, isPublicPath, isWrongShell } from "@/lib/shell";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
 
@@ -58,6 +58,13 @@ function redirectTo(path: string, request: NextRequest) {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // A shared Live Lookbook is for anyone with the link, signed in or not, and
+  // a signed-in visitor isn't sent off to their own shell either. No session
+  // check: the page never uses one. `allow` with no user also strips any
+  // user header the request arrived with, so none can be smuggled through.
+  if (isPublicPath(pathname)) return allow(request, null);
+
   const isLoginPage = pathname === LOGIN_PATH;
   const hasSessionCookies = Boolean(
     request.cookies.get("access_token") || request.cookies.get("refresh_token")

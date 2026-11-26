@@ -1,4 +1,5 @@
 import type { DeckCategory } from "./affinity";
+import type { LookbookDesign } from "./lookbook/types";
 import { SESSION_CHECK_TIMEOUT_MS, readSessionResponse, timeoutSignal, type SessionCheck } from "./session-check";
 import { reportReachable } from "./connection";
 
@@ -2654,4 +2655,162 @@ export function deleteHistoryItem(id: string) {
  */
 export function clearLocalSession() {
   return apiRequest("/api/auth/session/clear", { method: "POST" });
+}
+
+// ── Live Lookbook ───────────────────────────────────────────────────────────
+
+export type LookbookStatus = "draft" | "published";
+
+export type LookbookSummary = {
+  id: string;
+  title: string;
+  /** The public link's name: the page lives at /l/<slug>. */
+  slug: string | null;
+  status: LookbookStatus;
+  /** Published, and edited since: the client still sees the last published version. */
+  hasUnpublishedChanges: boolean;
+  coverUrl: string | null;
+  publishedAt: string | null;
+  firstPublishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Lookbook = LookbookSummary & {
+  /** The working copy. Open it with `normalizeDesign` (lib/lookbook/defaults.ts). */
+  design: unknown;
+  /** The save this copy is, sent back with the next save (see `saveLookbook`). */
+  revision: number;
+  /** Earlier link names that still lead here. */
+  previousSlugs: string[];
+};
+
+/** One of the person's Image to Video results, for the Turntable card. */
+export type LookbookVideo = {
+  id: string;
+  url: string;
+  posterUrl: string | null;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  createdAt: string;
+};
+
+export function listLookbooks() {
+  return apiRequest<{ lookbooks?: LookbookSummary[] }>("/api/lookbooks");
+}
+
+export function fetchLookbook(id: string) {
+  return apiRequest<{ lookbook?: Lookbook }>(`/api/lookbooks/${id}`);
+}
+
+/**
+ * The design travels as a JSON string, not as nested JSON: requireAuth turns
+ * any body string starting with "stored:" into image bytes, and a page's own
+ * text could begin that way (see backend/src/services/lookbookDesign.js).
+ */
+export function createLookbook(body: { title: string; design: LookbookDesign }) {
+  return apiRequest<{ lookbook?: Lookbook }>("/api/lookbooks", {
+    method: "POST",
+    body: JSON.stringify({ title: body.title, design: JSON.stringify(body.design) }),
+  });
+}
+
+/**
+ * The builder's autosave. `revision` is the save it last saw: if the page
+ * was saved since from somewhere else, this answers `code: "stale"` with the
+ * newer `revision` rather than overwriting that work.
+ */
+export function saveLookbook(id: string, body: { title?: string; design?: LookbookDesign; revision: number }) {
+  return apiRequest<{ lookbook?: LookbookSummary & { revision: number }; revision?: number }>(`/api/lookbooks/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...(body.title !== undefined ? { title: body.title } : {}),
+      ...(body.design !== undefined ? { design: JSON.stringify(body.design) } : {}),
+      revision: body.revision,
+    }),
+  });
+}
+
+/**
+ * Whether a link name is free. Reads only; nothing is claimed until
+ * `renameLookbookSlug`. The server's `available` arrives as `free`, since
+ * `ApiResult` already has an `available` (credits, a number).
+ */
+export async function checkLookbookSlug(slug: string, id?: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ slug });
+  if (id) query.set("id", id);
+  const result = await apiRequest<{ slug: string; reason?: "too_short" | "taken"; suggestion?: string }>(`/api/lookbooks/slug-check?${query}`, {
+    signal,
+  });
+  return { ...result, free: (result as unknown as { available?: unknown }).available === true };
+}
+
+/** Renames the link. A taken name answers `code: "slug_taken"` with a `suggestion`. */
+export function renameLookbookSlug(id: string, slug: string) {
+  return apiRequest<{ lookbook?: Lookbook; changedSlugs?: string[]; suggestion?: string }>(`/api/lookbooks/${id}/slug`, {
+    method: "POST",
+    body: JSON.stringify({ slug }),
+  });
+}
+
+export function publishLookbook(id: string) {
+  return apiRequest<{ lookbook?: Lookbook }>(`/api/lookbooks/${id}/publish`, { method: "POST" });
+}
+
+export function unpublishLookbook(id: string) {
+  return apiRequest<{ lookbook?: Lookbook }>(`/api/lookbooks/${id}/unpublish`, { method: "POST" });
+}
+
+export function duplicateLookbook(id: string) {
+  return apiRequest<{ lookbook?: Lookbook }>(`/api/lookbooks/${id}/duplicate`, { method: "POST" });
+}
+
+export function deleteLookbook(id: string) {
+  return apiRequest<{ deleted?: boolean; changedSlugs?: string[] }>(`/api/lookbooks/${id}`, { method: "DELETE" });
+}
+
+export function fetchLookbookVideos(before?: string | null) {
+  const query = new URLSearchParams({ limit: "24" });
+  if (before) query.set("before", before);
+  return apiRequest<{ items?: LookbookVideo[]; nextCursor?: string | null }>(`/api/lookbooks/videos?${query}`);
+}
+
+export type LookbookUpload = { kind: "image" | "video"; url: string; thumbnailUrl?: string | null; posterUrl?: string | null; width: number | null; height: number | null; alpha?: boolean };
+
+/**
+ * Uploads one photo or clip, exactly as it is on the device: no resizing, no
+ * re-encoding. The public page shows what the photographer delivered.
+ *
+ * Sent as a multipart file part, in the layout the backend's multipart
+ * middleware reads (backend/src/middleware/inlineImages.js), through
+ * XMLHttpRequest rather than fetch so the builder can show progress on a
+ * large original.
+ */
+export function uploadLookbookMedia(id: string, file: File, onProgress?: (fraction: number) => void) {
+  return new Promise<ApiResult<{ media?: LookbookUpload }>>((resolve) => {
+    const form = new FormData();
+    form.append("__json", JSON.stringify({ file: "__file:0" }));
+    form.append("file0", file, file.name || "upload");
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BACKEND_URL}/api/lookbooks/${id}/media`);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded / event.total);
+    };
+    xhr.onload = () => {
+      reportReachable(true);
+      try {
+        resolve(JSON.parse(xhr.responseText));
+      } catch {
+        resolve({ status: "error", code: "bad_response", message: `The upload failed (${xhr.status}).` } as ApiResult<{ media?: LookbookUpload }>);
+      }
+    };
+    xhr.onerror = () => {
+      reportReachable(false);
+      resolve({ status: "error", code: "network_error", message: "Couldn't reach Sparkle. Check your connection and try again." } as ApiResult<{ media?: LookbookUpload }>);
+    };
+    xhr.send(form);
+  });
 }

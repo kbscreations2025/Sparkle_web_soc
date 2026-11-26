@@ -28,6 +28,8 @@ const jobRoutes = require("./routes/jobs");
 const auditLogRoutes = require("./routes/auditLog");
 const creditRoutes = require("./routes/credits");
 const orgMemberRoutes = require("./routes/orgMembers");
+const lookbookRoutes = require("./routes/lookbooks");
+const publicLookbookRoutes = require("./routes/publicLookbooks");
 const { initSocket } = require("./socket");
 const { startQueueEventsBridge, closeQueue } = require("./queue");
 const { closeRedisConnections, isRedisReady } = require("./redis");
@@ -71,6 +73,13 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/cleaning", cleaningRoutes);
 app.use("/api/chat-to-edit", chatToEditRoutes);
 app.use("/api/text-to-image", textToImageRoutes);
+// Both Live Lookbook routers go ahead of the sketch tools' router below. That
+// one is mounted on all of /api and applies requireAuth to every request
+// passing through it, so anything mounted after it is behind a login. The
+// public page read must not be, and the builder's routes would otherwise
+// check the session twice.
+app.use("/api/public/lookbooks", publicLookbookRoutes);
+app.use("/api/lookbooks", lookbookRoutes);
 // One router for the three sketch tools — each owns a path under it.
 app.use("/api", sketchToolRoutes);
 app.use("/api/lifestyle", lifestyleRoutes);

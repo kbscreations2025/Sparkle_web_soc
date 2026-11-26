@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { Wand2, Film, Type, PenTool, PenLine, Image as ImageIcon, ScanText, Newspaper, MessageSquare, Leaf, History, Gem, Package, type LucideIcon } from "lucide-react";
+import { Wand2, Film, Type, PenTool, PenLine, Image as ImageIcon, ScanText, Newspaper, MessageSquare, Leaf, History, Package, BookOpenText, type LucideIcon } from "lucide-react";
 import { useAuth } from "./auth-context";
 import { can } from "./permissions";
+import { LOOKBOOK_PERMISSION } from "./lookbook/access";
 import { NEW_CLEANING_MODELS, TESTING_CLEANING_MODELS } from "./api";
 
 /** New Cleaning/High-Res Image Generation's model labels — what a run recorded when it was made on that page's GPT models rather than Default's Gemini ones. */
@@ -17,8 +18,8 @@ export type NavItem = {
   icon: LucideIcon;
   /** An item without an `href` has no page yet — give it one to make it navigable. */
   href?: string;
-  /** Hidden unless the user's grants match. Omitted means visible to everyone. */
-  permission?: string;
+  /** Hidden unless the user's grants match. Omitted means visible to everyone. A list means any one of them. */
+  permission?: string | readonly string[];
 };
 
 /** A tool as the dashboard grid shows it: the nav item plus its card artwork. */
@@ -32,6 +33,11 @@ export type Tool = NavItem & {
    * tool's colour and the full name on hover, so it is never a guess.
    */
   shortLabel: string;
+  /**
+   * False for a tool that makes no History entries (Live Lookbook builds
+   * pages, not results), so History doesn't offer a filter that finds nothing.
+   */
+  inHistory?: boolean;
 };
 
 /**
@@ -154,6 +160,18 @@ export const TOOLS: Tool[] = [
     image: "/dashboard/product-background.jpg",
     href: "/product-background",
     permission: "tool.product_background.run",
+  },
+  {
+    id: "live_lookbook",
+    label: "Live Lookbook",
+    shortLabel: "Look",
+    icon: BookOpenText,
+    description: "Build an interactive page for your collection and share it as a link",
+    image: "/dashboard/live-lookbook.svg",
+    href: "/live-lookbook",
+    // Its own grant, or Marketing Kit's: the backend accepts either (routes/lookbooks.js).
+    permission: LOOKBOOK_PERMISSION,
+    inHistory: false,
   },
 ];
 
@@ -303,8 +321,7 @@ export function conversationHref(
 
 /**
  * Announced on the dashboard but not built. No permission and no nav pill:
- * granting one would reveal a pill that leads nowhere.
+ * granting one would reveal a pill that leads nowhere. Empty for now: the
+ * "Virtual Try On" card that sat here became Live Lookbook, a working tool.
  */
-export const UPCOMING_TOOLS: Tool[] = [
-  { id: "virtual_try_on", label: "Virtual Try On", shortLabel: "Try On", icon: Gem, description: "See jewellery on a model instantly" },
-];
+export const UPCOMING_TOOLS: Tool[] = [];

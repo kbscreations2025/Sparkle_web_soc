@@ -19,6 +19,9 @@ const TOOLS = [
   { key: "marketing_kit", label: "Marketing Kit" },
   { key: "chat_to_edit", label: "Chat to Edit" },
   { key: "product_background", label: "Product Background" },
+  // Builds pages rather than running a model, so it has no generations and
+  // costs no credits. Marketing Kit's grant opens it too (routes/lookbooks.js).
+  { key: "live_lookbook", label: "Live Lookbook" },
 ];
 
 const TOOL_KEYS = TOOLS.map((tool) => tool.key);

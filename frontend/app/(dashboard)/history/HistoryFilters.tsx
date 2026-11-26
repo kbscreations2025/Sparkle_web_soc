@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils";
  * every filter beside it.
  */
 
-const TOOL_OPTIONS = TOOLS.map((t) => ({ id: t.id, label: t.label }));
+// Only tools that leave results behind: a filter for one that makes none would always come up empty.
+const TOOL_OPTIONS = TOOLS.filter((t) => t.inHistory !== false).map((t) => ({ id: t.id, label: t.label }));
 
 /**
  * One half of the segmented History / Marketing Kits toggle.

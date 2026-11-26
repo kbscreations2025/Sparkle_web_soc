@@ -89,6 +89,13 @@ type PickerProps = {
    * box's own upload handler treats a pick exactly as an upload.
    */
   onFiles: (files: File[]) => void;
+  /**
+   * Library picks as they are, stored urls and all, instead of downloaded
+   * files. For a caller that only points at a picture rather than sending
+   * it anywhere (Live Lookbook): nothing is fetched, and nothing is uploaded
+   * again. Files off the disk still arrive through `onFiles`.
+   */
+  onItems?: (items: LibraryItem[]) => void;
   /** How many more the box takes. Unset is no limit of its own (one pick still stops at `MAX_PICK`). */
   room?: number;
 };
@@ -108,7 +115,7 @@ export function LibraryPicker({ open, ...props }: PickerProps & { open: boolean 
   return createPortal(<LibraryDialog {...props} />, document.body);
 }
 
-function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
+function LibraryDialog({ onClose, onFiles, onItems, room }: PickerProps) {
   const { user } = useAuth();
   const limit = Math.max(1, Math.min(room ?? MAX_PICK, MAX_PICK));
 
@@ -348,6 +355,11 @@ function LibraryDialog({ onClose, onFiles, room }: PickerProps) {
 
   async function addSelected() {
     if (selected.length === 0 || adding !== null) return;
+    if (onItems) {
+      onItems(selected);
+      onClose();
+      return;
+    }
     const controller = new AbortController();
     downloads.current = controller;
     setAdding(0);

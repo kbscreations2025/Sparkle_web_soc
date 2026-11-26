@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { usePathname, useRouter } from "next/navigation";
 import { checkCurrentUser, logout as apiLogout, clearLocalSession, type ApiUser } from "./api";
 import { acquireSocket, releaseSocket } from "./socket";
-import { LOGIN_PATH } from "./shell";
+import { LOGIN_PATH, isPublicPath } from "./shell";
 import { clearPageCache } from "./pageCache";
 
 type AuthContextValue = {
@@ -67,7 +67,9 @@ export function AuthProvider({
   // away when the connection or the tab comes back. Before, any failure here
   // was a trip to the login page.
   useEffect(() => {
-    if (user || loggingOut || pathname === LOGIN_PATH) return;
+    // A shared Live Lookbook is opened by clients with no account: no session
+    // to look for, and no login page to send them to.
+    if (user || loggingOut || pathname === LOGIN_PATH || isPublicPath(pathname)) return;
 
     let cancelled = false;
     let checking = false;
