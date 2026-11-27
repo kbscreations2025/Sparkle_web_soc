@@ -3,6 +3,7 @@ const sharp = require("sharp");
 const { registerJobHandler } = require("./registry");
 const { runTextJob, ModelRefusedError, inlineData } = require("./textRunner");
 const kits = require("../services/marketingKits");
+const MarketingKit = require("../models/marketingKit");
 const gemini = require("../providers/gemini");
 const {
   LAYOUTS,
@@ -13,6 +14,11 @@ const {
   buildPresentationPrompt,
   buildPresentationEditPrompt,
   PRESENTATION_RESPONSE_SCHEMA,
+  PICTURE_ROLES,
+  REDESIGN_PALETTES,
+  REDESIGN_SYSTEM_INSTRUCTION,
+  buildRedesignPlanPrompt,
+  REDESIGN_PLAN_SCHEMA,
 } = require("../prompts/presentation");
 
 /**
@@ -27,6 +33,8 @@ const {
 
 const PRESENTATION_JOB = "marketingKit.presentation";
 const PRESENTATION_EDIT_JOB = "marketingKit.presentationEdit";
+/** A redesigned PowerPoint's description read into an arrangement plan — words untouched (see below). */
+const PRESENTATION_REDESIGN_JOB = "marketingKit.presentationRedesign";
 
 const WRITING_MODEL = "gemini-2.5-pro";
 const KIT_MODEL = { provider: "google", modelId: WRITING_MODEL, modelLabel: gemini.labelFor(WRITING_MODEL) };
@@ -253,4 +261,130 @@ registerJobHandler(PRESENTATION_EDIT_JOB, (context) => {
   });
 });
 
-module.exports = { PRESENTATION_JOB, PRESENTATION_EDIT_JOB };
+/*
+ * ── Redesign plan ───────────────────────────────────────────────────────────
+ * A redesigned PowerPoint (frontend lib/pptxRedesign.ts) and a description of
+ * how it should be arranged, read into a plan: which slides open a section,
+ * what each picture is for, the colours. The browser lays the deck out from
+ * the plan and saves it, as it does after a chat edit. The plan has no field
+ * for words, so the designer's text is never at the model's mercy.
+ */
+
+/** The longest side of each picture the planning model sees: enough to tell a pencil sketch from a render. */
+const PLAN_PICTURE_SIDE = 384;
+const PLAN_FETCH_TIMEOUT_MS = 20 * 1000;
+/** Stored pictures fetched at once while preparing the model's copies. */
+const PLAN_FETCHES_AT_ONCE = 6;
+
+/**
+ * A small copy of one of the deck's stored pictures, for the model. Drawings
+ * on transparent backgrounds are put on white first, the way they look on a
+ * page; a transparent area read as black would hide the sketch entirely.
+ */
+async function storedCopyForModel(url) {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(PLAN_FETCH_TIMEOUT_MS) });
+    if (!response.ok) return null;
+    const buffer = await sharp(Buffer.from(await response.arrayBuffer()), { failOn: "none" })
+      .flatten({ background: "#ffffff" })
+      .resize({ width: PLAN_PICTURE_SIDE, height: PLAN_PICTURE_SIDE, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    return { mimeType: "image/jpeg", base64: buffer.toString("base64") };
+  } catch {
+    // One picture the model can't see costs it one hint, not the whole plan.
+    return null;
+  }
+}
+
+/** `fn` over `items`, at most `limit` at a time, results in order. */
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await fn(items[index]);
+      }
+    })
+  );
+  return results;
+}
+
+/** The model's plan, rebuilt field by field: nothing in the answer is trusted to be there or of the right type. */
+function readRedesignPlan(raw, pictureIds) {
+  const numbers = (value) => (Array.isArray(value) ? value.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n <= 1000) : []);
+  const roles = {};
+  for (const entry of Array.isArray(raw.pictures) ? raw.pictures : []) {
+    const id = text(entry?.id, 40);
+    if (pictureIds.has(id) && PICTURE_ROLES.includes(entry.role)) roles[id] = entry.role;
+  }
+  return {
+    plan: {
+      conceptSlides: [...new Set(numbers(raw.conceptSlides))],
+      roles,
+      palette: REDESIGN_PALETTES.includes(raw.palette) ? raw.palette : "ivory",
+      conceptStyle: raw.conceptStyle === "dark" ? "dark" : "light",
+      cardsPerPage: Math.min(8, Math.max(1, Math.round(Number(raw.cardsPerPage) || 8))),
+      order: [...new Set(numbers(raw.order))],
+    },
+    reply: text(raw.reply, 1000) || "Done — the slides are arranged as you described.",
+  };
+}
+
+registerJobHandler(PRESENTATION_REDESIGN_JOB, async (context) => {
+  const { data, job } = context;
+  // The deck's own stored pictures, read from its record: never addresses a client sent.
+  const kit = await MarketingKit.findOne({ _id: data.kitId, tenantId: job.tenantId, userId: job.userId, deletedAt: null })
+    .select("presentation.images")
+    .lean();
+  if (!kit?.presentation) throw new ModelRefusedError("That deck could not be found.", "not_found");
+  const stored = kit.presentation.images ?? [];
+
+  // Each stored picture once, with every place in the deck that shows it.
+  const placesOf = new Map();
+  for (const { id, piece } of data.pictures) {
+    if (!stored[piece]) continue;
+    placesOf.set(piece, [...(placesOf.get(piece) ?? []), id]);
+  }
+  const pieces = [...placesOf.keys()];
+  const copies = await mapLimit(pieces, PLAN_FETCHES_AT_ONCE, (piece) => storedCopyForModel(stored[piece].url));
+  const prompt = buildRedesignPlanPrompt({ summary: data.summary, current: data.current, instruction: data.instruction, history: data.history });
+  const pictureIds = new Set(data.pictures.map((picture) => picture.id));
+
+  return runTextJob({
+    ...context,
+    tool: "marketing_kit",
+    modelId: WRITING_MODEL,
+    systemInstruction: REDESIGN_SYSTEM_INSTRUCTION,
+    responseSchema: REDESIGN_PLAN_SCHEMA(),
+    thinkingBudget: 2048,
+    // A role for every picture of a long deck, and a short reply.
+    maxOutputTokens: 8192,
+    temperature: 0.3,
+    buildParts: () => [
+      { text: prompt },
+      ...(pieces.length ? [{ text: "THE PICTURES — each stored picture once, with the ids of the places it appears:" }] : []),
+      ...pieces.flatMap((piece, i) => (copies[i] ? [{ text: `PICTURE ${placesOf.get(piece).join(", ")}:` }, inlineData(copies[i])] : [])),
+    ],
+    promptForHistory: prompt,
+    userPrompt: data.instruction,
+    historyParams: { kitId: data.kitId, kitKind: "presentation", isEdit: true },
+    parse: ({ text: output }) => readRedesignPlan(parseJson(output), pictureIds),
+    persist: async ({ parsed, data, dbUser, generationId }) => {
+      const plan = { ...parsed.plan, id: String(new mongoose.Types.ObjectId()) };
+      const saved = await kits.savePresentationPlan({
+        dbUser,
+        kitId: data.kitId,
+        plan,
+        instruction: data.instruction,
+        reply: parsed.reply,
+        generationId,
+      });
+      return { result: { plan, reply: parsed.reply }, kitId: data.kitId, kitSaved: Boolean(saved) };
+    },
+  });
+});
+
+module.exports = { PRESENTATION_JOB, PRESENTATION_EDIT_JOB, PRESENTATION_REDESIGN_JOB };

@@ -24,6 +24,7 @@ const KIT_KIND_BY_JOB_TYPE: Record<string, MarketingKitKind> = {
   "marketingKit.onModel": "on_model",
   "marketingKit.presentation": "presentation",
   "marketingKit.presentationEdit": "presentation",
+  "marketingKit.presentationRedesign": "presentation",
 };
 
 /**

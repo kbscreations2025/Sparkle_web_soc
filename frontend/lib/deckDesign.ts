@@ -127,6 +127,8 @@ export type DesignSlide = {
   backgroundImage?: SlideBackgroundImage | null;
   /** Which category (chapter) the page belongs to — shared by its cover and its product pages. */
   chapter?: string;
+  /** Speaker notes, carried over from an uploaded PowerPoint and written back into the PPTX. */
+  notes?: string;
   elements: DesignElement[];
 };
 
@@ -142,7 +144,13 @@ export type DeckBrand = {
   bodyFont?: string;
 };
 
-export type DeckDesign = { version: 1; slides: DesignSlide[]; brand?: DeckBrand };
+export type DeckDesign = {
+  version: 1;
+  slides: DesignSlide[];
+  brand?: DeckBrand;
+  /** A redesigned PowerPoint's: the arrangement plan it was laid out from (lib/pptxRedesign.ts). */
+  planId?: string;
+};
 
 /** Where the brand is remembered between decks, in this browser. */
 export const BRAND_STORAGE_KEY = "sparkle.deckBrand";

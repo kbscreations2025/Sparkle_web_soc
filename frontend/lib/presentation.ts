@@ -218,7 +218,7 @@ function lineCount(text: string, width: number, size: number, font: string) {
 }
 
 /** The largest size from `max` down to `min` at which `text` fits the box. */
-function fitSize(text: string, width: number, height: number, max: number, min: number, font: string, lineHeight: number) {
+export function fitSize(text: string, width: number, height: number, max: number, min: number, font: string, lineHeight: number) {
   for (let size = max; size > min; size -= 1) {
     if (lineCount(text, width, size, font) * size * lineHeight <= height) return size;
   }
@@ -226,7 +226,7 @@ function fitSize(text: string, width: number, height: number, max: number, min: 
 }
 
 /** How tall `text` actually is at `size` — for stacking boxes under each other. */
-function heightAt(text: string, width: number, size: number, font: string, lineHeight: number) {
+export function heightAt(text: string, width: number, size: number, font: string, lineHeight: number) {
   return Math.ceil(lineCount(text, width, size, font) * size * lineHeight) + 4;
 }
 

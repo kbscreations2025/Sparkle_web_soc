@@ -107,6 +107,7 @@ export async function exportDesignPptx({
   for (const designSlide of design.slides) {
     const slide = deck.addSlide();
     slide.background = { color: hex(designSlide.background) };
+    if (designSlide.notes) slide.addNotes(designSlide.notes);
 
     // The background picture first, so everything else lands on top of it.
     const backdrop = designSlide.backgroundImage;

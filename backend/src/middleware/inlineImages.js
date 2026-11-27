@@ -22,10 +22,16 @@ const { isOwnPublicUrl } = require("../storage/ownUrl");
 
 /** Per file. Matches the JSON body limit these images used to travel inside. */
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
+/**
+ * Files in one request. A redesigned PowerPoint sends every picture of the
+ * deck at once (backend routes/marketingKit.js allows 250), where every other
+ * route sends a few dozen at most.
+ */
+const MAX_FILES = 260;
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_BYTES, files: 40, fieldSize: 5 * 1024 * 1024 },
+  limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES, fieldSize: 5 * 1024 * 1024 },
 }).any();
 
 const FILE_PLACEHOLDER = /^__file:(\d+)$/;

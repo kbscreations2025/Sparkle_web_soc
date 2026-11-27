@@ -339,6 +339,89 @@ async function savePresentationKit({ dbUser, kitId, model, generationId = null, 
   return toPublicKit(kit);
 }
 
+/** How a redesigned PowerPoint is labelled where a kit names the model that made it. No model did. */
+const REDESIGN_MODEL = { provider: "sparkle", modelId: "pptx-redesign", modelLabel: "Layout redesign" };
+/** Pictures uploaded at once while saving a redesign — a deck can carry a hundred. */
+const REDESIGN_UPLOADS_AT_ONCE = 6;
+
+/**
+ * A PowerPoint redesigned in the browser (frontend lib/pptxRedesign.ts): the
+ * person's own slides, every word as they wrote it, laid out in the house
+ * style. Nothing was generated, so there is no run behind it, and the kit is
+ * saved complete, design and all, in one go.
+ *
+ * The design places pictures by their position in `images`, so they are
+ * stored in exactly that order.
+ */
+async function savePresentationRedesign({ dbUser, title, fileName, images, design, outline, text, source, instruction }) {
+  if (JSON.stringify(design).length > MAX_DESIGN_BYTES) {
+    const error = new Error("This deck is too large to save");
+    error.code = "design_too_large";
+    throw error;
+  }
+
+  const kitId = new mongoose.Types.ObjectId();
+  const common = { tenantId: dbUser.tenantId, userId: dbUser._id, kitId };
+  const storedImages = new Array(images.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(REDESIGN_UPLOADS_AT_ONCE, images.length) }, async () => {
+      while (next < images.length) {
+        const index = next++;
+        const image = images[index];
+        storedImages[index] = await storeImage({ ...common, role: "upload", image, fileName: image.label || null });
+      }
+    })
+  );
+
+  const kit = await createKit(dbUser, kitId, {
+    kind: "presentation",
+    title: String(title || "Presentation").slice(0, 300),
+    status: "ready",
+    model: REDESIGN_MODEL,
+    presentation: {
+      images: storedImages,
+      imageNotes: images.map((image) => String(image.label || "")),
+      sources: [{ name: String(fileName || "").slice(0, 300), kind: "PowerPoint", text: String(text || "").slice(0, 60_000) }],
+      // The description it was redesigned from, if one was given; its plan arrives later (PRESENTATION_REDESIGN_JOB).
+      brief: String(instruction || "").slice(0, 4000),
+      // How the editor knows its chat arranges rather than rewrites: the words here are kept exactly.
+      style: "redesign",
+      length: "auto",
+      outline,
+      originalOutline: outline,
+      design,
+      redesign: source ? { source, plan: null } : null,
+      slideCount: design.slides.length,
+      messages: [],
+    },
+  });
+
+  return toPublicKit(kit);
+}
+
+/**
+ * A redesign plan a description was read into (jobs/presentation.js), stored
+ * with the deck it arranges, and both sides of the exchange added to its
+ * thread. The browser lays the deck out from it and saves the design. A deck
+ * opened later with a plan its design wasn't laid out from catches up then.
+ */
+async function savePresentationPlan({ dbUser, kitId, plan, instruction, reply, generationId = null }) {
+  const kit = await MarketingKit.findOne({ _id: kitId, tenantId: dbUser.tenantId, userId: dbUser._id, deletedAt: null });
+  if (!kit?.presentation?.redesign) return null;
+
+  kit.presentation.redesign = { ...kit.presentation.redesign, plan };
+  kit.markModified("presentation.redesign");
+  kit.presentation.messages.push(
+    { role: "user", text: String(instruction).slice(0, 4000) },
+    { role: "assistant", text: String(reply || "Done.").slice(0, 4000) }
+  );
+  // A deck redesigned without a description has no run behind it until its first one.
+  if (!kit.generationId && generationId) kit.generationId = generationId;
+  await kit.save();
+  return toPublicKit(kit);
+}
+
 /**
  * A chat edit's result: the new outline, and both sides of the exchange for
  * the thread. The design is the client's to lay out and save — it knows which
@@ -458,6 +541,7 @@ function toPublicKit(kit) {
           length: kit.presentation.length,
           outline: kit.presentation.outline ?? null,
           design: kit.presentation.design ?? null,
+          redesign: kit.presentation.redesign ?? null,
           messages: (kit.presentation.messages ?? []).map((message) => ({ role: message.role, text: message.text, at: message.at })),
         }
       : null,
@@ -495,6 +579,7 @@ const LIST_EXCLUDED_FIELDS = [
   "-presentation.outline",
   "-presentation.originalOutline",
   "-presentation.design",
+  "-presentation.redesign",
   "-presentation.sources",
   "-presentation.messages",
   "-presentation.imageNotes",
@@ -659,6 +744,8 @@ module.exports = {
   saveAffinityKit,
   saveCampaignKit,
   savePresentationKit,
+  savePresentationRedesign,
+  savePresentationPlan,
   savePresentationEdit,
   saveKitSafely,
   listKits,

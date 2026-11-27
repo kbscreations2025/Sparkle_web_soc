@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowUp, CalendarClock, Download, FileDown, FileSpreadsheet, FileText, ImageIcon, Loader2, MessageSquare, Presentation as PresentationIcon, RotateCcw, Sparkles, Upload, X } from "lucide-react";
+import { ArrowUp, CalendarClock, Download, FileDown, FileSpreadsheet, FileText, ImageIcon, LayoutTemplate, Loader2, MessageSquare, PenLine, Presentation as PresentationIcon, RotateCcw, Sparkles, Upload, X } from "lucide-react";
 import { ErrorBanner, RunButton } from "@/components/studio/ToolChrome";
 import { Chip } from "@/components/studio/OptionChips";
 import { DeckEditor } from "@/components/studio/deck-editor/DeckEditor";
 import { PrintDeck } from "@/components/studio/deck-editor/PrintDeck";
 import { JobProgressBar } from "@/components/studio/JobProgressBar";
 import { ToolAccessNotice } from "@/components/studio/ToolAccessNotice";
-import { buildPresentation, editPresentation, fetchMarketingKit, updateMarketingKit, type QueuedJob } from "@/lib/api";
+import { buildPresentation, editPresentation, fetchMarketingKit, planPresentationRedesign, redesignPresentation, updateMarketingKit, type QueuedJob } from "@/lib/api";
+import { isRedesignSource, layoutRedesign, planningBrief, readPlan, type RedesignPlan, type RedesignSource } from "@/lib/pptxRedesign";
 import { describeJob, useNow } from "@/lib/job-progress";
 import { isDesign, type DeckDesign } from "@/lib/deckDesign";
 import { exportDesignPptx } from "@/lib/exportAffinity";
@@ -53,6 +54,19 @@ const EDIT_SUGGESTIONS = [
   "Turn the key numbers into a stats slide",
 ];
 
+/** The same for a redesigned PowerPoint, whose chat arranges the slides and never touches their words. */
+const ARRANGE_SUGGESTIONS = [
+  "Make the concept slides dark and dramatic",
+  "Use the rough pencil sketches as background drama",
+  "Give each design a slide of its own",
+  "Try blush and rose gold",
+  "Keep the inspiration pictures small in the corner",
+];
+
+/** What the description box suggests, in the words people use for this. */
+const REDESIGN_PLACEHOLDER =
+  "e.g. Slides 1, 2, 6, 10 and 14 are concept slides. Keep the inspiration images small in the top right corner. The R-numbered designs are the main sketches; the rough pencil sketches in the blank spaces are there for drama, so keep them in the background. Leave this empty for the standard redesign.";
+
 type Message = { role: "user" | "assistant"; text: string };
 
 /**
@@ -84,8 +98,21 @@ export function PresentationWorkspace() {
   const [reading, setReading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState("");
+  /** More pictures than a written deck can use. Said only when writing: a redesign uses them all. */
+  const [overLimit, setOverLimit] = useState(false);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  /**
+   * The PowerPoint among the uploads, kept as the file itself: a redesign
+   * reads where everything sits on each slide, which the text and pictures
+   * read out for writing a new deck don't keep.
+   */
+  const [deckFile, setDeckFile] = useState<File | null>(null);
+  /** With a PowerPoint uploaded: keep its slides and redesign them (the default), or write a new deck. */
+  const [mode, setMode] = useState<"redesign" | "write">("redesign");
+  /** What a redesign is doing while it runs: it happens in this tab, in seconds, with no job behind it. */
+  const [redesignStatus, setRedesignStatus] = useState<string | null>(null);
+  const redesignMode = mode === "redesign" && Boolean(deckFile);
 
   // ── run and result
   const [error, setError] = useState("");
@@ -124,6 +151,26 @@ export function PresentationWorkspace() {
    */
   const [deckInfo, setDeckInfo] = useState<{ createdAt: string; userName?: string; isOwn: boolean } | null>(null);
   const readOnly = deckInfo?.isOwn === false;
+  /**
+   * The open deck is a redesigned PowerPoint: its words are the person's own,
+   * kept exactly. Its chat arranges (a description read into a plan) rather
+   * than edits: a chat edit rewrites the outline in the model's own words.
+   */
+  const [redesigned, setRedesigned] = useState(false);
+  /** Said once over a just-redesigned deck: anything in the file that couldn't come across. */
+  const [deckNotice, setDeckNotice] = useState("");
+  /**
+   * A redesigned deck's slides as read from the file, and the plan it is laid
+   * out from: what a description rearranges. No source (a deck redesigned
+   * before these were kept) means no arranging.
+   */
+  const [redesignSource, setRedesignSource] = useState<RedesignSource | null>(null);
+  const [redesignPlan, setRedesignPlan] = useState<RedesignPlan | null>(null);
+  /** A description being read into a plan. */
+  const [planJobId, setPlanJobId] = useState<string | null>(null);
+  /** A just-redesigned deck waiting for its first arrangement: shown once that lands, not before. */
+  const [arranging, setArranging] = useState(false);
+  const canArrange = redesigned && Boolean(redesignSource);
 
   // ── chat
   const [messages, setMessages] = useState<Message[]>([]);
@@ -137,6 +184,7 @@ export function PresentationWorkspace() {
 
   const job = jobId ? (jobs.find((entry) => entry.id === jobId) ?? null) : null;
   const editJob = editJobId ? (jobs.find((entry) => entry.id === editJobId) ?? null) : null;
+  const planJob = planJobId ? (jobs.find((entry) => entry.id === planJobId) ?? null) : null;
   const pieces = useMemo(() => imagesAsPieces(deckImages), [deckImages]);
 
   /** A saved deck reopened from History or the queue, or one a run just built (see builtKitId). */
@@ -154,7 +202,13 @@ export function PresentationWorkspace() {
       }
       const urls = saved.images.map((image) => image.url);
       const savedDesign = isDesign(saved.design) ? saved.design : null;
-      const shownDesign = savedDesign ?? buildPresentationDesign(saved.outline, urls.length);
+      const isOwn = res.kit?.isOwn !== false;
+      const source = saved.style === "redesign" && isRedesignSource(saved.redesign?.source) ? saved.redesign.source : null;
+      const plan = source ? readPlan(saved.redesign?.plan, source) : null;
+      // A plan that landed while the deck was closed (its description finished
+      // after the person left) is laid out now, as it would have been then.
+      const behind = Boolean(source && plan?.id && savedDesign?.planId !== plan.id);
+      const shownDesign = behind ? layoutRedesign(source!, plan).design : (savedDesign ?? buildPresentationDesign(saved.outline, urls.length));
       // Whatever went wrong before this is over: the deck is here.
       setError("");
       setKitId(kitToOpen);
@@ -164,11 +218,13 @@ export function PresentationWorkspace() {
       latestDesign.current = shownDesign;
       setDesignKey((key) => key + 1);
       setMessages(saved.messages.map(({ role, text }) => ({ role, text })));
-      const isOwn = res.kit?.isOwn !== false;
+      setRedesigned(saved.style === "redesign");
+      setRedesignSource(source);
+      setRedesignPlan(plan);
       setDeckInfo({ createdAt: res.kit!.createdAt, userName: res.kit!.userName, isOwn });
       // A first open lays the deck out; kept, so it reopens exactly like this.
       // Only by its owner, the one person allowed to save it.
-      if (!savedDesign && isOwn) updateMarketingKit(kitToOpen, { design: shownDesign });
+      if ((!savedDesign || behind) && isOwn) updateMarketingKit(kitToOpen, { design: shownDesign });
     });
     return () => {
       cancelled = true;
@@ -218,6 +274,7 @@ export function PresentationWorkspace() {
     latestDesign.current = built;
     setDesignKey((key) => key + 1);
     setMessages([]);
+    setRedesigned(false);
     // Just made, by this person: theirs to change.
     setDeckInfo({ createdAt: settled.finishedAt ?? new Date().toISOString(), isOwn: true });
     if (newKitId) {
@@ -278,6 +335,37 @@ export function PresentationWorkspace() {
     if (kitId) updateMarketingKit(kitId, { design: next });
   });
 
+  /**
+   * A description read into a plan: the deck laid out again from it, words
+   * untouched, and saved. Hand edits made since the last layout are replaced;
+   * the chat says so before anything is sent.
+   */
+  useSettledJob(planJob, (settled) => {
+    setPlanJobId(null);
+    const first = arranging;
+    setArranging(false);
+    const result = settled.result?.result as { plan?: unknown; reply?: string } | undefined;
+    const plan = settled.status === "completed" && redesignSource ? readPlan(result?.plan, redesignSource) : null;
+    if (!plan || !redesignSource) {
+      const message =
+        settled.status === "completed"
+          ? "That description came back without a usable plan. Try saying it another way."
+          : failureMessage(settled, "Couldn't arrange the deck as described. Try saying it another way.");
+      setMessages((list) => [...list, { role: "assistant", text: message }]);
+      // A brand-new deck still opens, in the standard redesign, with the reason above it.
+      if (first) setDeckNotice(`${message} This is the standard redesign; describe the change again in the chat.`);
+      return;
+    }
+    const laid = layoutRedesign(redesignSource, plan);
+    setRedesignPlan(plan);
+    setOutline(laid.outline);
+    setDesign(laid.design);
+    latestDesign.current = laid.design;
+    setDesignKey((key) => key + 1);
+    setMessages((list) => [...list, { role: "assistant", text: result?.reply || "Done — the slides are arranged as you described." }]);
+    if (kitId) updateMarketingKit(kitId, { design: laid.design });
+  });
+
   // An edit too large to come back inline (see builtKitId): its outline is
   // read back from the saved deck and applied exactly as an inline one is.
   useEffect(() => {
@@ -314,21 +402,25 @@ export function PresentationWorkspace() {
   // The thread follows the newest message.
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, editJobId]);
+  }, [messages, editJobId, planJobId]);
 
   async function addFiles(list: FileList | File[] | null) {
     const files = Array.from(list ?? []);
     if (files.length === 0) return;
     setReading(true);
     setNotice("");
+    // A PowerPoint is offered for redesign; the newest one, if several are added.
+    const pptx = files.filter((file) => /\.pptx$/i.test(file.name)).pop();
+    if (pptx) {
+      setDeckFile(pptx);
+      setMode("redesign");
+    }
     try {
       const read = await readPresentationFiles(files, images.length);
       setSources((current) => [...current, ...read.sources]);
       setImages((current) => [...current, ...read.images].slice(0, MAX_IMAGES));
-      const parts = [];
-      if (read.skipped.length) parts.push(`Couldn't read ${read.skipped.join(", ")}`);
-      if (images.length + read.images.length > MAX_IMAGES) parts.push(`Only the first ${MAX_IMAGES} pictures are used`);
-      setNotice(parts.join(" · "));
+      setNotice(read.skipped.length ? `Couldn't read ${read.skipped.join(", ")}` : "");
+      setOverLimit(images.length + read.images.length > MAX_IMAGES);
     } finally {
       setReading(false);
     }
@@ -373,11 +465,107 @@ export function PresentationWorkspace() {
     }
   }
 
+  /**
+   * Sends a description of how a redesigned deck should be arranged, to be
+   * read into a plan (see the plan job's settle handler). True once it's
+   * queued; otherwise what to tell the person.
+   */
+  async function requestArrangement(deckId: string, source: RedesignSource, plan: RedesignPlan | null, instruction: string) {
+    const res = await planPresentationRedesign({ kitId: deckId, instruction, ...planningBrief(source, plan) });
+    if (res.status === "queued" && res.job) {
+      setPlanJobId(res.job.id);
+      track(res.job);
+      return true as const;
+    }
+    creditGuard(res);
+    return res.message || "Couldn't send that description.";
+  }
+
+  /**
+   * Redesigns the uploaded PowerPoint: laid out here in the browser in a few
+   * seconds, every word as written (lib/pptxRedesign.ts), then saved. With no
+   * description that's all: no model, no queue, no credits. With one, the
+   * description is then read into a plan and the deck opens laid out from it.
+   */
+  async function handleRedesign() {
+    if (!deckFile) return;
+    const instruction = brief.trim();
+    setError("");
+    setRedesignStatus("Reading your slides…");
+    try {
+      const { redesignPptx } = await import("@/lib/pptxRedesign");
+      let result: Awaited<ReturnType<typeof redesignPptx>>;
+      try {
+        result = await redesignPptx(deckFile);
+      } catch (err) {
+        console.error("[presentation] redesign failed:", err);
+        setError(`${deckFile.name} couldn't be read. Check that it opens in PowerPoint, then try again.`);
+        return;
+      }
+      setRedesignStatus(`Saving ${result.slideCount.after} slides and ${result.images.length} pictures…`);
+      const res = await redesignPresentation({
+        title: result.name,
+        fileName: deckFile.name,
+        images: result.images,
+        design: result.design,
+        outline: result.outline,
+        text: result.text,
+        source: result.source,
+        instruction,
+      });
+      const kit = res.status === "success" ? res.kit : null;
+      const saved = kit?.presentation;
+      if (!kit || !saved || !isDesign(saved.design) || !isOutline(saved.outline)) {
+        setError(res.message || "Could not save the redesigned deck");
+        return;
+      }
+      setKitId(kit.id);
+      setOutline(saved.outline);
+      setDeckImages(saved.images.map((image) => image.url));
+      setDesign(saved.design);
+      latestDesign.current = saved.design;
+      setDesignKey((key) => key + 1);
+      setMessages([]);
+      setRedesigned(true);
+      setRedesignSource(result.source);
+      setRedesignPlan(null);
+      setDeckInfo({ createdAt: kit.createdAt, isOwn: true });
+      const notes: string[] = [];
+      if (result.skipped.length) notes.push(`Couldn't carry over ${result.skipped.join(", ")}.`);
+      // Never expected: every text box is placed by construction. Said plainly if it ever happens.
+      if (result.missing.length) {
+        notes.push(`${result.missing.length} line${result.missing.length === 1 ? "" : "s"} of text couldn't be placed: ${result.missing.slice(0, 3).join(" · ")}`);
+      }
+
+      if (instruction) {
+        setMessages([{ role: "user", text: instruction }]);
+        setRedesignStatus("Sending your description…");
+        const sent = await requestArrangement(kit.id, result.source, null, instruction);
+        if (sent === true) {
+          setArranging(true);
+        } else {
+          // Saved all the same: it opens in the standard redesign, saying why.
+          notes.push(`Couldn't arrange it as described: ${sent} This is the standard redesign.`);
+          setMessages((list) => [...list, { role: "assistant", text: sent }]);
+        }
+      }
+      setDeckNotice(notes.join(" "));
+    } finally {
+      setRedesignStatus(null);
+    }
+  }
+
   async function sendEdit(text: string) {
     const instruction = text.trim();
-    if (!instruction || !kitId || editJobId || readOnly) return;
+    if (!instruction || !kitId || editJobId || planJobId || readOnly) return;
     setDraft("");
     setMessages((list) => [...list, { role: "user", text: instruction }]);
+    // A redesigned deck is arranged, never rewritten.
+    if (canArrange && redesignSource) {
+      const sent = await requestArrangement(kitId, redesignSource, redesignPlan, instruction);
+      if (sent !== true) setMessages((list) => [...list, { role: "assistant", text: sent }]);
+      return;
+    }
     const res = await editPresentation({ kitId, instruction });
     if (res.status === "queued" && res.job) {
       setEditJobId(res.job.id);
@@ -400,6 +588,7 @@ export function PresentationWorkspace() {
     setStyle("auto");
     setLength("auto");
     setNotice("");
+    setOverLimit(false);
     setError("");
     setJobId(null);
     setKitId(null);
@@ -410,6 +599,14 @@ export function PresentationWorkspace() {
     setMessages([]);
     setEditJobId(null);
     setDeckInfo(null);
+    setDeckFile(null);
+    setMode("redesign");
+    setRedesigned(false);
+    setDeckNotice("");
+    setRedesignSource(null);
+    setRedesignPlan(null);
+    setPlanJobId(null);
+    setArranging(false);
     router.replace("/marketing-kit/presentation");
   }
 
@@ -430,7 +627,8 @@ export function PresentationWorkspace() {
   const showingDeck = Boolean(design && outline);
 
   usePageActions(
-    showingDeck ? (
+    // Not while a new redesign is being arranged: a download then would be the layout before the description.
+    showingDeck && !arranging ? (
       <div className="flex items-center gap-1.5" data-app-chrome>
         <HeaderPill onClick={reset} icon={RotateCcw} label="New" />
         <HeaderPill onClick={downloadPptx} icon={FileDown} label="PPTX" busy={exporting} />
@@ -444,20 +642,51 @@ export function PresentationWorkspace() {
   if (!can(user, PERMISSION)) return <ToolAccessNotice tool="Marketing Kit" />;
 
   const hasInput = sources.length > 0 || images.length > 0 || brief.trim().length >= 10;
+  const shownNotice = [notice, overLimit && !redesignMode ? `Only the first ${MAX_IMAGES} pictures are used` : ""].filter(Boolean).join(" · ");
+  /** Anything uploaded besides the PowerPoint (and the pictures read out of it), which a redesign leaves out. */
+  const hasOtherFiles =
+    Boolean(deckFile) &&
+    (sources.some((source) => source.name !== deckFile!.name) || images.some((image) => !image.label.startsWith(`${deckFile!.name} · `)));
+
+  // ── A new redesign being arranged as described ────────────────────────────
+  // Saved already; it opens once its plan lands, so it isn't shown twice.
+  if (arranging) {
+    return (
+      <BuildingView
+        job={planJob}
+        missing={false}
+        title="Arranging your slides as you described"
+        note="Every word and every picture stays exactly as it is in your file; only the arrangement follows your description. Your deck is already saved, and this takes about a minute."
+        brief={brief}
+        sourceNames={deckFile ? [deckFile.name] : []}
+        pictures={[]}
+        styleLabel="Redesign, every word kept"
+        onStartOver={reset}
+      />
+    );
+  }
 
   // ── The deck, with the chat beside it ─────────────────────────────────────
   if (showingDeck && design) {
     // Still "updating" while a large edit's outline is being read back.
-    const editing = Boolean(editJobId) || reloadAfterEdit;
+    const editing = Boolean(editJobId) || reloadAfterEdit || Boolean(planJobId);
+    const runningJob = editJob ?? planJob;
+    const chatTitle = canArrange ? "Arrange with AI" : "Edit with AI";
     const chat = (
       <div className="flex min-h-0 flex-1 flex-col">
         <div ref={threadRef} className="thin-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
-          {messages.length === 0 && (
-            <p className="text-[11px] leading-relaxed text-faint">
-              Tell me what to change — &ldquo;make slide 3 a comparison&rdquo;, &ldquo;use navy and gold&rdquo;, &ldquo;add a slide on
-              pricing&rdquo;. You can also edit any slide directly; your changes stay unless you ask me to redo that slide.
-            </p>
-          )}
+          {messages.length === 0 &&
+            (canArrange ? (
+              <p className="text-[11px] leading-relaxed text-faint">
+                Describe how the slides should be arranged: which are concept slides, where the pictures go, the colours. Every word
+                stays exactly as written. Each change lays the deck out again, so make it before editing slides by hand.
+              </p>
+            ) : (
+              <p className="text-[11px] leading-relaxed text-faint">
+                Tell me what to change — &ldquo;make slide 3 a comparison&rdquo;, &ldquo;use navy and gold&rdquo;, &ldquo;add a slide on
+                pricing&rdquo;. You can also edit any slide directly; your changes stay unless you ask me to redo that slide.
+              </p>
+            ))}
           {messages.map((message, index) => (
             <div key={index} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
               <p
@@ -474,15 +703,15 @@ export function PresentationWorkspace() {
           ))}
           {editing && (
             <div className="flex items-center gap-2 text-[11px] text-faint">
-              <Loader2 size={12} className="animate-spin" /> Updating the deck…
+              <Loader2 size={12} className="animate-spin" /> {planJobId ? "Arranging the slides…" : "Updating the deck…"}
             </div>
           )}
-          {editing && editJob && <JobProgressBar percent={editJob.progress} />}
+          {editing && runningJob && <JobProgressBar percent={runningJob.progress} />}
         </div>
 
         {!editing && !readOnly && (
           <div className="flex flex-wrap gap-1.5 px-3 pb-2">
-            {EDIT_SUGGESTIONS.map((suggestion) => (
+            {(canArrange ? ARRANGE_SUGGESTIONS : EDIT_SUGGESTIONS).map((suggestion) => (
               <button
                 key={suggestion}
                 type="button"
@@ -507,7 +736,13 @@ export function PresentationWorkspace() {
             }}
             rows={2}
             placeholder={
-              readOnly ? "Only the person who made this deck can change it" : editing ? "Wait for this edit to finish…" : "Ask for a change…"
+              readOnly
+                ? "Only the person who made this deck can change it"
+                : editing
+                  ? "Wait for this change to finish…"
+                  : canArrange
+                    ? "Describe how to arrange it…"
+                    : "Ask for a change…"
             }
             disabled={editing || !kitId || readOnly}
             className="thin-scrollbar max-h-32 min-h-[40px] flex-1 resize-none rounded-lg border border-white/10 bg-surface-raised px-2.5 py-2 text-base text-cream outline-none placeholder:text-faint focus:border-gold/40 disabled:opacity-60 md:text-[12px]"
@@ -528,39 +763,71 @@ export function PresentationWorkspace() {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
         <ErrorBanner message={error} />
-        {deckInfo && <DeckInfoBar {...deckInfo} />}
+        {deckInfo && <DeckInfoBar {...deckInfo} redesigned={redesigned} />}
+        {deckNotice && (
+          <p className="shrink-0 border-b border-white/[0.06] px-4 py-1.5 text-[11px] text-gold sm:px-5" role="status">
+            {deckNotice}
+          </p>
+        )}
         <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden lg:flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <DeckEditor key={designKey} initial={design} pieces={pieces} onSave={saveDesign} latestRef={latestDesign} />
           </div>
 
-          {/* Desktop: the chat is a column beside the deck. */}
-          <aside className="hidden w-[320px] shrink-0 flex-col border-l border-white/[0.06] bg-surface-raised/40 lg:flex">
-            <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2.5">
-              <Sparkles size={13} className="text-gold" />
-              <p className="text-[12px] font-semibold text-cream">Edit with AI</p>
-            </div>
-            {chat}
-          </aside>
+          {/*
+            A redesigned PowerPoint keeps the person's own words: its chat arranges
+            rather than edits, and one redesigned before its slides were kept has none.
+          */}
+          {(!redesigned || canArrange) && (
+            <>
+              {/* Desktop: the chat is a column beside the deck. */}
+              <aside className="hidden w-[320px] shrink-0 flex-col border-l border-white/[0.06] bg-surface-raised/40 lg:flex">
+                <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2.5">
+                  <Sparkles size={13} className="text-gold" />
+                  <p className="text-[12px] font-semibold text-cream">{chatTitle}</p>
+                </div>
+                {chat}
+              </aside>
 
-          {/* Below desktop: a bar under the deck that opens into the thread. */}
-          <div className={cn("flex flex-col border-t border-white/[0.06] bg-surface-raised lg:hidden", chatOpen ? "h-[52dvh]" : "")}>
-            <button
-              type="button"
-              onClick={() => setChatOpen((open) => !open)}
-              className="flex items-center gap-2 px-3 py-2.5 text-left"
-            >
-              <MessageSquare size={14} className="text-gold" />
-              <span className="flex-1 text-[12px] font-semibold text-cream">Edit with AI</span>
-              {editing && <Loader2 size={13} className="animate-spin text-faint" />}
-              <span className="text-[11px] text-faint">{chatOpen ? "Hide" : messages.length ? `${messages.length} messages` : "Open"}</span>
-            </button>
-            {chatOpen && chat}
-          </div>
+              {/* Below desktop: a bar under the deck that opens into the thread. */}
+              <div className={cn("flex flex-col border-t border-white/[0.06] bg-surface-raised lg:hidden", chatOpen ? "h-[52dvh]" : "")}>
+                <button
+                  type="button"
+                  onClick={() => setChatOpen((open) => !open)}
+                  className="flex items-center gap-2 px-3 py-2.5 text-left"
+                >
+                  <MessageSquare size={14} className="text-gold" />
+                  <span className="flex-1 text-[12px] font-semibold text-cream">{chatTitle}</span>
+                  {editing && <Loader2 size={13} className="animate-spin text-faint" />}
+                  <span className="text-[11px] text-faint">{chatOpen ? "Hide" : messages.length ? `${messages.length} messages` : "Open"}</span>
+                </button>
+                {chatOpen && chat}
+              </div>
+            </>
+          )}
 
           {printing && <PrintDeck design={printing} pieces={pieces} onDone={endPrint} />}
         </div>
       </div>
+    );
+  }
+
+  // ── Being redesigned ───────────────────────────────────────────────────────
+  // In this tab and quick, but still its own page from the moment it starts.
+  if (redesignStatus && deckFile) {
+    return (
+      <BuildingView
+        job={null}
+        missing={false}
+        title="Redesigning your PowerPoint"
+        statusText={redesignStatus}
+        note="Every word and every picture is kept exactly as it is in your file. This takes a few seconds; keep this page open until your deck appears."
+        brief=""
+        sourceNames={[deckFile.name]}
+        pictures={[]}
+        styleLabel="Redesign, every word kept"
+        onStartOver={reset}
+      />
     );
   }
 
@@ -598,7 +865,8 @@ export function PresentationWorkspace() {
                 <h1 className="text-lg font-semibold text-cream">Make a presentation</h1>
                 <p className="mt-1 text-[12px] leading-relaxed text-muted">
                   Drop in whatever you have — a price list, last season&apos;s deck, a brochure, notes, photos. You&apos;ll get a clean,
-                  internationally presentable deck, then you can change anything by chatting with it.
+                  internationally presentable deck, then you can change anything by chatting with it. Upload a PowerPoint and its own
+                  slides can be redesigned instead, with every word kept exactly.
                 </p>
               </div>
 
@@ -623,7 +891,7 @@ export function PresentationWorkspace() {
                 <p className="text-[11px] text-faint">Excel · CSV · PowerPoint · PDF · Word · text · photos — any mix, up to {MAX_IMAGES} pictures</p>
               </div>
               <input ref={fileInput} type="file" multiple accept={PRESENTATION_FILE_ACCEPT} onChange={onPick} className="hidden" />
-              {notice && <p className="text-[11px] text-faint">{notice}</p>}
+              {shownNotice && <p className="text-[11px] text-faint">{shownNotice}</p>}
 
               {sources.length > 0 && (
                 <ul className="flex flex-wrap gap-2">
@@ -642,11 +910,17 @@ export function PresentationWorkspace() {
                       <span className="truncate text-[11.5px] text-cream">{source.name}</span>
                       <span className="shrink-0 text-[10px] text-faint">
                         {source.kind}
-                        {source.imageCount ? ` · ${source.imageCount} pic${source.imageCount === 1 ? "" : "s"}` : ""}
+                        {/* The count is what a written deck may use; a redesign keeps every picture, so it's left out there. */}
+                        {source.imageCount && !(redesignMode && source.name === deckFile?.name)
+                          ? ` · ${source.imageCount} pic${source.imageCount === 1 ? "" : "s"}`
+                          : ""}
                       </span>
                       <button
                         type="button"
-                        onClick={() => setSources((list) => list.filter((_, i) => i !== index))}
+                        onClick={() => {
+                          setSources((list) => list.filter((_, i) => i !== index));
+                          if (deckFile && source.name === deckFile.name) setDeckFile(null);
+                        }}
                         aria-label={`Remove ${source.name}`}
                         className="shrink-0 rounded-full p-0.5 text-faint transition-colors hover:text-error"
                       >
@@ -657,7 +931,8 @@ export function PresentationWorkspace() {
                 </ul>
               )}
 
-              {images.length > 0 && (
+              {/* A redesign uses every picture in the deck, where they were: nothing to pick from here. */}
+              {images.length > 0 && !redesignMode && (
                 <div className="space-y-1.5">
                   <p className="flex items-center gap-1.5 text-[11px] text-faint">
                     <ImageIcon size={12} /> {images.length} picture{images.length === 1 ? "" : "s"} the deck can use · double-tap to preview
@@ -688,52 +963,115 @@ export function PresentationWorkspace() {
               )}
             </section>
 
-            <section className="space-y-2">
-              <label htmlFor="presentation-brief" className="text-[12px] font-semibold text-cream">
-                What should it say? <span className="font-normal text-faint">(optional)</span>
-              </label>
-              <textarea
-                id="presentation-brief"
-                value={brief}
-                onChange={(event) => setBrief(event.target.value)}
-                rows={4}
-                placeholder="e.g. A 10-slide pitch of our bridal collection for a buyer in Dubai — lead with the best sellers, show prices in USD, end with ordering terms. Leave empty and AI will decide."
-                className="w-full resize-y rounded-xl border border-white/10 bg-surface-raised px-3 py-2.5 text-base leading-relaxed text-cream outline-none placeholder:text-faint focus:border-gold/40 md:text-[13px]"
-              />
-            </section>
-
-            <section className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <p className="text-[12px] font-semibold text-cream">Style</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {STYLE_OPTIONS.map((option) => (
-                    <Chip key={option.id} label={option.label} active={style === option.id} onClick={() => setStyle(option.id)} size="sm" />
-                  ))}
+            {deckFile && (
+              <section className="space-y-2">
+                <p className="text-[12px] font-semibold text-cream">
+                  What should happen to <span className="text-gold">{deckFile.name}</span>?
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="What to do with the PowerPoint">
+                  <ModeOption
+                    active={mode === "redesign"}
+                    onClick={() => setMode("redesign")}
+                    icon={LayoutTemplate}
+                    title="Redesign my slides"
+                    text="Every word stays exactly as written and every picture is kept. Only the design changes."
+                  />
+                  <ModeOption
+                    active={mode === "write"}
+                    onClick={() => setMode("write")}
+                    icon={PenLine}
+                    title="Write a new presentation"
+                    text="AI writes a fresh deck from your files, in its own words."
+                  />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <p className="text-[12px] font-semibold text-cream">Length</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {LENGTH_OPTIONS.map((option) => (
-                    <Chip key={option.id} label={option.label} active={length === option.id} onClick={() => setLength(option.id)} size="sm" />
-                  ))}
-                </div>
-              </div>
-            </section>
+                {redesignMode && hasOtherFiles && (
+                  <p className="text-[11px] text-faint">
+                    Only {deckFile.name} is redesigned. Your other files are used when writing a new presentation.
+                  </p>
+                )}
+              </section>
+            )}
 
-            <RunButton
-              onClick={handleBuild}
-              disabled={!hasInput || starting || reading}
-              icon={starting || reading ? <Loader2 size={14} className="animate-spin" /> : <PresentationIcon size={14} />}
-            >
-              {starting
-                ? "Sending your files…"
-                : reading
-                  ? "Reading your files…"
-                  : hasInput
-                    ? "Build the presentation"
-                    : "Add files or describe the presentation to begin"}
-            </RunButton>
+            {redesignMode && (
+              <section className="space-y-2">
+                <label htmlFor="redesign-brief" className="text-[12px] font-semibold text-cream">
+                  How should it be redesigned? <span className="font-normal text-faint">(optional)</span>
+                </label>
+                <textarea
+                  id="redesign-brief"
+                  value={brief}
+                  onChange={(event) => setBrief(event.target.value)}
+                  rows={5}
+                  placeholder={REDESIGN_PLACEHOLDER}
+                  className="w-full resize-y rounded-xl border border-white/10 bg-surface-raised px-3 py-2.5 text-base leading-relaxed text-cream outline-none placeholder:text-faint focus:border-gold/40 md:text-[13px]"
+                />
+                <p className="text-[11px] leading-relaxed text-faint">
+                  Say which slides are concept slides, what the pictures are for, the colours or the mood. This only decides the arrangement:
+                  the words on your slides never change.
+                </p>
+              </section>
+            )}
+
+            {!redesignMode && (
+              <>
+                <section className="space-y-2">
+                  <label htmlFor="presentation-brief" className="text-[12px] font-semibold text-cream">
+                    What should it say? <span className="font-normal text-faint">(optional)</span>
+                  </label>
+                  <textarea
+                    id="presentation-brief"
+                    value={brief}
+                    onChange={(event) => setBrief(event.target.value)}
+                    rows={4}
+                    placeholder="e.g. A 10-slide pitch of our bridal collection for a buyer in Dubai — lead with the best sellers, show prices in USD, end with ordering terms. Leave empty and AI will decide."
+                    className="w-full resize-y rounded-xl border border-white/10 bg-surface-raised px-3 py-2.5 text-base leading-relaxed text-cream outline-none placeholder:text-faint focus:border-gold/40 md:text-[13px]"
+                  />
+                </section>
+
+                <section className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <p className="text-[12px] font-semibold text-cream">Style</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {STYLE_OPTIONS.map((option) => (
+                        <Chip key={option.id} label={option.label} active={style === option.id} onClick={() => setStyle(option.id)} size="sm" />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[12px] font-semibold text-cream">Length</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {LENGTH_OPTIONS.map((option) => (
+                        <Chip key={option.id} label={option.label} active={length === option.id} onClick={() => setLength(option.id)} size="sm" />
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </>
+            )}
+
+            {redesignMode ? (
+              <RunButton
+                onClick={handleRedesign}
+                disabled={reading}
+                icon={reading ? <Loader2 size={14} className="animate-spin" /> : <LayoutTemplate size={14} />}
+              >
+                {reading ? "Reading your files…" : brief.trim() ? "Redesign as described" : "Redesign the PowerPoint"}
+              </RunButton>
+            ) : (
+              <RunButton
+                onClick={handleBuild}
+                disabled={!hasInput || starting || reading}
+                icon={starting || reading ? <Loader2 size={14} className="animate-spin" /> : <PresentationIcon size={14} />}
+              >
+                {starting
+                  ? "Sending your files…"
+                  : reading
+                    ? "Reading your files…"
+                    : hasInput
+                      ? "Build the presentation"
+                      : "Add files or describe the presentation to begin"}
+              </RunButton>
+            )}
           </>
         )}
       </div>
@@ -759,6 +1097,9 @@ function BuildingView({
   styleLabel,
   lengthLabel,
   onStartOver,
+  title = "Building your presentation",
+  statusText,
+  note = "You can leave this page. It keeps building in your queue, and opens right here when it's ready.",
 }: {
   job: QueuedJob | null;
   /** Opened on a link to a job that isn't in the queue any more. */
@@ -769,10 +1110,14 @@ function BuildingView({
   styleLabel?: string;
   lengthLabel?: string;
   onStartOver: () => void;
+  title?: string;
+  /** Said instead of the job's own status, for work with no job behind it (a redesign). */
+  statusText?: string;
+  note?: string;
 }) {
   const active = Boolean(job && (job.status === "queued" || job.status === "running"));
   const now = useNow(active);
-  const status = job ? describeJob(job, now).label : "Starting…";
+  const status = statusText ?? (job ? describeJob(job, now).label : "Starting…");
   // Only what this tab still holds: after a reload the request itself is gone.
   const asked = [
     sourceNames.length ? `${sourceNames.length} file${sourceNames.length === 1 ? "" : "s"}` : null,
@@ -818,16 +1163,14 @@ function BuildingView({
           <div className="flex items-start gap-3">
             <Loader2 size={18} className="mt-1 shrink-0 animate-spin text-gold" />
             <div className="min-w-0">
-              <h1 className="text-lg font-semibold text-cream">Building your presentation</h1>
+              <h1 className="text-lg font-semibold text-cream">{title}</h1>
               <p className="mt-0.5 text-[12px] text-muted" role="status">
                 {status}
               </p>
             </div>
           </div>
           {job && <JobProgressBar percent={job.progress} />}
-          <p className="text-[11.5px] leading-relaxed text-faint">
-            You can leave this page. It keeps building in your queue, and opens right here when it&apos;s ready.
-          </p>
+          <p className="text-[11.5px] leading-relaxed text-faint">{note}</p>
         </section>
 
         {/* Where the slides will be. */}
@@ -868,7 +1211,17 @@ function BuildingView({
  * who made it and that it can only be looked at. In the viewer's own time
  * zone and language, e.g. "Made on 26 Nov 2026, 10:29 am".
  */
-function DeckInfoBar({ createdAt, userName, isOwn }: { createdAt: string; userName?: string; isOwn: boolean }) {
+function DeckInfoBar({
+  createdAt,
+  userName,
+  isOwn,
+  redesigned,
+}: {
+  createdAt: string;
+  userName?: string;
+  isOwn: boolean;
+  redesigned?: boolean;
+}) {
   const made = new Date(createdAt);
   const when = Number.isNaN(made.getTime())
     ? null
@@ -880,6 +1233,12 @@ function DeckInfoBar({ createdAt, userName, isOwn }: { createdAt: string; userNa
         <span>
           Made on <time dateTime={made.toISOString()} className="text-muted">{when}</time>
         </span>
+      )}
+      {redesigned && (
+        <>
+          <span aria-hidden>·</span>
+          <span>Redesigned from a PowerPoint, every word kept</span>
+        </>
       )}
       {!isOwn && (
         <>
@@ -893,6 +1252,40 @@ function DeckInfoBar({ createdAt, userName, isOwn }: { createdAt: string; userNa
         </>
       )}
     </p>
+  );
+}
+
+/** One of the two things an uploaded PowerPoint can become, as a choice. */
+function ModeOption({
+  active,
+  onClick,
+  icon: Icon,
+  title,
+  text,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: typeof Download;
+  title: string;
+  text: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      className={cn(
+        "flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
+        active ? "border-gold/50 bg-gold/[0.07]" : "border-white/10 bg-surface-raised/50 hover:border-white/20"
+      )}
+    >
+      <Icon size={15} className={cn("mt-0.5 shrink-0", active ? "text-gold" : "text-faint")} />
+      <span className="min-w-0">
+        <span className="block text-[12.5px] font-semibold text-cream">{title}</span>
+        <span className="mt-0.5 block text-[11px] leading-relaxed text-muted">{text}</span>
+      </span>
+    </button>
   );
 }
 

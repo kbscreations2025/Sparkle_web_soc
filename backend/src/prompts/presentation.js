@@ -188,6 +188,82 @@ function PRESENTATION_RESPONSE_SCHEMA({ forEdit = false } = {}) {
   };
 }
 
+/*
+ * ── Redesign plan ───────────────────────────────────────────────────────────
+ * A PowerPoint redesigned word for word (frontend lib/pptxRedesign.ts), with a
+ * description of how it should be arranged. The model reads the description
+ * into a plan: which slides open a section, what each picture is for, the
+ * colours. The plan has no place for words, so the deck's text cannot change
+ * whatever the model writes.
+ */
+
+const PICTURE_ROLES = ["product", "inspiration", "decoration", "feature"];
+const REDESIGN_PALETTES = ["ivory", "champagne", "blush", "pearl", "emerald"];
+
+const REDESIGN_SYSTEM_INSTRUCTION = `You are a senior presentation designer at a fine-jewellery house. A designer has made a rough PowerPoint and wants it laid out again as a polished, eye-catching proposal in the house style, without a single word changed. You decide the arrangement only: which slides open a section with a concept page, what each picture is for, and the colours. A layout engine draws the slides from your plan and copies every word from the original file exactly as it was written. You never write, rewrite, shorten or translate slide text, and nothing in your answer can change it.`;
+
+function buildRedesignPlanPrompt({ summary, current, instruction, history }) {
+  const earlier = history.length
+    ? history.map((message) => `${message.role === "user" ? "DESIGNER" : "YOU"}: ${message.text}`).join("\n")
+    : "(none: this is the first description)";
+
+  return `THE DECK, AS IT IS LAID OUT NOW:
+${summary}
+
+THE PLAN IN FORCE NOW:
+${JSON.stringify(current)}
+
+EARLIER REQUESTS FOR THIS DECK:
+${earlier}
+
+THE DESIGNER NOW SAYS:
+"""
+${instruction}
+"""
+
+Return the complete plan. Change it where the designer asks, or where what they say about their deck shows the current reading is wrong; keep everything else as it is now.
+- "conceptSlides": the slide numbers (as numbered in the original deck) that open a section with a concept page: number, title, words and framed pictures. Every slide after one belongs to its section until the next. If the designer names the concept slides, use exactly those.
+- "pictures": EVERY picture id listed above, each with one role:
+  · "product": a main design, shown on a white card. A picture labelled with a code (R-1, R-2 …) is always a product and keeps its code and spec lines.
+  · "inspiration": a reference or mood image, kept small and quiet in the top right corner of its page.
+  · "decoration": a rough sketch or drawing used as background drama: shown frameless and large in the blank space at the side of the page, behind the content. Best for drawings on transparent backgrounds. On a dark concept page it would vanish, so it is framed there instead.
+  · "feature": a main picture shown framed: in a concept page's collage, as a card of its own on a product page, or on a page of pictures.
+  Look at the pictures below to tell rough pencil sketches, technical drawings, renders and photos apart.
+- "palette": one of ${REDESIGN_PALETTES.join(", ")}. Ivory and gold is the house style; champagne is warmer, blush is rose gold, pearl is cool silver, emerald is green and gold. Change it only when the designer asks for a colour or a mood.
+- "conceptStyle": "light" (concept pages on the page colour) or "dark" (concept pages in the palette's deep shade with light words, for drama and contrast).
+- "cardsPerPage": the most product cards on one page, 1 to 8. 8 keeps the original slides' groups together; fewer spreads the products over more pages, larger.
+- "order": every original slide number exactly once, in the order the pages should go.
+- "reply": one or two friendly sentences to the designer saying what you arranged. If they asked for something a plan can't do, such as rewriting or adding words, new images, animations or a different font, say so plainly and briefly.
+
+Never leave a picture out, and never try to change the words.`;
+}
+
+/** Built lazily, like the outline's, so the API process never loads the Gemini SDK. */
+function REDESIGN_PLAN_SCHEMA() {
+  const { Type } = require("@google/genai");
+  const numbers = { type: Type.ARRAY, items: { type: Type.INTEGER } };
+  return {
+    type: Type.OBJECT,
+    properties: {
+      conceptSlides: numbers,
+      pictures: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: { id: { type: Type.STRING }, role: { type: Type.STRING, enum: PICTURE_ROLES } },
+          required: ["id", "role"],
+        },
+      },
+      palette: { type: Type.STRING, enum: REDESIGN_PALETTES },
+      conceptStyle: { type: Type.STRING, enum: ["light", "dark"] },
+      cardsPerPage: { type: Type.INTEGER },
+      order: numbers,
+      reply: { type: Type.STRING },
+    },
+    required: ["conceptSlides", "pictures", "palette", "conceptStyle", "cardsPerPage", "order", "reply"],
+  };
+}
+
 module.exports = {
   LAYOUTS,
   PALETTES,
@@ -199,4 +275,9 @@ module.exports = {
   buildPresentationPrompt,
   buildPresentationEditPrompt,
   PRESENTATION_RESPONSE_SCHEMA,
+  PICTURE_ROLES,
+  REDESIGN_PALETTES,
+  REDESIGN_SYSTEM_INSTRUCTION,
+  buildRedesignPlanPrompt,
+  REDESIGN_PLAN_SCHEMA,
 };

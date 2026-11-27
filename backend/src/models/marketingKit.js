@@ -245,6 +245,13 @@ const presentationSchema = new mongoose.Schema(
     /** As first written. Never edited, same rule as `originalItems`. */
     originalOutline: { type: mongoose.Schema.Types.Mixed, default: null },
     design: { type: mongoose.Schema.Types.Mixed, default: null },
+    /**
+     * A redesigned PowerPoint's (style "redesign"): `source`, the slides as read
+     * from the file, every word exactly as written, so the deck can be laid out
+     * again without it; and `plan`, the arrangement the latest description asked
+     * for (frontend lib/pptxRedesign.ts). Null for every other deck.
+     */
+    redesign: { type: mongoose.Schema.Types.Mixed, default: null },
     /** Denormalised so a listing needn't read the outline to say how long the deck is. */
     slideCount: { type: Number, default: 0 },
     messages: { type: [presentationMessageSchema], default: [] },

@@ -27,7 +27,7 @@ const { MARKETING_KIT_TYPES } = require("../models/marketingKit");
 const MarketingKit = require("../models/marketingKit");
 const Generation = require("../models/generation");
 const mongoose = require("mongoose");
-const { PRESENTATION_JOB, PRESENTATION_EDIT_JOB } = require("../jobs/presentation");
+const { PRESENTATION_JOB, PRESENTATION_EDIT_JOB, PRESENTATION_REDESIGN_JOB } = require("../jobs/presentation");
 const kits = require("../services/marketingKits");
 
 const router = express.Router();
@@ -687,6 +687,129 @@ router.post("/presentation", async (req, res) => {
     },
     payload: { sources: readSources, images: readImages, brief, style, length, conversationId: conversationId || null },
     message: `queued a Presentation (${readSources.length} file${readSources.length === 1 ? "" : "s"}, ${readImages.length} picture${readImages.length === 1 ? "" : "s"})`,
+  });
+});
+
+/*
+ * "Redesign this PowerPoint": the browser has already laid the person's own
+ * slides out in the house style, every word as written (frontend
+ * lib/pptxRedesign.ts), so this only stores the result. No model runs and
+ * nothing is charged.
+ */
+const MAX_REDESIGN_IMAGES = 250;
+/** The slides as read from the file, kept so the deck can be laid out again: tens of KB for a long deck. */
+const MAX_REDESIGN_SOURCE_BYTES = 2_000_000;
+
+router.post("/presentation/redesign", async (req, res) => {
+  const { images, design, outline, source } = req.body || {};
+  const validDesign = design && design.version === 1 && Array.isArray(design.slides) && design.slides.length > 0;
+  const validOutline = outline && Array.isArray(outline.slides) && outline.slides.length > 0;
+  if (!validDesign || !validOutline) {
+    return res.status(400).json({ status: "error", message: "That deck couldn't be read. Please try again.", code: "invalid" });
+  }
+  // Optional: without it the deck still saves, it just can't be rearranged by description later.
+  const validSource =
+    source && typeof source === "object" && Array.isArray(source.slides) && JSON.stringify(source).length <= MAX_REDESIGN_SOURCE_BYTES;
+
+  const list = Array.isArray(images) ? images : [];
+  if (list.length > MAX_REDESIGN_IMAGES) {
+    return res
+      .status(400)
+      .json({ status: "error", message: `A deck can carry up to ${MAX_REDESIGN_IMAGES} pictures.`, code: "too_many_images" });
+  }
+  // All or nothing: the design places pictures by position, so dropping one
+  // unreadable picture would shift every picture after it onto the wrong card.
+  const parsed = list.map((image) => {
+    const inline = parseDataUri(image?.src);
+    return inline && inline.mimeType.startsWith("image/") ? { ...inline, label: clean(image?.label, 300) } : null;
+  });
+  if (parsed.some((image) => !image)) {
+    return res.status(400).json({ status: "error", message: "One of the pictures couldn't be read. Please try again.", code: "invalid_image" });
+  }
+
+  try {
+    const kit = await kits.savePresentationRedesign({
+      dbUser: req.dbUser,
+      title: clean(req.body?.title, 300),
+      fileName: clean(req.body?.fileName, 300),
+      images: parsed,
+      design,
+      outline,
+      text: clean(req.body?.text, 60_000),
+      source: validSource ? source : null,
+      instruction: clean(req.body?.instruction, 4000),
+    });
+    res.json({ status: "success", kit: { ...kit, isOwn: true } });
+  } catch (err) {
+    if (err.code === "design_too_large") return res.status(413).json({ status: "error", message: err.message, code: err.code });
+    // Express 4 does not catch a rejected handler, so answer here rather than leave the request hanging.
+    console.error("[marketing-kit] redesign save failed:", err);
+    res.status(500).json({ status: "error", message: "Could not save the redesigned deck", code: "server_error" });
+  }
+});
+
+/*
+ * A description of how a redesigned deck should be arranged ("slides 1, 2, 6,
+ * 10 and 14 are concept slides; the pencil sketches are background drama"),
+ * read by the model into a plan. Queued and charged like a chat edit. The
+ * browser sends what it read the deck as (it has the reading code); the model
+ * is shown the deck's own stored pictures, fetched by the job.
+ */
+const MAX_PLAN_SUMMARY_CHARS = 60_000;
+const MAX_PLAN_CURRENT_BYTES = 20_000;
+
+router.post("/presentation/redesign/plan", async (req, res) => {
+  const instruction = clean(req.body?.instruction, 4000);
+  if (!instruction) return res.status(400).json({ status: "error", message: "Describe how the slides should be arranged", code: "invalid" });
+
+  const kitId = String(req.body?.kitId || "");
+  const kit = mongoose.Types.ObjectId.isValid(kitId)
+    ? await MarketingKit.findOne({ _id: kitId, tenantId: req.dbUser.tenantId, userId: req.dbUser._id, deletedAt: null })
+        .select("generationId presentation.images presentation.messages presentation.redesign")
+        .lean()
+    : null;
+  if (!kit?.presentation?.redesign?.source) {
+    return res.status(404).json({ status: "error", message: "That deck can't be rearranged by description", code: "not_found" });
+  }
+
+  const imageCount = kit.presentation.images?.length ?? 0;
+  const pictures = (Array.isArray(req.body?.pictures) ? req.body.pictures : [])
+    .slice(0, 1000)
+    .map((picture) => ({ id: clean(picture?.id, 40), piece: Number(picture?.piece) }))
+    .filter((picture) => picture.id && Number.isInteger(picture.piece) && picture.piece >= 0 && picture.piece < imageCount);
+  const current = req.body?.current && typeof req.body.current === "object" ? req.body.current : {};
+  if (JSON.stringify(current).length > MAX_PLAN_CURRENT_BYTES) {
+    return res.status(400).json({ status: "error", message: "That deck couldn't be read. Please try again.", code: "invalid" });
+  }
+
+  // Every description joins the deck's own thread, so History shows one conversation per deck.
+  const conversationId = kit.generationId
+    ? (await Generation.findById(kit.generationId).select("conversationId").lean())?.conversationId
+    : null;
+
+  return queueGeneration(req, res, {
+    type: PRESENTATION_REDESIGN_JOB,
+    tool: "marketing_kit",
+    request: {
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+      modelLabel: "Sparkle 2.5 Pro",
+      kind: "presentation",
+      isRedesign: true,
+      kitId,
+      count: 1,
+      conversationId: conversationId ? String(conversationId) : null,
+    },
+    payload: {
+      kitId,
+      instruction,
+      summary: clean(req.body?.summary, MAX_PLAN_SUMMARY_CHARS),
+      current,
+      pictures,
+      history: (kit.presentation.messages ?? []).slice(-EDIT_HISTORY_MESSAGES).map((message) => ({ role: message.role, text: message.text })),
+      conversationId: conversationId ? String(conversationId) : null,
+    },
+    message: "queued a Presentation redesign",
   });
 });
 

@@ -1897,6 +1897,8 @@ export type MarketingKit = MarketingKitSummary & {
     outline: unknown;
     /** The editor's layout; null until first saved. */
     design: unknown;
+    /** A redesigned PowerPoint's slides as read, and its arrangement plan — see lib/pptxRedesign.ts. */
+    redesign?: { source: unknown; plan: unknown } | null;
     messages: { role: "user" | "assistant"; text: string; at: string }[];
   } | null;
 };
@@ -1963,6 +1965,42 @@ export function buildPresentation(body: {
   preview?: string | null;
 }) {
   return apiRequest<QueuedResult>("/api/marketing-kit/presentation", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * Saves a PowerPoint redesigned in the browser (lib/pptxRedesign.ts): its
+ * pictures in `pieceIndex` order, the laid-out slides and the original words.
+ * Nothing is generated and nothing is charged; the saved deck comes back,
+ * ready to open.
+ */
+export function redesignPresentation(body: {
+  title: string;
+  fileName: string;
+  images: { src: string; label: string }[];
+  design: unknown;
+  outline: unknown;
+  text: string;
+  /** The slides as read from the file, kept so the deck can be rearranged by description later. */
+  source: unknown;
+  /** How the person asked for it to be redesigned, if they did. */
+  instruction?: string;
+}) {
+  return apiRequest<{ kit?: MarketingKit }>("/api/marketing-kit/presentation/redesign", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
+ * Queues a description of how a redesigned deck should be arranged, read by
+ * the model into a plan (lib/pptxRedesign.ts `planningBrief` says what it is
+ * shown). The words of the deck can't change: a plan has no place for them.
+ */
+export function planPresentationRedesign(body: {
+  kitId: string;
+  instruction: string;
+  summary: string;
+  current: unknown;
+  pictures: { id: string; piece: number }[];
+}) {
+  return apiRequest<QueuedResult>("/api/marketing-kit/presentation/redesign/plan", { method: "POST", body: JSON.stringify(body) });
 }
 
 /** One chat edit to a saved presentation — the server edits its own stored outline. */
